@@ -9,7 +9,10 @@ description: Prepares a release of the sisa-caching crates (versions, changelog,
 ([release-plz.toml](../../../release-plz.toml)) on every push to `main`. The five library crates
 share one version, one changelog at the root and one `v<version>` tag.
 
-- Each push opens or updates one release PR. It bumps the versions, runs cargo-semver-checks
+- Each push with a `feat`, `fix`, `perf`, `revert` or breaking commit since the last release
+  opens or updates one release PR, on a `release/<timestamp>` branch. Other commits, such as
+  `build(deps)` bumps, wait for the next one (`release_commits` in release-plz.toml).
+- The release PR bumps the versions, runs cargo-semver-checks
   against the last published version, and adds a changelog section.
 - Merging the release PR publishes to crates.io, tags `v<version>`, creates the GitHub release
   as a draft, runs the benchmarks, whose table and report go on the draft, and then publishes
