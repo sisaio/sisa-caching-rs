@@ -590,7 +590,8 @@ impl RedisSentinel {
 
     /// Closes every client connection to the server on `port` but this call's own, as a server
     /// dropping its clients would, and returns how many it closed. Kills each by ID, as
-    /// [`Redis::drop_subscriptions`] does, since Dragonfly refuses `CLIENT KILL TYPE`.
+    /// [`Redis::drop_subscriptions`] does, since Dragonfly refuses `CLIENT KILL TYPE`. Dragonfly
+    /// lists a replica's link to its primary too and refuses to kill it, so that one stays.
     pub async fn drop_clients(&self, port: u16) -> usize {
         let mut connection = self
             .server(port)
@@ -617,14 +618,13 @@ impl RedisSentinel {
             })
             .filter(|id| *id != own.to_string())
         {
-            let killed: usize = redis::cmd("CLIENT")
+            let killed: redis::RedisResult<usize> = redis::cmd("CLIENT")
                 .arg("KILL")
                 .arg("ID")
                 .arg(id)
                 .query_async(&mut connection)
-                .await
-                .unwrap();
-            closed += killed;
+                .await;
+            closed += killed.unwrap_or(0);
         }
         closed
     }
@@ -684,7 +684,18 @@ impl RedisSentinel {
                 .query_async(&mut old)
                 .await
                 .unwrap();
-            if info.contains("master_port:6380") && info.contains("master_link_status:up") {
+            // Dragonfly answers LOADING for a moment after the link comes up.
+            let loading = redis::cmd("EXISTS")
+                .arg("loading-check")
+                .query_async::<bool>(&mut old)
+                .await
+                .is_err_and(|error| {
+                    error.kind() == redis::ErrorKind::Server(redis::ServerErrorKind::BusyLoading)
+                });
+            if info.contains("master_port:6380")
+                && info.contains("master_link_status:up")
+                && !loading
+            {
                 break;
             }
             assert!(
