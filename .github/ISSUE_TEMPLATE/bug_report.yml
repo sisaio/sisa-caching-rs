@@ -1,0 +1,63 @@
+name: Bug report
+description: Something doesn't work as the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a security problem, don't open an issue: report it privately as
+        [SECURITY.md](https://github.com/sisaio/sisa-caching-rs/blob/main/SECURITY.md) explains.
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Crate
+      options:
+        - sisa-caching
+        - sisa-caching-memory
+        - sisa-caching-redis
+        - sisa-caching-hybrid
+        - sisa-caching-core
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Crate version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: The smallest code or steps that show it.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors and logs
+      description: The error, and logs with `RUST_LOG=sisa_caching=debug` if you can. Debug logs show full cache keys, and this issue is public, so replace any key you don't want seen.
+      render: text
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: For Redis and hybrid stores. The server, its version, and how it runs (one primary, replicas, cluster, Sentinel).
+      placeholder: "Redis 7.4, one primary"
+  - type: input
+    id: environment
+    attributes:
+      label: Rust version and OS
+      placeholder: "rustc 1.89.0, Linux x86_64"
+    validations:
+      required: true

@@ -1,0 +1,51 @@
+[package]
+name = "sisa-caching-hybrid"
+description = "The hybrid store of Sisa Caching: an in-memory layer in front of a Redis-family store, kept coherent across nodes by pub/sub invalidation"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cache", "hybrid-cache", "two-level-cache", "invalidation", "async"]
+categories = ["caching", "asynchronous"]
+
+[features]
+# `rediss://` URLs for the store and the backplane.
+tls-rustls = ["sisa-caching-redis/tls-rustls", "sisa-caching-testing/rustls"]
+# The same, through the system's TLS library.
+tls-native-tls = ["sisa-caching-redis/tls-native-tls"]
+
+[dependencies]
+# The shared contracts that the engine runs against.
+sisa-caching-core = { workspace = true }
+sisa-caching-memory = { workspace = true }
+
+# The error types' `Display` and `Error` implementations.
+thiserror = { workspace = true }
+
+# The settings' serialization traits.
+serde = { workspace = true }
+
+# The task that applies invalidations from other nodes.
+tokio = { workspace = true }
+tracing = { workspace = true }
+opentelemetry = { workspace = true, features = ["trace"] }
+
+# Redis store and pub/sub transport.
+redis = { workspace = true }
+sisa-caching-redis = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+
+[dev-dependencies]
+sisa-caching-testing = { workspace = true }
+# Paused time for the reconnect backoff tests.
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
+
+# The W3C propagator for the trace context test, and an in-memory exporter for the metrics test.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -1,0 +1,83 @@
+# The library crates, the example applications, and the benchmarks.
+[workspace]
+members = ["crates/*", "examples/*", "benches"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Sang Au <auvansang@outlook.com>"]
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/sisaio/sisa-caching-rs"
+readme = "README.md"
+
+[workspace.dependencies]
+# The library crates, at the coordinated version.
+sisa-caching = { path = "crates/sisa-caching", version = "0.1.0" }
+sisa-caching-core = { path = "crates/core", version = "0.1.0" }
+sisa-caching-memory = { path = "crates/memory", version = "0.1.0" }
+sisa-caching-redis = { path = "crates/redis", version = "0.1.0" }
+sisa-caching-hybrid = { path = "crates/hybrid", version = "0.1.0" }
+
+# Redis client library, without the default features (streams, scripts, ACL helpers...) that no
+# crate here uses.
+redis = { version = "1.7.1", default-features = false, features = ["connection-manager", "tokio-comp", "cluster-async", "sentinel"] }
+
+# The TLS library behind redis-rs's `rediss://`, named only to pick its crypto provider.
+rustls = { version = "0.23.46", default-features = false }
+
+# Async building blocks.
+tokio = { version = "1.53.3", features = ["rt", "macros", "time", "sync"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+tracing = { version = "0.1.44" }
+
+# The OpenTelemetry metrics API: stores count through it, and the application installs the SDK.
+opentelemetry = { version = "0.33.1", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.33.1" }
+
+# The example web service.
+axum = { version = "0.8.9" }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-opentelemetry = { version = "0.34.0" }
+opentelemetry-otlp = { version = "0.33.1" }
+opentelemetry-appender-tracing = { version = "0.33.1" }
+
+# Certificates for the TLS test server, made when a test starts.
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
+
+# Error types: the mechanical `Display` and `Error` implementations.
+thiserror = { version = "2.0.21" }
+
+# Tests: the shared helpers, and a Redis server per test in Docker.
+sisa-caching-testing = { path = "crates/testing" }
+testcontainers = { version = "0.28.0", default-features = false }
+
+# Benchmarks, with HTML reports.
+criterion = { version = "0.8.2", features = ["async_tokio", "html_reports"] }
+
+# Serialization: settings, and the JSON that Redis stores and the backplane sends.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.154" }
+
+# Development and test builds keep line tables for backtraces but no full debug information, and
+# dependencies carry none, which shortens builds and links. This follows the Cargo book's
+# "Optimizing Build Performance" guide. `cargo test` uses this profile too.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# A debugger session needs full debug information: `cargo build --profile debugging`.
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+# Release and benchmark builds keep Cargo's defaults, which applications also get, so measurements
+# stay representative. A library's profiles never reach an application's build. Profilers need line
+# tables: `cargo bench --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"

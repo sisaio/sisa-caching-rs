@@ -1,0 +1,235 @@
+# Flows
+
+How a call moves through the stores, step by step. [Architecture](01-architecture.md) explains
+why each step is there.
+
+## `get_or_set`, on every store
+
+One loader runs per key per process. Other callers for the same key wait on its lock, up to
+`lock_timeout_ms`, then read what it stored.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Store
+    participant Lock as Per-key lock
+    participant Loader
+
+    App->>Store: get_or_set(key, loader)
+    Store->>Store: get_entry(key)
+    alt live entry, not due for refresh
+        Store-->>App: cached value
+    else live entry past refresh_threshold
+        Store->>Lock: try_lock(key)
+        alt another caller is refreshing
+            Store-->>App: cached value
+        else got the lock
+            Store->>Loader: load()
+            Loader-->>Store: new value, or an error
+            Store->>Store: set(key, new value)
+            Store-->>App: new value, or on an error the cached one while it is live
+        end
+    else missing
+        Store->>Lock: lock(key), waiting up to lock_timeout_ms
+        Store->>Store: get_entry(key) again
+        alt another caller stored it meanwhile
+            Store-->>App: that value
+        else still missing, or unreadable
+            Store->>Loader: load()
+            Loader-->>Store: value
+            Store->>Store: set(key, value)
+            Store-->>App: value
+        end
+    end
+```
+
+If the lock wait times out, the caller loads without the lock and logs a warning. If the second
+read fails, for example because a value of another type is there, the loaded value is stored over
+it.
+
+## Memory store write
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Store as InMemoryCacheStore
+    participant Shard as Key's shard
+
+    App->>Store: set_entry(key, entry)
+    Store->>Store: lifetime = remaining TTL, capped at max_ttl_secs
+    Store->>Shard: insert, marked as just used
+    opt more than max_entries
+        Store->>Store: drop expired entries
+        Store->>Store: drop least recently used, down to 90% of max_entries
+    end
+    Store-->>App: Ok
+```
+
+Only one trim runs at a time. Replaced and dropped values are freed after the shard's lock is
+released, so a large value never holds up other callers.
+
+A read looks the key up in its shard and marks it as used. An expired entry, including one
+written with no lifetime left, reads as a miss and stays until a purge, a trim or a write to its
+key.
+
+## Redis store write and read
+
+Each key is a hash: `value` (JSON), `created_at` and optionally `ttl_ms`. Another language
+writing the same keys follows these two steps; [Data formats](01-architecture.md#data-formats)
+has the full contract.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Store as RedisCacheStore
+    participant Redis
+
+    App->>Store: set_entry(key, entry)
+    Store->>Store: encode the value as JSON
+    Store->>Redis: MULTI, DEL key, HSET key value created_at ttl_ms, PEXPIRE key remaining_ms, EXEC
+    Note over Store,Redis: An already expired entry only sends DEL; one that never expires gets no PEXPIRE.
+    Redis-->>Store: OK
+    Store-->>App: Ok
+
+    App->>Store: get_entry(key)
+    Store->>Redis: MULTI, HMGET key value created_at ttl_ms, PTTL key, EXEC
+    Redis-->>Store: fields and the remaining TTL
+    alt no value, or the key is gone
+        Store-->>App: None
+    else
+        Store->>Store: decode JSON into the requested type
+        Store-->>App: entry, expiring after PTTL
+    end
+```
+
+A value that doesn't decode into the requested type is an error, not a miss, so `get` shows a type
+mix-up. `get_or_set` loads and stores over it.
+
+## Hybrid read
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Hybrid
+    participant Local as Local memory
+    participant Redis
+
+    App->>Hybrid: get_entry(key)
+    Hybrid->>Hybrid: note the key's generation
+    alt local reads on
+        Hybrid->>Local: get_entry(key)
+        Local-->>Hybrid: entry or none
+    end
+    alt local hit
+        Hybrid-->>App: entry
+    else local miss, or local reads off
+        Hybrid->>Redis: get_entry(key)
+        Redis-->>Hybrid: entry or none
+        opt found and local reads on
+            Hybrid->>Local: copy the entry, if the generation is unchanged
+            Note over Hybrid,Local: An invalidation waits for a copy in progress, then evicts it.
+        end
+        Hybrid-->>App: entry or none
+    end
+```
+
+## Hybrid write and invalidation
+
+`set`, `set_entry`, `remove`, `remove_prefix` and `clear` all take this path. The steps after
+the first eviction run in their own task, so they finish even if the caller is cancelled. The call
+returns once Redis has answered and the key is evicted again; the publish and its retries carry on
+in the background, so a backplane that can't be reached doesn't slow writes down.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant A as Hybrid on node A
+    participant LA as Local memory A
+    participant Redis
+    participant Bus as Backplane (pub/sub)
+    participant W as BackplaneWorker on node B
+    participant LB as Local memory B
+
+    App->>A: set(key, value)
+    A->>LA: bump generation, evict key
+    A->>Redis: set_entry(key, entry)
+    Redis-->>A: ok or error
+    A->>LA: bump generation, evict key again
+    A-->>App: the Redis result
+    loop in the background, up to 3 tries, 50 then 100 ms apart
+        A->>Bus: publish Invalidation::Key(key)
+    end
+    Bus-->>W: message, with A's trace context
+    W->>W: skip A's own messages and other stores' messages
+    W->>LB: bump generation, evict key
+```
+
+If every publish try fails, the write has already returned the Redis result, and a warning is
+logged. Node B then serves its old copy until it expires, at most the local `max_ttl_secs`.
+
+## Backplane worker
+
+```mermaid
+sequenceDiagram
+    participant W as BackplaneWorker
+    participant Bus as Backplane
+    participant Local as Local layer
+
+    W->>Bus: subscribe
+    Bus-->>W: subscribed
+    W->>Local: clear, then turn local reads on
+    loop while subscribed
+        Bus-->>W: invalidation from another node
+        W->>Local: bump generation, evict
+    end
+    Bus-->>W: subscription lost
+    W->>Local: turn local reads off, clear
+    Note over W: wait 100 ms, doubling up to 5 s
+    W->>Bus: subscribe again
+```
+
+The local layer is cleared on every subscribe, because copies made before it may have missed
+invalidations. While reads are off, every read goes to Redis. The wait only starts over from
+100 ms after a subscription that stayed up for at least 5 s, so a connection that keeps dropping
+can't clear the local layer in a tight loop. If subscribing fails, the worker waits the same way
+and tries again.
+
+## Purge worker
+
+```mermaid
+sequenceDiagram
+    participant W as PurgeWorker
+    participant Store as InMemoryCacheStore
+
+    loop every purge_interval_secs
+        W->>Store: purge()
+        Store->>Store: remove expired entries from every shard
+    end
+```
+
+Without a purge interval the worker stops at once. An expired entry then stays in memory until
+its key is written again or `max_entries` trims it; with neither, the entries of keys that are
+never written again stay for good.
+
+## Workers on a host
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Host as WorkerHost
+    participant W as Worker
+
+    App->>Host: register(worker)
+    Host->>W: run on the tokio runtime
+    Note over W: runs until it returns or the host stops it
+    alt App calls shutdown().await
+        Host->>W: cancel
+        Host-->>App: returns once every worker has stopped
+    else App drops the host
+        Host->>W: cancel, without waiting
+    end
+```
+
+Stores never start workers; the application registers them and keeps the host alive as long as
+the stores. When a `BackplaneWorker` stops for any reason, its hybrid store turns local reads off
+and reads Redis until a new worker subscribes.

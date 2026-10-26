@@ -1,0 +1,39 @@
+[package]
+name = "sisa-caching"
+description = "Composable caching for Rust: an in-memory store, a Redis-family store, and a hybrid that keeps local copies coherent across nodes"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cache", "redis", "valkey", "hybrid-cache", "async"]
+categories = ["caching", "asynchronous"]
+
+[features]
+# No default: an application names the stores it uses.
+default = []
+# The in-process store.
+memory = ["dep:sisa-caching-memory"]
+# The store on a Redis-family server.
+redis = ["dep:sisa-caching-redis"]
+# A memory layer in front of Redis, kept coherent across nodes.
+hybrid = ["memory", "redis", "dep:sisa-caching-hybrid"]
+# `rediss://` URLs, through rustls.
+tls-rustls = ["redis", "sisa-caching-redis/tls-rustls", "sisa-caching-hybrid?/tls-rustls"]
+# `rediss://` URLs, through the system's TLS library (OpenSSL, Schannel or Security.framework).
+tls-native-tls = ["redis", "sisa-caching-redis/tls-native-tls", "sisa-caching-hybrid?/tls-native-tls"]
+
+[dependencies]
+# One crate per part; this one only re-exports them.
+sisa-caching-core = { workspace = true }
+sisa-caching-memory = { workspace = true, optional = true }
+sisa-caching-redis = { workspace = true, optional = true }
+sisa-caching-hybrid = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

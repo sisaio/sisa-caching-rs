@@ -1,0 +1,6 @@
+# The release toolchain for contributors and CI. The workspace `rust-version` is the
+# MSRV, which CI also builds.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

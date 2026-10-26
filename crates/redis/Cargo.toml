@@ -1,0 +1,48 @@
+[package]
+name = "sisa-caching-redis"
+description = "The Redis-family distributed store of Sisa Caching, tested on Redis, Valkey, Dragonfly and Garnet"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cache", "redis", "valkey"]
+categories = ["caching", "database", "asynchronous"]
+
+[features]
+# `rediss://` URLs: TLS through rustls, trusting the system's root certificates. redis-rs picks
+# no crypto provider, so this picks aws-lc-rs, rustls's own default.
+tls-rustls = ["redis/tokio-rustls-comp", "dep:rustls", "rustls/aws_lc_rs", "sisa-caching-testing/rustls"]
+# `rediss://` URLs: TLS through the system's library (OpenSSL, Schannel or Security.framework).
+tls-native-tls = ["redis/tokio-native-tls-comp"]
+
+[dependencies]
+# The shared contracts that this crate implements.
+sisa-caching-core = { workspace = true }
+
+# The error types' `Display` and `Error` implementations.
+thiserror = { workspace = true }
+
+# The serialization traits and the format.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The redis-rs client, which speaks to every supported Redis-family server.
+redis = { workspace = true }
+
+# Only for its crypto provider, with `tls-rustls`.
+rustls = { workspace = true, optional = true }
+
+# The lock that lets one Sentinel lookup run at a time.
+tokio = { workspace = true }
+
+# Spans per command.
+tracing = { workspace = true }
+
+[dev-dependencies]
+sisa-caching-testing = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

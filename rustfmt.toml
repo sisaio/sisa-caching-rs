@@ -1,0 +1,5 @@
+# Formatting for every workspace package, with stable options only.
+style_edition = "2024"
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true

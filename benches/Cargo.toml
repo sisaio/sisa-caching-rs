@@ -1,0 +1,47 @@
+[package]
+name = "sisa-caching-benches"
+description = "Benchmarks for the memory, Redis and hybrid stores, and the table each release records"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The values and keys the benchmarks share.
+[lib]
+path = "lib.rs"
+bench = false
+
+# Prints the last `cargo bench` results as a Markdown table.
+[[bin]]
+name = "summary"
+path = "summary.rs"
+bench = false
+
+[[bench]]
+name = "memory"
+path = "memory.rs"
+harness = false
+
+[[bench]]
+name = "redis"
+path = "redis.rs"
+harness = false
+
+[[bench]]
+name = "hybrid"
+path = "hybrid.rs"
+harness = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sisa-caching-core = { workspace = true }
+
+[dev-dependencies]
+sisa-caching-memory = { workspace = true }
+sisa-caching-redis = { workspace = true }
+sisa-caching-hybrid = { workspace = true }
+sisa-caching-testing = { workspace = true }
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

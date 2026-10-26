@@ -1,0 +1,43 @@
+name: Feature request
+description: Something the library should do but doesn't.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/sisaio/sisa-caching-rs/blob/main/ROADMAP.md) and the
+        decisions in the [architecture page](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#decisions)
+        first; some ideas are planned and some were settled on purpose.
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Crate
+      options:
+        - sisa-caching
+        - sisa-caching-memory
+        - sisa-caching-redis
+        - sisa-caching-hybrid
+        - sisa-caching-core
+        - A new crate
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: How it could work, ideally with the code you'd want to write.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use now, or other ways you considered.

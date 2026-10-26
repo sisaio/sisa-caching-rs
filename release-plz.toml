@@ -1,0 +1,32 @@
+# Releases with release-plz: every push to main updates one release PR, and only merging that PR
+# publishes. The five crates share one version, one changelog at the root, and one `v` tag and
+# GitHub release, all carried by `sisa-caching-core`. Crates with `publish = false` are skipped on
+# their own; listing them here would turn publishing back on and fail the release.
+[workspace]
+release_always = false
+changelog_update = false
+git_release_enable = false
+git_tag_enable = false
+
+# Changelog sections come from each commit's type (CONTRIBUTING.md#commit-messages). Work users
+# don't see is left out unless it is marked breaking.
+[changelog]
+protect_breaking_commits = true
+commit_parsers = [
+    { message = "^feat", group = "added" },
+    { message = "^(fix|revert)", group = "fixed" },
+    { message = "^perf", group = "changed" },
+    { message = "^(refactor|docs|test|build|ci|chore)", skip = true },
+    { message = "^.*", group = "other" },
+]
+
+[[package]]
+name = "sisa-caching-core"
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = ["sisa-caching", "sisa-caching-memory", "sisa-caching-redis", "sisa-caching-hybrid"]
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+

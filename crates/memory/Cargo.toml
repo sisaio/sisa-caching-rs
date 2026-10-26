@@ -1,0 +1,36 @@
+[package]
+name = "sisa-caching-memory"
+description = "The in-process local store of Sisa Caching, with TTLs and an optional entry limit"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cache", "caching", "in-memory", "async"]
+categories = ["caching", "asynchronous"]
+
+[dependencies]
+# The shared contracts that this crate implements.
+sisa-caching-core = { workspace = true }
+
+# The serialization traits and the format.
+serde = { workspace = true }
+
+# The purge worker's timer.
+tokio = { workspace = true }
+
+tracing = { workspace = true }
+
+[dev-dependencies]
+sisa-caching-testing = { workspace = true }
+# Paused time for the purge worker's tests.
+tokio = { workspace = true, features = ["test-util"] }
+futures-util = { workspace = true }
+# The settings docs parse a config.
+serde_json = { workspace = true }
+
+# Captures metrics in tests.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

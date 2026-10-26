@@ -1,0 +1,26 @@
+#!/bin/sh
+# Checks a commit message against CONTRIBUTING.md#commit-messages. Git runs it on each commit once
+# a clone sets `git config core.hooksPath .githooks`; CI runs it on a PR's commits and title.
+set -eu
+
+subject=$(grep -v '^#' "$1" | grep -m 1 . || true)
+
+fail() {
+  printf 'commit-msg: %s\n  %s\nSee CONTRIBUTING.md#commit-messages.\n' "$1" "$subject" >&2
+  exit 1
+}
+
+case "$subject" in
+  # Local autosquash commits pass; CI rejects them so none reaches main.
+  fixup!* | squash!* | amend!*) [ -z "${CI:-}" ] && exit 0 ;;
+esac
+
+echo "$subject" |
+  grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\((core|memory|redis|hybrid|facade|deps)\))?!?: [^ ]' ||
+  fail 'start with type(scope): summary, for example "fix(redis): keep the TTL on refresh"'
+[ "${#subject}" -le 72 ] || fail 'keep the subject to 72 characters'
+case "$subject" in
+  *.) fail 'end the subject without a period' ;;
+  *'[skip ci]'* | *'[ci skip]'*) fail 'put [skip ci] in the body, not the subject' ;;
+esac
+if grep -iq '^co-authored-by:' "$1"; then fail 'drop the Co-authored-by trailer'; fi
