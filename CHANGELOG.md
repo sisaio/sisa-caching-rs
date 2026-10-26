@@ -10,14 +10,6 @@ All notable changes are listed here. The format follows
 
 ### Added
 
-- initialize project
-
-### Other
-
-- Initial commit
-
-### Added
-
 - `sisa-caching`: one crate for applications, with features `memory`, `redis` and `hybrid` that
   pick the stores (none on by default), and every type an application uses at
   its root.
