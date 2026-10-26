@@ -1,0 +1,5 @@
+# Deadlines use the monotonic clock and the server's TTL countdown. Only the clock module in core
+# reads the wall clock, to stamp `created_at`. Any other reader needs a justified `#[expect]`.
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "read the wall clock only through sisa_caching_core::clock::SystemClock" },
+]

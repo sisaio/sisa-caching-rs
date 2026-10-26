@@ -1,0 +1,27 @@
+[package]
+name = "sisa-caching-core"
+description = "Cache keys, entries, settings and the store contract of Sisa Caching"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cache", "caching", "async"]
+categories = ["caching", "asynchronous"]
+
+[dependencies]
+# The error types' `Display` and `Error` implementations.
+thiserror = { workspace = true }
+
+# The settings' and keys' serialization traits, and the bound on cached values.
+serde = { workspace = true }
+
+# The per-key lock behind `get_or_set` and its wait timeout.
+tokio = { workspace = true }
+
+# The worker host: task tracking and the stop signal.
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+opentelemetry = { workspace = true }

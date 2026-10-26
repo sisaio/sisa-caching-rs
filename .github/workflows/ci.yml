@@ -1,0 +1,174 @@
+# Formatting, lints, the MSRV build, the dependency policy, the tests, which run against
+# Redis 7.4, Redis 8 and Valkey 8, and coverage on main. The Redis tests start their servers in
+# Docker.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The whole history, so the commit check below can read the PR's commits.
+          fetch-depth: 0
+
+      # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
+      # checked on the next push. Dependabot's titles run long, so its PRs are left out.
+      - name: Check commit messages
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          status=0
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/message"
+            .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          done
+          printf '%s\n' "$TITLE" > "$RUNNER_TEMP/message"
+          .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          exit "$status"
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # The `tls-rustls` feature changes some redis-rs signatures, so lint with it on too.
+      - name: Run Clippy with every feature
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      # With `tls-rustls` on too, redis-rs uses rustls, so the native-tls tests only build alone.
+      - name: Run Clippy with native-tls
+        run: cargo clippy -p sisa-caching-redis -p sisa-caching-hybrid --all-targets --features tls-native-tls --locked -- -D warnings
+
+      # Alone, so the workspace's other members don't turn its features on.
+      - name: Build the facade with each feature
+        run: |
+          for features in "" memory redis hybrid tls-rustls tls-native-tls; do
+            cargo check -p sisa-caching --features "$features" --locked
+          done
+
+      # docs.rs builds every published crate with every feature; a broken link fails here instead.
+      - name: Build the docs
+        run: cargo doc --workspace --no-deps --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The workspace `rust-version`.
+      - name: Install the MSRV toolchain
+        run: rustup toolchain install 1.89 --profile minimal
+
+      - name: Build at the MSRV
+        run: cargo +1.89 check --workspace --all-targets --all-features --locked
+
+  deny:
+    name: deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Advisories, licenses, bans and sources, as deny.toml sets them.
+      - name: Check the dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  test:
+    name: test (${{ matrix.server }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        server: ["redis:7.4-alpine", "redis:8-alpine", "valkey/valkey:8-alpine"]
+    env:
+      REDIS_IMAGE: ${{ matrix.server }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      # Pulled once here, so no test waits on the download.
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      # Every feature, so the TLS tests run on `tls-rustls`'s own crypto provider.
+      - name: Run all tests including Redis
+        run: cargo test --workspace --all-features --locked
+
+      - name: Run the native-tls tests
+        run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
+
+  # Line coverage for the README badge, on main only to keep Actions minutes down. One server is
+  # enough: the other servers run the same code paths. The test helpers crate is left out.
+  coverage:
+    name: coverage
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      REDIS_IMAGE: redis:8-alpine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install && rustup component add llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      - name: Measure coverage
+        run: cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex 'crates/testing/' --lcov --output-path lcov.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

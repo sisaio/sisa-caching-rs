@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/sisaio/sisa-caching-rs/security/advisories/new
+    about: Report it privately, not in a public issue.
+  - name: Documentation
+    url: https://github.com/sisaio/sisa-caching-rs/blob/main/docs/00-overview.md
+    about: How the stores work, what they guarantee, and which servers they support.

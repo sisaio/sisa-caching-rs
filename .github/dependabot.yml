@@ -1,0 +1,29 @@
+# Weekly version updates for Cargo and the SHA-pinned actions.
+# Patch and minor updates are grouped per ecosystem, and major updates stay separate.
+# Dependabot doesn't update the server images in ci.yml. `redis:8-alpine` and
+# `valkey/valkey:8-alpine` follow 8.x releases by themselves; `redis:7.4-alpine` follows 7.4 patch
+# releases, so move it to a new minor version by hand.
+# Commit titles start with `build(deps)`.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build(deps)
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build(deps)
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

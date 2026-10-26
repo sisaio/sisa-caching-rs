@@ -1,0 +1,28 @@
+[package]
+name = "sisa-caching-testing"
+description = "Test helpers shared by the Sisa Caching crates: a clock the test moves and a Redis server in a container"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# `RedisTls::client`, which needs redis-rs's rustls to show a client certificate.
+rustls = ["redis/tokio-rustls-comp"]
+
+[dependencies]
+# The clock trait the test clock implements.
+sisa-caching-core = { workspace = true }
+
+# A Redis server per test, in Docker.
+testcontainers = { workspace = true }
+# No TLS library and no rustls crypto provider here: the TLS tests get them from the store's
+# `tls-rustls` or `tls-native-tls`, as an application does.
+redis = { workspace = true }
+tokio = { workspace = true }
+
+# A CA, server and client certificate for the TLS server.
+rcgen = { workspace = true }

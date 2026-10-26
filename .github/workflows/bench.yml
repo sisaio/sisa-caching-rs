@@ -1,0 +1,87 @@
+# Runs the benchmarks for each release and records them on its release page: the table in the
+# release notes, and the table and Criterion's full HTML report as assets. The previous release's
+# benchmarks run first in the same job, so the table compares the two on one machine. The release
+# workflow calls it with the new tag, since a release made with the workflow token starts no other
+# workflow; a release published by hand starts it too. Run it by hand to see the table in the
+# run's summary without touching a release.
+name: bench
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: The release to record the results on.
+        type: string
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  REDIS_IMAGE: redis:8-alpine
+
+jobs:
+  bench:
+    name: bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The tags, to find the previous release.
+          fetch-depth: 0
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      # The newest `v` tag before this release; none before the first one.
+      - name: Find the previous release
+        id: previous
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          previous=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -n 1 || true)
+          echo "tag=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Run the previous release's benchmarks
+        if: steps.previous.outputs.tag
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
+        run: |
+          git worktree add ../previous "$PREVIOUS"
+          cd ../previous
+          rustup toolchain install
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
+            cargo bench -p sisa-caching-benches --locked -- --save-baseline previous
+
+      - name: Run the benchmarks
+        run: cargo bench -p sisa-caching-benches --locked -- --save-baseline current
+
+      - name: Summarize
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
+        run: |
+          cargo run -p sisa-caching-benches --locked --bin summary -- ${PREVIOUS:+"$PREVIOUS"} > benchmarks.md
+          cat benchmarks.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Reruns replace the assets and the table instead of adding another.
+      - name: Record on the release
+        if: inputs.tag || github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          tar -czf criterion-report.tar.gz -C target criterion
+          gh release upload "$TAG" benchmarks.md criterion-report.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY" \
+            | sed '/^<!-- benchmarks -->$/,$d' > notes.md
+          { echo '<!-- benchmarks -->'; cat benchmarks.md; } >> notes.md
+          gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
