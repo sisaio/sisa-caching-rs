@@ -76,6 +76,9 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 - Cluster mode needs `RedisBackplane::cluster`, which uses sharded pub/sub (above).
 - Over TLS without client certificates, Dragonfly refuses to start unless a password is set
   (`--requirepass`).
+- A demoted primary answers writes with `LOADING` for a moment after it syncs from the new
+  primary, where Redis answers `READONLY`. A store writing to it then gets that error instead of
+  moving to the new primary; the next call after the sync moves.
 
 ### Garnet
 

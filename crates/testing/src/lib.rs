@@ -684,17 +684,19 @@ impl RedisSentinel {
                 .query_async(&mut old)
                 .await
                 .unwrap();
-            // Dragonfly answers LOADING for a moment after the link comes up.
-            let loading = redis::cmd("EXISTS")
-                .arg("loading-check")
-                .query_async::<bool>(&mut old)
+            // Dragonfly answers writes with LOADING for a moment after the link comes up, so wait
+            // until it refuses them as a replica does.
+            let read_only = redis::cmd("SET")
+                .arg("read-only-check")
+                .arg(1)
+                .query_async::<()>(&mut old)
                 .await
                 .is_err_and(|error| {
-                    error.kind() == redis::ErrorKind::Server(redis::ServerErrorKind::BusyLoading)
+                    error.kind() == redis::ErrorKind::Server(redis::ServerErrorKind::ReadOnly)
                 });
             if info.contains("master_port:6380")
                 && info.contains("master_link_status:up")
-                && !loading
+                && read_only
             {
                 break;
             }
