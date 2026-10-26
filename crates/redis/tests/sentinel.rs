@@ -78,19 +78,7 @@ async fn a_call_cut_off_during_a_failover_fails_and_the_next_one_reaches_the_new
     sentinel.failover().await;
     sentinel.demote_old_primary().await;
     // The old primary drops the store's connection, so the call may or may not have run there.
-    redis::cmd("CLIENT")
-        .arg("KILL")
-        .arg("TYPE")
-        .arg("normal")
-        .query_async::<usize>(
-            &mut sentinel
-                .server(6379)
-                .get_multiplexed_async_connection()
-                .await
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    sentinel.drop_clients(6379).await;
 
     assert!(store.remove(&key(1)).await.is_err(), "not sent again");
     assert!(store.remove(&key(1)).await.unwrap());

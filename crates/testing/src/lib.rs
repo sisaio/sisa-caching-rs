@@ -588,6 +588,47 @@ impl RedisSentinel {
         Client::open(format!("redis://{}:{port}", self.ip)).unwrap()
     }
 
+    /// Closes every client connection to the server on `port` but this call's own, as a server
+    /// dropping its clients would, and returns how many it closed. Kills each by ID, as
+    /// [`Redis::drop_subscriptions`] does, since Dragonfly refuses `CLIENT KILL TYPE`.
+    pub async fn drop_clients(&self, port: u16) -> usize {
+        let mut connection = self
+            .server(port)
+            .get_multiplexed_async_connection()
+            .await
+            .unwrap();
+        let own: u64 = redis::cmd("CLIENT")
+            .arg("ID")
+            .query_async(&mut connection)
+            .await
+            .unwrap();
+        let clients: String = redis::cmd("CLIENT")
+            .arg("LIST")
+            .query_async(&mut connection)
+            .await
+            .unwrap();
+        let mut closed = 0;
+        for id in clients
+            .lines()
+            .filter_map(|client| {
+                client
+                    .split(' ')
+                    .find_map(|field| field.strip_prefix("id="))
+            })
+            .filter(|id| *id != own.to_string())
+        {
+            let killed: usize = redis::cmd("CLIENT")
+                .arg("KILL")
+                .arg("ID")
+                .arg(id)
+                .query_async(&mut connection)
+                .await
+                .unwrap();
+            closed += killed;
+        }
+        closed
+    }
+
     /// Promotes the server on 6380 and waits until Sentinel names it. The old primary keeps
     /// accepting writes until Sentinel demotes it, about ten seconds later.
     pub async fn failover(&self) {
