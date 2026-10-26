@@ -2,7 +2,8 @@
 # - opens or updates the release PR, which bumps the versions, checks the public API for breaking
 #   changes with cargo-semver-checks, and adds the changelog section;
 # - when the push is that PR being merged, publishes to crates.io, tags `v<version>`, creates the
-#   GitHub release from the changelog, and runs the benchmarks for it.
+#   GitHub release from the changelog as a draft, runs the benchmarks for it, and then publishes
+#   it. Releases are immutable once published, so the benchmark files go on while it's a draft.
 #
 # Publishing uses crates.io trusted publishing (no secret) once each crate exists there. The very
 # first publish of a crate needs a `CARGO_REGISTRY_TOKEN` secret, removed afterwards.
@@ -67,6 +68,22 @@ jobs:
     uses: ./.github/workflows/bench.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
+
+  # Publishes the draft even when the benchmarks fail, since the crates are already out.
+  publish-release:
+    name: publish release
+    needs: [release, bench]
+    if: always() && needs.release.outputs.tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
 
   release-pr:
     name: release PR

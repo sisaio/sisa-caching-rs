@@ -1,14 +1,12 @@
 # Runs the benchmarks for each release and records them on its release page: the table in the
 # release notes, and the table and Criterion's full HTML report as assets. The previous release's
 # benchmarks run first in the same job, so the table compares the two on one machine. The release
-# workflow calls it with the new tag, since a release made with the workflow token starts no other
-# workflow; a release published by hand starts it too. Run it by hand to see the table in the
-# run's summary without touching a release.
+# workflow calls it with the new tag while that release is still a draft, because a published
+# release is immutable and takes no more assets. Run it by hand to see the table in the run's
+# summary without touching a release.
 name: bench
 
 on:
-  release:
-    types: [published]
   workflow_call:
     inputs:
       tag:
@@ -46,7 +44,7 @@ jobs:
       - name: Find the previous release
         id: previous
         env:
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           previous=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -n 1 || true)
           echo "tag=$previous" >> "$GITHUB_OUTPUT"
@@ -74,10 +72,10 @@ jobs:
 
       # Reruns replace the assets and the table instead of adding another.
       - name: Record on the release
-        if: inputs.tag || github.event_name == 'release'
+        if: inputs.tag
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           tar -czf criterion-report.tar.gz -C target criterion
           gh release upload "$TAG" benchmarks.md criterion-report.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
