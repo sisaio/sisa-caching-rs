@@ -82,6 +82,8 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 - It replicates only in cluster mode, so Sentinel can't watch it. A cluster's own failover
   (`CLUSTER FAILOVER`) hasn't been tested.
 - It listens on 127.0.0.1 unless started with `--bind`, so a container needs `--bind 0.0.0.0`.
+- It delivers a sharded subscription's messages as `message` pushes, not `smessage`. The
+  cluster backplane takes either.
 
 ### Any setup with async replication
 

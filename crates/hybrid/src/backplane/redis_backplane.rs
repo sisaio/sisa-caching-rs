@@ -263,7 +263,10 @@ impl Connection {
                 let push = pushes.recv().await.ok_or_else(closed)?;
 
                 match (push.kind, push.data.into_iter().nth(1)) {
-                    (PushKind::SMessage, Some(Value::BulkString(payload))) => return Ok(payload),
+                    // Garnet hands a sharded subscription's messages over as `message`.
+                    (PushKind::SMessage | PushKind::Message, Some(Value::BulkString(payload))) => {
+                        return Ok(payload);
+                    }
                     // redis-rs subscribes again by itself, but messages sent in the gap are lost.
                     // On Redis, a slot that moves unsubscribes its channel.
                     (PushKind::Disconnection | PushKind::SUnsubscribe, _) => {
