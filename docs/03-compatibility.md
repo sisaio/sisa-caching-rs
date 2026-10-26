@@ -14,11 +14,8 @@ hashes, `PEXPIRE`, `MULTI`, `SCAN` and pub/sub.
 | --- | --- | --- | --- | --- | --- |
 | Redis 7.4, 8 | ✅ tested in CI | ✅ | ✅ tested in CI | ✅ tested in CI | ✅ tested in CI |
 | Valkey 8 | ✅ tested in CI | ✅ | ✅ tested in CI | ✅ tested in CI | ✅ tested in CI |
-| Dragonfly 2 | ✅ run locally | ✅, but every node must publish and subscribe on the primary | ✅ run locally; the backplane needs sharded pub/sub | ✅ run locally, watched by Redis Sentinel | ✅ run locally |
-| Garnet 2 | ✅ run locally | Only in cluster mode; not tested | ✅ run locally | ❌ Garnet has no Sentinel | ✅ run locally |
-
-"Run locally" means the whole suite passes with `REDIS_IMAGE` set to that server, but CI doesn't
-run it yet.
+| Dragonfly 2 | ✅ tested in CI | ✅, but every node must publish and subscribe on the primary | ✅ tested in CI; the backplane needs sharded pub/sub | ✅ tested in CI, watched by Redis Sentinel | ✅ tested in CI |
+| Garnet 2 | ✅ tested in CI | Only in cluster mode; not tested | ✅ tested in CI | ❌ Garnet has no Sentinel | ✅ tested in CI |
 
 `RedisCacheStore::connect`, `RedisBackplane::connect` and `HybridCacheStore::connect` take a URL
 for one server.
