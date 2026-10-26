@@ -76,9 +76,9 @@ an invalidation never reaches it.
 
 ## Compatibility
 
-Tested in CI against Redis 7.4, Redis 8 and Valkey 8, each as one primary, a three-primary
-cluster, and a primary and replica behind Sentinel through a failover. The whole suite also passes
-on Dragonfly 2 and Garnet 2, except Sentinel on Garnet, which has none. [docs/03-compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/03-compatibility.md) says how to connect to
+Tested in CI against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, each as one primary,
+a three-primary cluster, and a primary and replica behind Sentinel through a failover, except
+Sentinel on Garnet, which has none. [docs/03-compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/03-compatibility.md) says how to connect to
 each.
 
 ## Observability

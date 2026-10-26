@@ -1,6 +1,7 @@
 # Formatting, lints, the MSRV build, the dependency policy, the tests, which run against
-# Redis 7.4, Redis 8 and Valkey 8, and coverage on main. The Redis tests start their servers in
-# Docker. PRs that change no Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
+# Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and coverage on main. The Redis tests
+# start their servers in Docker. PRs that change no Rust inputs skip the Rust jobs; `ci` sums them
+# up for the ruleset.
 name: ci
 
 on:
@@ -159,7 +160,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        server: ["redis:7.4-alpine", "redis:8-alpine", "valkey/valkey:8-alpine"]
+        # Dragonfly publishes no tag that follows its major version, so it is pinned.
+        server:
+          - redis:7.4-alpine
+          - redis:8-alpine
+          - valkey/valkey:8-alpine
+          - ghcr.io/dragonflydb/dragonfly:v2.0.2
+          - ghcr.io/microsoft/garnet:2
     env:
       REDIS_IMAGE: ${{ matrix.server }}
     steps:
