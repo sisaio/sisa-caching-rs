@@ -12,7 +12,8 @@ share one version, one changelog at the root and one `v<version>` tag.
 - Each push opens or updates one release PR. It bumps the versions, runs cargo-semver-checks
   against the last published version, and adds a changelog section.
 - Merging the release PR publishes to crates.io, tags `v<version>`, creates the GitHub release
-  and runs the benchmarks, whose table goes into the release notes.
+  as a draft, runs the benchmarks, whose table and report go on the draft, and then publishes
+  it. Releases are immutable once published, so nothing may change one after that.
 
 The maintainer merges the release PR. An agent never merges it, publishes, or pushes a tag.
 
@@ -43,6 +44,7 @@ The maintainer merges the release PR. An agent never merges it, publishes, or pu
 | --- | --- |
 | `GitHub Actions is not permitted to create or approve pull requests` | The maintainer allows it in Settings → Actions → General → Workflow permissions |
 | `has publish = false ... publish = true in the release-plz configuration` | Remove that crate's entry from `release-plz.toml` |
+| `Cannot upload assets to an immutable release` | Something wrote to a published release; record on the draft before `publish release` runs |
 | crates.io `403` or no token | A crate's first publish needs the `CARGO_REGISTRY_TOKEN` secret; later ones use trusted publishing |
 
 For anything else, find the first error in the failed step's log and report it with a fix.
