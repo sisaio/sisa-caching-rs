@@ -6,6 +6,16 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0](https://github.com/sisaio/sisa-caching-rs/releases/tag/v0.1.0) - 2026-10-26
+
+### Added
+
+- initialize project
+
+### Other
+
+- Initial commit
+
 ### Added
 
 - `sisa-caching`: one crate for applications, with features `memory`, `redis` and `hybrid` that
