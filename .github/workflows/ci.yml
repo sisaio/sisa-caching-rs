@@ -77,6 +77,12 @@ jobs:
       - name: Install the pinned toolchain
         run: rustup toolchain install
 
+      # Restores ~/.cargo and target/ from main's last run. Only main saves, so PRs don't fill the
+      # cache quota. The other jobs below do the same.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -119,6 +125,13 @@ jobs:
       - name: Install the MSRV toolchain
         run: rustup toolchain install 1.89 --profile minimal
 
+      # Keyed on the MSRV compiler; the default from rust-toolchain.toml isn't installed here.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        env:
+          RUSTUP_TOOLCHAIN: "1.89"
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Build at the MSRV
         run: cargo +1.89 check --workspace --all-targets --all-features --locked
 
@@ -156,6 +169,10 @@ jobs:
 
       - name: Install the pinned toolchain
         run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Pulled once here, so no test waits on the download.
       - name: Pull the server image
@@ -197,6 +214,10 @@ jobs:
 
       - name: Install the pinned toolchain
         run: rustup toolchain install && rustup component add llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31

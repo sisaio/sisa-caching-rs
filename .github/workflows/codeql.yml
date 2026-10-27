@@ -26,6 +26,9 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    # The Rust extractor's cargo commands build into target/, so the cache below applies.
+    env:
+      CODEQL_EXTRACTOR_RUST_OPTION_CARGO_TARGET_DIR: ${{ github.workspace }}/target
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +58,11 @@ jobs:
       - name: Install the pinned toolchain
         if: matrix.language == 'rust' && steps.scope.outputs.scan == 'true'
         run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: matrix.language == 'rust' && steps.scope.outputs.scan == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: steps.scope.outputs.scan == 'true'
