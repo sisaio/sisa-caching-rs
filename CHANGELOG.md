@@ -6,6 +6,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/sisaio/sisa-caching-rs/compare/v0.1.0...v0.1.1) - 2026-10-27
+
+### Fixed
+
+- *(redis)* resend a command refused with LOADING after a failover
+- *(hybrid)* take Garnet's sharded messages on a cluster
+
 ## [0.1.0](https://github.com/sisaio/sisa-caching-rs/releases/tag/v0.1.0) - 2026-10-26
 
 ### Added
