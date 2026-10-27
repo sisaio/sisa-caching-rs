@@ -14,11 +14,12 @@ existing=$(gh api "repos/$REPO/rulesets?includes_parents=false&per_page=100" --j
 for file in "$dir"/*.json; do
   name=$(jq -er .name "$file")
   id=$(awk -F'|' -v name="$name" '$1 == name { print $2 }' <<<"$existing")
+  # On an error, GitHub's reason is in the response body, so print it.
   if [ -n "$id" ]; then
-    gh api --method PUT "repos/$REPO/rulesets/$id" --input "$file" --silent
+    response=$(gh api --method PUT "repos/$REPO/rulesets/$id" --input "$file") || { echo "$response" >&2; exit 1; }
     echo "ruleset $name updated"
   else
-    gh api --method POST "repos/$REPO/rulesets" --input "$file" --silent
+    response=$(gh api --method POST "repos/$REPO/rulesets" --input "$file") || { echo "$response" >&2; exit 1; }
     echo "ruleset $name created"
   fi
 done
