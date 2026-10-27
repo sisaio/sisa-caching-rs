@@ -38,8 +38,10 @@ Both scripts can run any number of times:
 - Release PRs from release-plz get no CI, since the built-in token doesn't trigger workflows, so
   repository admins can bypass the `main` rules on a PR (never by a direct push). Merge a release
   PR with "Merge without waiting for requirements".
-- `release-tags.json`: only GitHub Actions (the release workflow) and admins can create, move or
-  delete a `v*` tag.
+- `release-tags.json`: once a `v*` tag exists, only admins can move or delete it. Creating one
+  isn't restricted: GitHub rejects the GitHub Actions app as a bypass actor on this repository's
+  rulesets, so a creation rule would stop release-plz from tagging. A published release's tag is
+  also locked by release immutability.
 
 ## By hand
 
