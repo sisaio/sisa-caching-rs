@@ -1,6 +1,7 @@
 # Formatting, lints, the MSRV build, the dependency policy, the tests, which run against
 # Redis 7.4, Redis 8 and Valkey 8, and coverage on main. The Redis tests start their servers in
-# Docker.
+# Docker. A PR that changes no Rust code, manifest or toolchain file skips all but the commit check,
+# and the `ci` job sums up the rest for the main ruleset.
 name: ci
 
 on:
@@ -21,16 +22,33 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  lint:
-    name: lint
+  # Whether the PR touches anything the Rust jobs below build, lint or test, and the commit check,
+  # which every PR needs. A PR that changes only docs, scripts or other workflows skips the Rust
+  # jobs. Pushes to main run everything.
+  changes:
+    name: changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The whole history, so the commit check below can read the PR's commits.
+          # The whole history, so both checks can read the PR's commits.
           fetch-depth: 0
+
+      - name: Look for code changes
+        id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
       # checked on the next push. Dependabot's titles run long, so its PRs are left out.
@@ -49,6 +67,17 @@ jobs:
           printf '%s\n' "$TITLE" > "$RUNNER_TEMP/message"
           .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
+
+  lint:
+    name: lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install the pinned toolchain
         run: rustup toolchain install
@@ -82,6 +111,8 @@ jobs:
 
   msrv:
     name: msrv
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -98,6 +129,8 @@ jobs:
 
   deny:
     name: deny
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -111,6 +144,8 @@ jobs:
 
   test:
     name: test (${{ matrix.server }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -137,6 +172,29 @@ jobs:
 
       - name: Run the native-tls tests
         run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
+
+  # The one check the main ruleset requires from this workflow, so jobs can be added, renamed or
+  # skipped without editing the ruleset. A skipped matrix job reports no check under its matrix
+  # name, which would leave a required `test (...)` check waiting forever. Passes when every job
+  # passed or was skipped, and fails when any failed or was cancelled.
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, lint, msrv, deny, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check the results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *) exit 1 ;;
+            esac
+          done
 
   # Line coverage for the README badge, on main only to keep Actions minutes down. One server is
   # enough: the other servers run the same code paths. The test helpers crate is left out.
