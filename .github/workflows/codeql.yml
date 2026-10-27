@@ -34,18 +34,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The whole history, so the next step can diff the PR against its base.
+          fetch-depth: 0
+
+      # A PR that changes no Rust code skips the Rust scan, the slowest check. The job still runs
+      # and passes, so the main ruleset's `analyze (rust)` check reports.
+      - name: Look for code changes
+        id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LANGUAGE: ${{ matrix.language }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$LANGUAGE" = rust ]; then
+            echo "scan=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
+          else
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # The Rust extractor reads the Cargo manifests and runs build scripts and procedural macros.
       - name: Install the pinned toolchain
-        if: matrix.language == 'rust'
+        if: matrix.language == 'rust' && steps.scope.outputs.scan == 'true'
         run: rustup toolchain install
 
       - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: steps.scope.outputs.scan == 'true'
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-and-quality
 
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: steps.scope.outputs.scan == 'true'
         with:
           category: /language:${{ matrix.language }}
