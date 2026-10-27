@@ -102,9 +102,10 @@ impl RedisConnection for ClusterConnection {
 
 /// A connection to the primary that Redis Sentinel names. When a command fails because the old
 /// primary went away or refuses writes with `READONLY`, this asks Sentinel for the new primary and
-/// moves there. A command that surely didn't run, refused with `READONLY` or never sent because
-/// the connection was refused, is sent once more on the new primary. Any other failed command
-/// returns its error, since it may have run.
+/// moves there. A command that surely didn't run, refused with `READONLY` or `LOADING` or never
+/// sent because the connection was refused, is sent once more on the new primary. Any other
+/// failed command returns its error, since it may have run. A demoted Dragonfly primary answers
+/// `LOADING` instead of `READONLY` while it syncs from the new one.
 ///
 /// It moves on an error, not on Sentinel's announcement. After a manual failover the old primary
 /// keeps accepting writes until Sentinel demotes it, about ten seconds later, and those writes are
@@ -224,11 +225,10 @@ enum Failover {
 
 fn failover(error: &RedisError) -> Option<Failover> {
     // Inside a transaction `READONLY` arrives as one of the aborted commands' errors.
-    let read_only = error.clone().into_server_errors().is_some_and(|errors| {
-        errors
-            .iter()
-            .any(|(_, error)| error.kind() == Some(ServerErrorKind::ReadOnly))
-    });
+    let read_only = error
+        .clone()
+        .into_server_errors()
+        .is_some_and(|errors| errors.iter().any(|(_, error)| not_run(error.kind())));
 
     if read_only || error.is_connection_refusal() {
         Some(Failover::NotRun)
@@ -239,10 +239,18 @@ fn failover(error: &RedisError) -> Option<Failover> {
     }
 }
 
-/// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, so a
-/// reply of `READONLY` means the write didn't run.
+/// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, and a
+/// server that is loading runs no commands, so a reply of `READONLY` or `LOADING` means the
+/// command didn't run.
 fn read_only(reply: &Value) -> bool {
-    matches!(reply, Value::ServerError(error) if error.kind() == Some(ServerErrorKind::ReadOnly))
+    matches!(reply, Value::ServerError(error) if not_run(error.kind()))
+}
+
+fn not_run(kind: Option<ServerErrorKind>) -> bool {
+    matches!(
+        kind,
+        Some(ServerErrorKind::ReadOnly | ServerErrorKind::BusyLoading)
+    )
 }
 
 impl SentinelConnection {
