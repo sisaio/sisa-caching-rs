@@ -89,6 +89,7 @@ Every issue and pull request gets labels from these groups, so anyone can filter
 | Kind | `bug`, `enhancement`, `task`, `documentation` | Exactly one. The issue forms set it. |
 | Crate | `crate: sisa-caching`, `crate: core`, `crate: memory`, `crate: redis`, `crate: hybrid`, `ci` | Every part the change touches. |
 | Other | `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
+| Automated | `dependencies`, `release` | Set by Dependabot and release-plz on their PRs. |
 
 - `needs info`: the reporter owes details or a reproduction. Remove it once they answer.
 - `breaking`: the public API or a data format changes. The PR says how to migrate.
@@ -103,6 +104,8 @@ stateDiagram-v2
     [*] --> Backlog: issue opened
     Backlog --> Ready: accepted, milestone set
     Ready --> InProgress: assigned
+    InProgress --> Blocked: waiting on something else
+    Blocked --> InProgress: unblocked
     InProgress --> InReview: PR opened with "Closes #n"
     InReview --> InProgress: changes requested
     InReview --> Done: PR merged
@@ -112,11 +115,20 @@ stateDiagram-v2
     InReview: In Review
 ```
 
-Only the maintainer moves an issue to Ready and sets its milestone; milestones are release
-versions. Assign yourself before starting so two people don't take the same issue.
+Only the maintainer moves an issue to Ready and sets its milestone and Priority (P0 urgent to P3
+low); milestones are release versions. Assign yourself before starting so two people don't take
+the same issue. A Blocked issue says in a comment what it waits on. Start date and Target date
+place an issue on the Roadmap view.
+
+The labels, milestones, board and the rulesets on `main` and the `v*` tags are kept in
+[.github/scripts](.github/scripts/README.md). Change them there in a PR, and a maintainer runs the
+script after the merge. A run overwrites what it manages, so a change made only on GitHub doesn't
+last.
 
 ## Git
 
+- Every PR closes an issue: open one first if none exists, and say `Closes #n` in the PR. Only
+  Dependabot's and release-plz's PRs come without one.
 - Branch from `main` as `feat/<topic>`, one topic per PR.
 - Bring a branch up to date by rebasing onto `main`; don't merge `main` into it.
 - PRs merge with the rebase method once CI is green.
