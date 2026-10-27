@@ -1,7 +1,6 @@
 # Formatting, lints, the MSRV build, the dependency policy, the tests, which run against
 # Redis 7.4, Redis 8 and Valkey 8, and coverage on main. The Redis tests start their servers in
-# Docker. A PR that changes no Rust code, manifest or toolchain file skips all but the commit check,
-# and the `ci` job sums up the rest for the main ruleset.
+# Docker. PRs that change no Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
 name: ci
 
 on:
@@ -22,15 +21,16 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Whether the PR touches anything the Rust jobs below build, lint or test, and the commit check,
-  # which every PR needs. A PR that changes only docs, scripts or other workflows skips the Rust
-  # jobs. Pushes to main run everything.
+  # Whether the Rust jobs need to run (always on main), and the commit check every PR needs.
   changes:
     name: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.diff.outputs.code }}
+    env:
+      BASE: ${{ github.event.pull_request.base.sha }}
+      HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,9 +40,6 @@ jobs:
 
       - name: Look for code changes
         id: diff
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
@@ -55,8 +52,6 @@ jobs:
       - name: Check commit messages
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
           TITLE: ${{ github.event.pull_request.title }}
         run: |
           status=0
@@ -173,10 +168,8 @@ jobs:
       - name: Run the native-tls tests
         run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
 
-  # The one check the main ruleset requires from this workflow, so jobs can be added, renamed or
-  # skipped without editing the ruleset. A skipped matrix job reports no check under its matrix
-  # name, which would leave a required `test (...)` check waiting forever. Passes when every job
-  # passed or was skipped, and fails when any failed or was cancelled.
+  # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
+  # matrix job reports no `test (...)` check, so those can't be required directly.
   ci:
     name: ci
     if: always()
@@ -185,16 +178,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check the results
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "$RESULTS"
-          for result in $RESULTS; do
-            case "$result" in
-              success | skipped) ;;
-              *) exit 1 ;;
-            esac
-          done
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
 
   # Line coverage for the README badge, on main only to keep Actions minutes down. One server is
   # enough: the other servers run the same code paths. The test helpers crate is left out.

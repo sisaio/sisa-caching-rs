@@ -37,8 +37,7 @@ jobs:
           # The whole history, so the next step can diff the PR against its base.
           fetch-depth: 0
 
-      # A PR that changes no Rust code skips the Rust scan, the slowest check. The job still runs
-      # and passes, so the main ruleset's `analyze (rust)` check reports.
+      # PRs that change no Rust inputs skip the Rust scan but still report `analyze (rust)`.
       - name: Look for code changes
         id: scope
         env:
