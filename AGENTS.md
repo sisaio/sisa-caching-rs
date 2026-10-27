@@ -28,10 +28,10 @@ cargo deny check
 - Write every commit message and PR title as [Commit messages](CONTRIBUTING.md#commit-messages)
   says: `type(scope): summary`. Run `git config core.hooksPath .githooks` before your first
   commit so the hook checks them.
-- Branch from `main` as `<type>/<topic>`, where `<type>` is the commit type of the change
-  (`feat/`, `fix/`, `ci/`, `docs/` and so on), as [Git](CONTRIBUTING.md#git) says. Use another
-  name only when the maintainer gives one. Rebase onto `main` to update a branch; never merge
-  `main` into it.
+- Branch from `main` as `<type>/<issue>-<topic>`, where `<type>` is the commit type of the change
+  (`feat/`, `fix/`, `ci/`, `docs/` and so on) and `<issue>` the number of the issue it closes, as
+  [Git](CONTRIBUTING.md#git) says. Use another name only when the maintainer gives one. Rebase
+  onto `main` to update a branch; never merge `main` into it.
 - Label every issue and PR as [Issues and labels](CONTRIBUTING.md#issues-and-labels) says, and
   follow its board flow.
 - Labels, milestones, board fields and views, and rulesets come from
