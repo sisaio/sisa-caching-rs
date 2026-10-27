@@ -53,9 +53,10 @@ Dragonfly's emulated cluster mode is one server; connect to it as to one primary
 Connect through a `SentinelConnection` and share it between the store and the backplane
 (`RedisBackplane::sentinel`). Redis Sentinel watches Redis, Valkey and Dragonfly.
 
-- When a command fails because the primary went away or answers `READONLY`, the connection asks
-  Sentinel for the primary again and moves there. A command refused with `READONLY` didn't run, so
-  it is sent once more; one cut off by a broken connection may have run, so it returns its error.
+- When a command fails because the primary went away or answers `READONLY` or `LOADING`, the
+  connection asks Sentinel for the primary again and moves there. A command refused with either
+  didn't run, so it is sent once more; one cut off by a broken connection may have run, so it
+  returns its error.
 - A hybrid node notices a new primary within one ping interval (5 s by default): each backplane
   ping asks Sentinel for the primary and moves the shared connection there. The subscription then
   ends, the node clears its local layer, and it subscribes on the new primary after the reconnect
@@ -76,9 +77,8 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 - Cluster mode needs `RedisBackplane::cluster`, which uses sharded pub/sub (above).
 - Over TLS without client certificates, Dragonfly refuses to start unless a password is set
   (`--requirepass`).
-- A demoted primary answers writes with `LOADING` for a moment after it syncs from the new
-  primary, where Redis answers `READONLY`. A store writing to it then gets that error instead of
-  moving to the new primary; the next call after the sync moves.
+- A demoted primary answers `LOADING` for a moment while it syncs from the new primary, where
+  Redis answers `READONLY`. The Sentinel connection takes either as a command that didn't run.
 
 ### Garnet
 
