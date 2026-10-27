@@ -7,6 +7,7 @@ release_always = false
 changelog_update = false
 git_release_enable = false
 git_tag_enable = false
+pr_labels = ["release"]
 # Only work users see opens a release PR: a feature, fix, speed-up, revert, or anything marked
 # breaking. Dependency bumps (`build(deps)`), docs, CI and refactors wait and ship with the next
 # release; use `fix(deps)` for a bump that should ship on its own, such as a security fix.
