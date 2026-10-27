@@ -31,9 +31,10 @@ Both scripts can run any number of times:
 ## The rulesets
 
 - `main`: every change goes through a PR, merged with rebase, with linear history, no force-push
-  or deletion, and resolved review threads. The CI jobs listed in `main.json` must pass. When a job
-  is renamed or added in a workflow, update the list too, or merges wait on a check that never
-  runs.
+  or deletion, and resolved review threads. The checks listed in `main.json` must pass: `ci`,
+  which fails when a job it needs fails and passes when they pass or are skipped, the two CodeQL
+  `analyze` jobs, and dependency `review`. A new CI job goes in `ci`'s `needs`, not in the list;
+  when a listed check is renamed, update the list too, or merges wait on a check that never runs.
 - Release PRs from release-plz get no CI, since the built-in token doesn't trigger workflows, so
   repository admins can bypass the `main` rules on a PR (never by a direct push). Merge a release
   PR with "Merge without waiting for requirements".
