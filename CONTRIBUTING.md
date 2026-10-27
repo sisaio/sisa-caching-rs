@@ -129,9 +129,10 @@ last.
 
 - Every PR closes an issue: open one first if none exists, and say `Closes #n` in the PR. Only
   Dependabot's and release-plz's PRs come without one.
-- Branch from `main` as `<type>/<topic>`, one topic per PR. `<type>` is the
-  [commit type](#commit-messages) of the change, such as `feat/memory-ttl`, `fix/redis-reconnect`,
-  `ci/rust-cache` or `docs/sentinel`.
+- Branch from `main` as `<type>/<issue>-<topic>`, one topic per PR. `<type>` is the
+  [commit type](#commit-messages) of the change and `<issue>` the number of the issue it closes,
+  such as `feat/31-memory-ttl`, `fix/42-redis-reconnect` or `ci/17-tag-ruleset`. Dependabot's and
+  release-plz's branches keep their own names.
 - Bring a branch up to date by rebasing onto `main`; don't merge `main` into it.
 - PRs merge with the rebase method once CI is green.
 - Commit messages and PR titles follow [Commit messages](#commit-messages).
