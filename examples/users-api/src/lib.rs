@@ -87,8 +87,8 @@ pub async fn serve(app: Router) -> std::io::Result<()> {
         .await
 }
 
-// Keys. The count and the list both sit under `users`, so one `remove_prefix` drops them together.
-// A single user sits under `user`, so that prefix leaves them alone.
+// Keys. A change removes the keys it makes stale by name: a `remove_prefix("users")` would drop the
+// count and the list together, but on Redis it scans every key on every primary.
 //
 // Each key carries the version of what it holds, right after its name. Bump it when a field is
 // renamed or changes type, or a value keeps its shape but changes meaning, then drop the old
@@ -152,8 +152,8 @@ async fn list<C: CacheStore>(State(app): State<App<C>>) -> Result<Json<Vec<User>
 }
 
 // Writes go to the database first, so a failed cache write leaves the cache stale, never ahead of
-// the database. The user itself is replaced; the count and the list are dropped and reloaded on
-// their next read.
+// the database. Then the user, the count and the list are removed and reloaded on their next read.
+// Writing the new user back instead could race: two updates could leave the older one cached.
 
 async fn update<C: CacheStore>(
     State(app): State<App<C>>,
@@ -166,8 +166,7 @@ async fn update<C: CacheStore>(
     };
 
     app.db.save(&user);
-    app.cache.set(&user_key(id), user.clone(), None).await?;
-    app.cache.remove_prefix("users").await?;
+    remove_user(&app.cache, id).await?;
 
     Ok(Json(user))
 }
@@ -177,10 +176,18 @@ async fn delete<C: CacheStore>(
     Path(id): Path<u64>,
 ) -> Result<StatusCode, AppError> {
     app.db.delete(id);
-    app.cache.remove(&user_key(id)).await?;
-    app.cache.remove_prefix("users").await?;
+    remove_user(&app.cache, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Removes the keys that a change to user `id` makes stale.
+async fn remove_user<C: CacheStore>(cache: &C, id: u64) -> Result<(), C::Error> {
+    cache.remove(&user_key(id)).await?;
+    cache.remove(LIST_KEY).await?;
+    cache.remove(COUNT_KEY).await?;
+
+    Ok(())
 }
 
 /// A missing user is a 404; anything else is a 500.
