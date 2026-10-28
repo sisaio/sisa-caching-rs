@@ -5,6 +5,9 @@ don't export anything themselves: install an OpenTelemetry SDK, for example with
 and a `tracing` subscriber with the `tracing-opentelemetry` layer. The
 [examples](../examples/users-api) set up all three signals.
 
+Install the meter provider before the first cache call. The stores create their instruments on
+that call, from the provider installed then, so a provider installed later never sees them.
+
 ## Metrics
 
 All under the meter `sisa-caching`. Every metric has a `store` attribute with the store's name.
@@ -50,7 +53,10 @@ to keep in production; only debug spans carry the full key. Failed Redis and hyb
 their span as an error.
 
 A hybrid write and the `hybrid apply_invalidation` spans it causes on other nodes share one trace.
-This needs a text map propagator, such as `TraceContextPropagator`, installed at startup.
+This needs a text map propagator, such as `TraceContextPropagator`, installed at startup. It also
+needs the `tracing-opentelemetry` layer's context activation, which is on by default: the writer
+sends OpenTelemetry's current context, and that holds the span only while activation is on. With
+`with_context_activation(false)`, invalidations carry no trace context, and nothing warns.
 
 ## Logs
 
