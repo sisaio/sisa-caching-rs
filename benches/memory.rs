@@ -21,26 +21,28 @@ fn store(shards: usize) -> InMemoryCacheStore {
 fn single(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
     let store = store(1);
+    // Built before timing, so the times leave out formatting a key.
+    let (hit, miss, written) = (key(1), key(2), key(3));
     let mut group = c.benchmark_group("memory");
 
-    runtime.block_on(store.set(&key(1), user(1), None)).unwrap();
+    runtime.block_on(store.set(&hit, user(1), None)).unwrap();
 
     group.bench_function("get hit", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&key(1))).await.unwrap() });
+            .iter(|| async { store.get::<User>(black_box(&hit)).await.unwrap() });
     });
     group.bench_function("get miss", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&key(2))).await.unwrap() });
+            .iter(|| async { store.get::<User>(black_box(&miss)).await.unwrap() });
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.set(black_box(&key(3)), user(3), None).await.unwrap() });
+            .iter(|| async { store.set(black_box(&written), user(3), None).await.unwrap() });
     });
     group.bench_function("get_or_set hit", |b| {
         b.to_async(&runtime).iter(|| async {
             store
-                .get_or_set(black_box(&key(1)), || async { Ok::<_, ()>(user(1)) }, None)
+                .get_or_set(black_box(&hit), || async { Ok::<_, ()>(user(1)) }, None)
                 .await
                 .unwrap()
         });
@@ -69,14 +71,16 @@ fn parallel(c: &mut Criterion) {
                 let store = store.clone();
 
                 async move {
+                    let keys: Vec<_> = (0..TASKS).map(key).collect();
                     let start = Instant::now();
-                    let tasks: Vec<_> = (0..TASKS)
-                        .map(|id| {
+                    let tasks: Vec<_> = keys
+                        .into_iter()
+                        .map(|key| {
                             let store = store.clone();
 
                             tokio::spawn(async move {
                                 for _ in 0..iters {
-                                    black_box(store.get::<User>(&key(id)).await.unwrap());
+                                    black_box(store.get::<User>(&key).await.unwrap());
                                 }
                             })
                         })

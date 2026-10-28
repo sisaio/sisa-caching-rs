@@ -16,21 +16,23 @@ fn redis(c: &mut Criterion) {
     let _runtime = runtime.enter();
     let redis = runtime.block_on(Redis::start());
     let store = RedisCacheStore::new("app", runtime.block_on(redis.connection())).unwrap();
+    // Built before timing, so the times leave out formatting a key.
+    let (hit, miss, written) = (key(1), key(2), key(3));
     let mut group = c.benchmark_group("redis");
 
-    runtime.block_on(store.set(&key(1), user(1), None)).unwrap();
+    runtime.block_on(store.set(&hit, user(1), None)).unwrap();
 
     group.bench_function("get hit", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&key(1))).await.unwrap() });
+            .iter(|| async { store.get::<User>(black_box(&hit)).await.unwrap() });
     });
     group.bench_function("get miss", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&key(2))).await.unwrap() });
+            .iter(|| async { store.get::<User>(black_box(&miss)).await.unwrap() });
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.set(black_box(&key(3)), user(3), None).await.unwrap() });
+            .iter(|| async { store.set(black_box(&written), user(3), None).await.unwrap() });
     });
     group.finish();
 }
