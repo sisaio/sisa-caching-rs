@@ -32,6 +32,10 @@ Review what changed, not the whole crate. Report findings; don't push fixes unle
       (`feat` only for something users can do now, `!` for a breaking change).
 - [ ] Look for bugs: a lock held across `.await` or across a value's drop, TTL arithmetic that
       can overflow, an error swallowed without a log, a key written without its store prefix.
+- [ ] Look for what only shows at scale or during an outage: a std lock or a long loop on an
+      async thread, a second copy of something meant to run once (such as two workers for one
+      store), a queue or buffer with no bound, and how many log lines and metric points each call
+      makes while a store is failing.
 
 ## Gotchas
 
