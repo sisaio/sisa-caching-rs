@@ -417,7 +417,7 @@ async fn an_entry_expires_on_time_however_late_its_write_starts() {
 
 #[tokio::test]
 async fn calls_fail_at_once_while_the_server_is_down_and_work_once_it_is_back() {
-    let redis = Redis::start().await;
+    let redis = Redis::start_restartable().await;
     let store = store(&redis).await;
 
     store.set(&key(1), "ada".to_owned(), None).await.unwrap();
