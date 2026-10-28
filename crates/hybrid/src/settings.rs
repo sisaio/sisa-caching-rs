@@ -106,7 +106,9 @@ pub(crate) fn check_local_common(local: &InMemoryCacheSettings) -> Result<(), Ca
 #[serde(default, deny_unknown_fields)]
 pub struct RedisBackplaneSettings {
     /// The pub/sub channel, [`DEFAULT_REDIS_CHANNEL`] by default. Every node of one deployment
-    /// uses the same one.
+    /// uses the same one, and each deployment on a shared server needs its own: Redis delivers a
+    /// message to subscribers on every database, so two deployments on one channel evict each
+    /// other's local copies of stores with the same name.
     pub channel: String,
 
     /// How often a subscription is pinged to detect a silently lost connection: 5 seconds by
