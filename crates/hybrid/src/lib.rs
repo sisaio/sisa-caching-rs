@@ -14,7 +14,6 @@
 //! ```no_run
 //! use sisa_caching_core::{CacheStore, WorkerHost};
 //! use sisa_caching_hybrid::{BackplaneWorker, HybridCacheSettings, HybridCacheStore};
-//! use sisa_caching_memory::PurgeWorker;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Local copies live at most 60 seconds, whatever their TTL, unless `local.max_ttl_secs` says
@@ -24,10 +23,9 @@
 //!
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
 //!
-//! // Keep the host alive as long as the cache; dropping it stops the workers.
+//! // Keep the host alive as long as the cache; dropping it stops the worker.
 //! let workers = WorkerHost::new();
 //! workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker.clone()));
-//! workers.register(PurgeWorker::new(cache.local_store().clone()));
 //!
 //! cache.set("user:v1:42", "Ada".to_string(), None).await?;
 //! # Ok(())

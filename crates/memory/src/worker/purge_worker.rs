@@ -1,39 +1,26 @@
 use std::time::Duration;
 
-use sisa_caching_core::{
-    cache::PurgeableStore,
-    worker::{CancellationToken, WorkerService},
-};
+use sisa_caching_core::cache::PurgeableStore;
 
 /// Drops a store's expired entries every `purge_interval_secs` of its settings. With no interval,
 /// or a zero one, it stops at once.
 #[derive(Debug)]
-pub struct PurgeWorker<C> {
+pub(crate) struct PurgeWorker<C> {
     cache: C,
     interval: Option<Duration>,
 }
 
 impl<C: PurgeableStore> PurgeWorker<C> {
-    /// A worker for `cache`. It reads the store's purge interval once, here; register it on a
-    /// `WorkerHost`.
-    pub fn new(cache: C) -> Self {
+    /// A worker for `cache`. It reads the store's purge interval once, here.
+    pub(crate) fn new(cache: C) -> Self {
         let interval = cache
             .purge_interval()
             .filter(|interval| !interval.is_zero());
 
         Self { cache, interval }
     }
-}
 
-impl<C> WorkerService for PurgeWorker<C>
-where
-    C: PurgeableStore + Send + 'static,
-{
-    fn name(&self) -> &'static str {
-        "in-memory-cache-purge-worker"
-    }
-
-    async fn run(self, _shutdown: CancellationToken) {
+    pub(crate) async fn run(self) {
         let Some(interval) = self.interval else {
             return;
         };
@@ -67,7 +54,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_worker_purges_every_interval() {
         let clock = ManualClock::new();
-        let store = purging_every(Some(60)).with_clock(clock.clone());
+        // A copy without the store's `Worker`, so the store doesn't start a purge of its own.
+        let store = purging_every(Some(60))
+            .with_clock(clock.clone())
+            .for_worker();
         let one_second = CacheOptions::with_ttl(Duration::from_secs(1));
 
         store
@@ -76,7 +66,7 @@ mod tests {
             .unwrap();
         clock.advance(Duration::from_secs(1));
 
-        let running = tokio::spawn(PurgeWorker::new(store.clone()).run(CancellationToken::new()));
+        let running = tokio::spawn(PurgeWorker::new(store.clone()).run());
 
         tokio::time::sleep(Duration::from_secs(61)).await;
 
@@ -89,7 +79,7 @@ mod tests {
         for secs in [None, Some(0)] {
             let worker = PurgeWorker::new(purging_every(secs));
 
-            tokio::time::timeout(Duration::from_secs(1), worker.run(CancellationToken::new()))
+            tokio::time::timeout(Duration::from_secs(1), worker.run())
                 .await
                 .expect("the worker returns");
         }
@@ -98,11 +88,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_longest_interval_waits_without_panicking() {
         let worker = PurgeWorker::new(purging_every(Some(MAX_TTL_SECS)));
-        let waited = tokio::time::timeout(
-            Duration::from_secs(3600),
-            worker.run(CancellationToken::new()),
-        )
-        .await;
+        let waited = tokio::time::timeout(Duration::from_secs(3600), worker.run()).await;
 
         assert!(waited.is_err(), "the worker keeps waiting");
     }

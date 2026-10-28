@@ -11,12 +11,12 @@ use crate::{
     settings::CacheSettings,
 };
 
-/// A store that can drop its expired entries on demand, for a purge worker.
+/// A store that can drop its expired entries on demand, as its own purge task or a scheduler does.
 pub trait PurgeableStore {
     /// Drops expired entries and returns how many.
     fn purge(&self) -> usize;
 
-    /// How often a purge worker should call `purge`. `None` or zero means never.
+    /// How often the store's own purge task calls `purge`. `None` or zero means never.
     fn purge_interval(&self) -> Option<Duration>;
 }
 

@@ -30,22 +30,23 @@
 //! ```
 //!
 //! An expired entry reads as a miss and stays until it is overwritten, a full store trims, or a
-//! purge drops it. Run a [`PurgeWorker`] on a `WorkerHost` for that. It purges every
-//! `purge_interval_secs` of the store's settings, 60 seconds by default:
+//! purge drops it. The store purges every `purge_interval_secs` of its settings, 60 seconds by
+//! default, on a task it starts on its first write inside a tokio runtime and stops when its last
+//! clone drops. To purge on a schedule of your own, turn that off and call `purge`:
 //!
-//! ```no_run
-//! # use sisa_caching_core::WorkerHost;
-//! # use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore, PurgeWorker};
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! ```
+//! use sisa_caching_core::cache::PurgeableStore;
+//! use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
+//!
 //! let cache = InMemoryCacheStore::new("app")?.with_settings(InMemoryCacheSettings {
-//!     purge_interval_secs: Some(30),
+//!     purge_interval_secs: None,
 //!     ..Default::default()
 //! })?;
 //!
-//! let workers = WorkerHost::new();
-//! workers.register(PurgeWorker::new(cache.clone()));
-//! # Ok(())
-//! # }
+//! // From your own scheduler:
+//! let removed = cache.purge();
+//! # assert_eq!(removed, 0);
+//! # Ok::<(), sisa_caching_core::CacheError>(())
 //! ```
 
 #![forbid(unsafe_code)]
@@ -53,8 +54,7 @@
 
 pub mod settings;
 pub mod store;
-pub mod worker;
+mod worker;
 
 pub use settings::InMemoryCacheSettings;
 pub use store::InMemoryCacheStore;
-pub use worker::PurgeWorker;

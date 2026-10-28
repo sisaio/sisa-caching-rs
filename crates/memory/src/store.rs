@@ -18,9 +18,10 @@ use sisa_caching_core::{
     locker::Locker,
     metrics::{Layer, METRICS},
     settings::CacheSettings,
+    worker::Worker,
 };
 
-use crate::settings::InMemoryCacheSettings;
+use crate::{settings::InMemoryCacheSettings, worker::PurgeWorker};
 
 /// A stored value of any type. A read asks for the type it expects and gets it back, or an error.
 type Erased = Arc<dyn Any + Send + Sync>;
@@ -89,6 +90,10 @@ impl StoredEntry {
 /// An in-process store. One store holds values of every type; `get::<User>` and `set(&key, user,
 /// None)` name the type per call, and a read with the wrong type fails with
 /// [`CacheError::TypeMismatch`].
+///
+/// The store drops its expired entries every `purge_interval_secs` of its settings, on a task it
+/// starts on its first write inside a tokio runtime. The task stops when the store's last clone
+/// drops.
 #[derive(Clone)]
 pub struct InMemoryCacheStore {
     name: KeyPrefix,
@@ -96,6 +101,7 @@ pub struct InMemoryCacheStore {
     settings: InMemoryCacheSettings,
     entries: Arc<Entries>,
     locker: Arc<Locker>,
+    worker: Worker,
 }
 
 /// The name, the settings and how many entries it holds; never a value.
@@ -120,6 +126,7 @@ impl InMemoryCacheStore {
             settings: InMemoryCacheSettings::default(),
             entries: Arc::new(Entries::new(1)),
             locker: Arc::default(),
+            worker: Worker::new(),
         })
     }
 
@@ -136,6 +143,8 @@ impl InMemoryCacheStore {
     pub fn with_settings(mut self, settings: InMemoryCacheSettings) -> Result<Self, CacheError> {
         settings.validate()?;
         self.entries = Arc::new(Entries::new(settings.shards()));
+        // New entries need a purge of their own; the store this came from keeps its own.
+        self.worker = Worker::new();
         self.settings = settings;
 
         Ok(self)
@@ -192,6 +201,15 @@ impl InMemoryCacheStore {
         // Let the next trim start, then free what this one dropped.
         drop(trimming);
         drop(removed);
+    }
+
+    /// A copy that shares the entries but not the `Worker`, for the store's purge worker, which
+    /// would otherwise keep itself running after the store's last clone drops.
+    pub(crate) fn for_worker(&self) -> Self {
+        Self {
+            worker: Worker::none(),
+            ..self.clone()
+        }
     }
 
     /// Takes out every entry `pick` chooses, one map at a time. The caller frees them.
@@ -293,6 +311,13 @@ impl CacheStore for InMemoryCacheStore {
         key: &str,
         entry: CacheEntry<CV>,
     ) -> Result<(), CacheError> {
+        // Entries only come in here, so the purge starts with the first one.
+        if self.settings.purge_interval().is_some() {
+            self.worker.start_once("in-memory-cache-purge-worker", || {
+                PurgeWorker::new(self.for_worker()).run()
+            });
+        }
+
         let now = self.clock.instant();
         // The store holds an entry for its remaining lifetime, or `max_ttl_secs` if that is
         // shorter.
@@ -393,7 +418,7 @@ mod tests {
     use futures_util::{FutureExt, future::join_all};
     use serde::{Deserialize, Serialize};
     use sisa_caching_core::{CacheKey, CacheOptions};
-    use sisa_caching_testing::ManualClock;
+    use sisa_caching_testing::{ManualClock, eventually};
 
     use super::*;
 
@@ -688,6 +713,77 @@ mod tests {
 
         assert_eq!(store.purge(), 2);
         assert_eq!(held(&store, 1..4).await, [3]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_store_purges_on_its_own_from_its_first_write() {
+        let clock = ManualClock::new();
+        let store = store(&clock, InMemoryCacheSettings::default());
+
+        store.set(&key(1), 1_u32, ttl(1)).await.unwrap();
+        clock.advance(secs(1));
+        tokio::time::sleep(secs(61)).await;
+
+        assert_eq!(store.purge(), 0, "its own worker already purged it");
+    }
+
+    #[tokio::test]
+    async fn the_purge_stops_when_the_last_clone_drops() {
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let clone = store.clone();
+        let entries = Arc::downgrade(&store.entries);
+
+        store.set(&key(1), 1_u32, None).await.unwrap();
+        drop(store);
+        drop(clone);
+
+        eventually("the worker drops its copy", || async {
+            entries.upgrade().is_none()
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn without_a_purge_interval_a_write_starts_no_worker() {
+        let store = store(
+            &ManualClock::new(),
+            InMemoryCacheSettings {
+                purge_interval_secs: None,
+                ..InMemoryCacheSettings::default()
+            },
+        );
+
+        store.set(&key(1), 1_u32, None).await.unwrap();
+
+        assert_eq!(
+            Arc::strong_count(&store.entries),
+            1,
+            "no worker holds a copy"
+        );
+    }
+
+    #[test]
+    fn a_write_outside_a_runtime_starts_no_purge_until_one_inside() {
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+
+        // The memory store never waits, so its calls finish on the first poll.
+        store
+            .set(&key(1), 1_u32, None)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            Arc::strong_count(&store.entries),
+            1,
+            "no worker holds a copy"
+        );
+
+        runtime.block_on(store.set(&key(2), 2_u32, None)).unwrap();
+        assert_eq!(Arc::strong_count(&store.entries), 2, "the worker holds one");
     }
 
     #[tokio::test]
