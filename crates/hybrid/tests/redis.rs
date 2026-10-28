@@ -356,16 +356,28 @@ async fn a_closed_subscription_clears_the_copies_and_subscribes_again() {
     let writer = node(&redis).await;
     let reader = node(&redis).await;
 
-    writer.set(&key(1), "old".to_owned(), None).await.unwrap();
-    reader.get::<String>(&key(1)).await.unwrap();
+    // Written straight to Redis, so no invalidation is on its way, and only a closed
+    // subscription clears these copies.
+    writer
+        .distributed_store()
+        .set(&key(1), "old".to_owned(), None)
+        .await
+        .unwrap();
+    for node in [&writer, &reader] {
+        node.get::<String>(&key(1)).await.unwrap();
+        assert_eq!(local_value(node, &key(1)).await.as_deref(), Some("old"));
+    }
 
     assert_eq!(
         redis.drop_subscriptions().await,
         2,
         "one subscription per node"
     );
-    eventually("the reader clears its copies", || async {
-        local_value(&reader, &key(1)).await.is_none()
+    // A node can see its connection close a while after the kill returns, so each wait is for
+    // something the nodes did: clearing their copies once they see it, then subscribing again.
+    eventually("both nodes clear their copies", || async {
+        local_value(&writer, &key(1)).await.is_none()
+            && local_value(&reader, &key(1)).await.is_none()
     })
     .await;
     eventually("both nodes subscribe again", || async {
