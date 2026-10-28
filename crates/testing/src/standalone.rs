@@ -14,11 +14,28 @@ use crate::server::{Server, image, wait_for_ping};
 pub struct Redis {
     container: ContainerAsync<GenericImage>,
     url: String,
+    restartable: bool,
 }
 
 impl Redis {
+    /// A server on a host port Docker picks.
     pub async fn start() -> Self {
-        // A host port of its own, so the server keeps its address after `restart`.
+        let container = image()
+            .with_exposed_port(6379.tcp())
+            .with_cmd(Server::current().serve(6379))
+            .start()
+            .await
+            .expect("Docker must be running to start Redis for the tests");
+        let port = container.get_host_port_ipv4(6379).await.unwrap();
+
+        Self::ready(container, port, false).await
+    }
+
+    /// A server that keeps its address across [`stop`](Self::stop) and [`restart`](Self::restart).
+    /// Docker gives a restarted container a new host port unless it was told one, so this picks a
+    /// free port first. Another process can take that port before Docker binds it, so only tests
+    /// that restart the server use this.
+    pub async fn start_restartable() -> Self {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -30,9 +47,15 @@ impl Redis {
             .start()
             .await
             .expect("Docker must be running to start Redis for the tests");
+
+        Self::ready(container, port, true).await
+    }
+
+    async fn ready(container: ContainerAsync<GenericImage>, port: u16, restartable: bool) -> Self {
         let redis = Self {
             container,
             url: format!("redis://127.0.0.1:{port}"),
+            restartable,
         };
 
         redis.wait_until_ready().await;
@@ -50,6 +73,10 @@ impl Redis {
 
     /// Starts a stopped server again at the same address, and waits until it answers.
     pub async fn restart(&self) {
+        assert!(
+            self.restartable,
+            "only a server from `Redis::start_restartable` keeps its address"
+        );
         self.container.start().await.unwrap();
         self.wait_until_ready().await;
     }
