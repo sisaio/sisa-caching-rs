@@ -8,6 +8,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
+# The tests use sisa-caching-testing, which isn't published, so a downloaded crate couldn't
+# build them.
+exclude = ["tests/"]
 keywords = ["cache", "redis", "valkey"]
 categories = ["caching", "database", "asynchronous"]
 
