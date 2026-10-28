@@ -1,11 +1,17 @@
-//! The in-memory store's reads and writes, alone and from many tasks at once.
+//! The in-memory store's reads and writes, alone and from many tasks at once, and the calls that
+//! walk every entry of a large store.
 
-use std::{hint::black_box, time::Instant};
+use std::{
+    hint::black_box,
+    ops::Range,
+    time::{Duration, Instant},
+};
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use sisa_caching_benches::{User, key, user};
-use sisa_caching_core::cache::CacheStore;
+use sisa_caching_core::cache::{CacheOptions, CacheStore, PurgeableStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
+use sisa_caching_testing::ManualClock;
 use tokio::runtime::Runtime;
 
 fn store(shards: usize) -> InMemoryCacheStore {
@@ -16,6 +22,20 @@ fn store(shards: usize) -> InMemoryCacheStore {
             ..InMemoryCacheSettings::default()
         })
         .unwrap()
+}
+
+/// Writes a user under each id, expiring after `ttl` if one is given.
+fn fill(runtime: &Runtime, store: &InMemoryCacheStore, ids: Range<u64>, ttl: Option<Duration>) {
+    let options = ttl.map(CacheOptions::with_ttl);
+
+    runtime.block_on(async {
+        for id in ids {
+            store
+                .set(&key(id), user(id), options.clone())
+                .await
+                .unwrap();
+        }
+    });
 }
 
 fn single(c: &mut Criterion) {
@@ -60,11 +80,7 @@ fn parallel(c: &mut Criterion) {
     for shards in [1, 16] {
         let store = store(shards);
 
-        for id in 0..TASKS {
-            runtime
-                .block_on(store.set(&key(id), user(id), None))
-                .unwrap();
-        }
+        fill(&runtime, &store, 0..TASKS, None);
 
         group.bench_function(BenchmarkId::new("get hit, shards", shards), |b| {
             b.to_async(&runtime).iter_custom(|iters| {
@@ -98,5 +114,82 @@ fn parallel(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, single, parallel);
+/// The calls that walk every entry of one map, at a million entries. Each holds that map's lock,
+/// and the async thread it runs on, until it is done.
+fn large(c: &mut Criterion) {
+    const ENTRIES: u64 = 1_000_000;
+
+    let runtime = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("memory 1M entries");
+
+    // Each call takes milliseconds, and some need a full store rebuilt before them.
+    group
+        .sample_size(10)
+        .sampling_mode(SamplingMode::Flat)
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(3));
+
+    let filled = store(1);
+
+    fill(&runtime, &filled, 0..ENTRIES, None);
+    group.bench_function("remove_prefix, nothing matches", |b| {
+        b.to_async(&runtime)
+            .iter(|| async { filled.remove_prefix(black_box("other")).await.unwrap() });
+    });
+    group.bench_function("purge, nothing expired", |b| b.iter(|| filled.purge()));
+    drop(filled);
+
+    group.bench_function("purge, every entry expired", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+
+            for _ in 0..iters {
+                let clock = ManualClock::new();
+                let expired = store(1).with_clock(clock.clone());
+
+                fill(&runtime, &expired, 0..ENTRIES, Some(Duration::from_secs(1)));
+                clock.advance(Duration::from_secs(2));
+
+                let start = Instant::now();
+
+                black_box(expired.purge());
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    // A trim leaves nine tenths of the cap, so each timed write first tops the store up to it.
+    let full = InMemoryCacheStore::new("app")
+        .unwrap()
+        .with_settings(InMemoryCacheSettings {
+            max_entries: Some(ENTRIES as usize),
+            ..InMemoryCacheSettings::default()
+        })
+        .unwrap();
+    let mut next = ENTRIES - ENTRIES / 10;
+
+    fill(&runtime, &full, 0..next, None);
+    group.bench_function("set that trims", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+
+            for _ in 0..iters {
+                fill(&runtime, &full, next..next + ENTRIES / 10, None);
+                next += ENTRIES / 10;
+
+                let (over, value) = (key(next), user(next));
+                let start = Instant::now();
+
+                runtime.block_on(full.set(&over, value, None)).unwrap();
+                total += start.elapsed();
+                next += 1;
+            }
+            total
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(benches, single, parallel, large);
 criterion_main!(benches);
