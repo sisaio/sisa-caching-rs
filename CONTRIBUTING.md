@@ -3,18 +3,19 @@
 ## Build and check
 
 The toolchain is pinned in `rust-toolchain.toml`; the minimum supported Rust is 1.89. Before a
-PR, run what CI runs:
+PR, run what CI runs. `--locked` makes a command fail instead of quietly rewriting `Cargo.lock`,
+as in CI; a dependency change updates the lock file on purpose and commits it.
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo clippy -p sisa-caching-redis -p sisa-caching-hybrid --all-targets --features tls-native-tls -- -D warnings
-for f in "" memory redis hybrid tls-rustls tls-native-tls; do cargo check -p sisa-caching --features "$f"; done
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-cargo +1.89 check --workspace --all-targets --all-features
-cargo test --workspace --all-features
-cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy -p sisa-caching-redis -p sisa-caching-hybrid --all-targets --features tls-native-tls --locked -- -D warnings
+for f in "" memory redis hybrid tls-rustls tls-native-tls; do cargo check -p sisa-caching --features "$f" --locked; done
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
+cargo +1.89 check --workspace --all-targets --all-features --locked
+cargo test --workspace --all-features --locked
+cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
 cargo deny check
 ```
 
