@@ -81,8 +81,8 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
     ///
     /// The store reads through to the distributed store until a
     /// [`BackplaneWorker`](crate::BackplaneWorker) has subscribed for it, so register one on a
-    /// `WorkerHost`. Register a `PurgeWorker` for the local store too if it should drop expired
-    /// copies that are never read again. The [crate docs](crate) show the whole setup.
+    /// `WorkerHost`. The local store drops expired copies on its own. The [crate docs](crate)
+    /// show the whole setup.
     pub fn new(
         local_store: InMemoryCacheStore,
         distributed_store: D,
@@ -202,9 +202,8 @@ async fn publish<B: Backplane>(state: Arc<State<B>>, message: BackplaneMessage) 
 impl RedisHybridCacheStore {
     /// Connects every part to one Redis server, such as `redis://127.0.0.1:6379` (`rediss://`
     /// with the `tls-rustls` or `tls-native-tls` feature): the local layer, the Redis store and
-    /// the backplane, each with its part of `settings`. `info` is a URL or a `redis::ConnectionInfo`. Register the
-    /// workers next: a `BackplaneWorker` with `settings.worker`, and a `PurgeWorker` on the local
-    /// store. Its connections use `connection_config`: while Redis is down a call fails at once.
+    /// the backplane, each with its part of `settings`. `info` is a URL or a `redis::ConnectionInfo`. Register a
+    /// `BackplaneWorker` with `settings.worker` next. Its connections use `connection_config`: while Redis is down a call fails at once.
     /// For other timeouts, a client built by hand, a cluster or Sentinel, build the parts and use
     /// `new`.
     pub async fn connect(

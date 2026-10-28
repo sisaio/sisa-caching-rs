@@ -16,7 +16,7 @@
 
 use sisa_caching::{
     BackplaneWorker, CacheSettings, HybridCacheSettings, HybridCacheStore, InMemoryCacheSettings,
-    PurgeWorker, RedisCacheSettings, WorkerHost,
+    RedisCacheSettings, WorkerHost,
 };
 
 #[tokio::main]
@@ -52,7 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // skip the local layer, so serving right away is safe.
     let workers = WorkerHost::new();
     workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker));
-    workers.register(PurgeWorker::new(cache.local_store().clone()));
 
     let served = users_api::serve(users_api::router(cache)).await;
     workers.shutdown().await;

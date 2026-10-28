@@ -1,5 +1,5 @@
-//! The worker that drops expired entries.
+//! The worker that drops expired entries, which each store starts for itself.
 
 mod purge_worker;
 
-pub use purge_worker::PurgeWorker;
+pub(crate) use purge_worker::PurgeWorker;

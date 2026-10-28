@@ -7,7 +7,7 @@
 //!
 //! | Feature | Adds |
 //! | --- | --- |
-//! | `memory` | `InMemoryCacheStore` and its `PurgeWorker` |
+//! | `memory` | `InMemoryCacheStore` |
 //! | `redis` | `RedisCacheStore`, and the `redis` crate it is built on |
 //! | `hybrid` | `HybridCacheStore` and its `BackplaneWorker`; turns on `memory` and `redis` |
 //! | `tls-rustls` | `rediss://` URLs through rustls; turns on `redis` |
@@ -17,14 +17,10 @@
 //! # #[cfg(feature = "memory")]
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use sisa_caching::{CacheStore, InMemoryCacheStore, PurgeWorker, WorkerHost};
+//! use sisa_caching::{CacheStore, InMemoryCacheStore};
 //!
+//! // From its first write on, it drops expired entries nobody reads again every 60 seconds.
 //! let cache = InMemoryCacheStore::new("app")?;
-//!
-//! // Stores start no task of their own: this one drops expired entries nobody reads again,
-//! // every 60 seconds. Keep the host as long as the cache.
-//! let workers = WorkerHost::new();
-//! workers.register(PurgeWorker::new(cache.clone()));
 //!
 //! let name = cache
 //!     .get_or_set("user:v1:42", || async { Ok::<_, std::io::Error>("Ada".to_string()) }, None)
@@ -37,22 +33,19 @@
 //! # fn main() {}
 //! ```
 //!
-//! A hybrid on one Redis server, with the two workers it needs:
+//! A hybrid on one Redis server, with the worker it needs:
 //!
 //! ```no_run
 //! # #[cfg(feature = "hybrid")]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use sisa_caching::{
-//!     BackplaneWorker, CacheStore, HybridCacheSettings, HybridCacheStore, PurgeWorker, WorkerHost,
-//! };
+//! use sisa_caching::{BackplaneWorker, CacheStore, HybridCacheSettings, HybridCacheStore, WorkerHost};
 //!
 //! let settings = HybridCacheSettings::default();
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
 //!
-//! // Keep the host alive as long as the cache; dropping it stops the workers.
+//! // Keep the host alive as long as the cache; dropping it stops the worker.
 //! let workers = WorkerHost::new();
 //! workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker.clone()));
-//! workers.register(PurgeWorker::new(cache.local_store().clone()));
 //!
 //! cache.set("user:v1:42", "Ada".to_string(), None).await?;
 //! # Ok(())
@@ -75,7 +68,7 @@ pub use sisa_caching_core::{
 };
 
 #[cfg(feature = "memory")]
-pub use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore, PurgeWorker};
+pub use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
 
 #[cfg(feature = "redis")]
 pub use sisa_caching_redis::{

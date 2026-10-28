@@ -11,16 +11,14 @@
 //! curl localhost:3000/users/count  # reloaded: 4
 //! ```
 
-use sisa_caching::{
-    CacheSettings, InMemoryCacheSettings, InMemoryCacheStore, PurgeWorker, WorkerHost,
-};
+use sisa_caching::{CacheSettings, InMemoryCacheSettings, InMemoryCacheStore};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry = users_api::init_telemetry("axum-memory")?;
-    // Up to 10,000 entries, each for five minutes unless a write says otherwise. Expired entries
-    // are swept every minute. A loader stuck longer than five seconds stops holding up other
-    // requests for its key.
+    // Up to 10,000 entries, each for five minutes unless a write says otherwise. The store sweeps
+    // out expired entries every minute, from its first write on. A loader stuck longer than five
+    // seconds stops holding up other requests for its key.
     let cache = InMemoryCacheStore::new("example")?.with_settings(InMemoryCacheSettings {
         common: CacheSettings {
             ttl_secs: Some(300),
@@ -32,11 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     })?;
 
-    let workers = WorkerHost::new();
-    workers.register(PurgeWorker::new(cache.clone()));
-
     let served = users_api::serve(users_api::router(cache)).await;
-    workers.shutdown().await;
 
     telemetry.shutdown();
 
