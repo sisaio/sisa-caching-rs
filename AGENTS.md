@@ -6,20 +6,8 @@ adds what an agent working in this repo needs on top.
 
 ## Before you push
 
-Run what CI runs, and check exit codes rather than piped output:
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo clippy -p sisa-caching-redis -p sisa-caching-hybrid --all-targets --features tls-native-tls -- -D warnings
-for f in "" memory redis hybrid tls-rustls tls-native-tls; do cargo check -p sisa-caching --features "$f"; done
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-cargo +1.89 check --workspace --all-targets --all-features
-cargo test --workspace --all-features   # needs Docker for the Redis tests
-cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls
-cargo deny check
-```
+Run the checks in [Build and check](CONTRIBUTING.md#build-and-check), as CI runs them, and check
+exit codes rather than piped output. The Redis tests need Docker.
 
 ## Git and PRs
 
