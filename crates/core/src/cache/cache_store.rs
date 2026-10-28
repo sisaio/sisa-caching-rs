@@ -131,6 +131,11 @@ pub trait CacheStore: Send + Sync {
     /// Removes every key under `prefix`, matched by whole levels (`user` removes `user:42`, not
     /// `users:42`, nor the key `user` itself), and returns how many. Fails with
     /// [`CacheError::InvalidKey`] when `prefix` is empty or has an empty level.
+    ///
+    /// It visits every key the store holds, not only those under `prefix`: a memory store walks
+    /// all its entries, and a Redis store runs `SCAN` over the whole database on each primary. A
+    /// hybrid store walks Redis once and the memory layer of every node, and reads in progress on
+    /// those nodes keep no local copy. Use [`remove`](Self::remove) for keys you can name.
     fn remove_prefix(
         &self,
         prefix: &str,

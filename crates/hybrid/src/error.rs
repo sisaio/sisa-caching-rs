@@ -21,7 +21,21 @@ pub enum HybridCacheError {
         distributed: KeyPrefix,
     },
 
-    /// An error from the distributed store.
+    /// An error from the distributed store, boxed. For a
+    /// [`RedisHybridCacheStore`](crate::RedisHybridCacheStore), downcast it to reach the Redis
+    /// error:
+    ///
+    /// ```
+    /// use sisa_caching_hybrid::HybridCacheError;
+    /// use sisa_caching_redis::RedisCacheError;
+    ///
+    /// fn redis_error(error: &HybridCacheError) -> Option<&RedisCacheError> {
+    ///     match error {
+    ///         HybridCacheError::Distributed(source) => source.downcast_ref(),
+    ///         _ => None,
+    ///     }
+    /// }
+    /// ```
     #[error("distributed layer: {0}")]
     Distributed(#[source] BoxError),
 
