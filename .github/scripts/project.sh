@@ -48,8 +48,8 @@ done
 # title|description
 milestones=(
   "0.1.0|First release on crates.io."
-  "0.2.0|API polish before 1.0: &str keys, connecting from a URL, nested settings."
-  "0.3.0|Redis Cluster and Sentinel."
+  "0.2.0|Breaking: stores run their own workers, and hybrid nodes detect lost invalidations."
+  "0.3.0|Picked from the roadmap's Later list, as users ask for it."
 )
 # Existing milestones keep their number, issues and state; only the description is updated.
 existing=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --jq '.[] | "\(.title)|\(.number)"')
