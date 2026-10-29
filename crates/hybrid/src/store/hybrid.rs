@@ -373,11 +373,12 @@ impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
     async fn get_entry<CV: CacheValue>(&self, key: &str) -> Result<Option<CacheEntry<CV>>> {
         self.start_worker();
 
-        let (generation, local) = self.state.read::<CV>(key).await;
-
-        let entry = match local {
+        let entry = match self.state.read::<CV>(key).await {
             Some(entry) => Some(entry),
             None => {
+                // Taken before the distributed read, so an invalidation that comes in during it
+                // keeps the value out of the local layer.
+                let generation = self.state.generation(key);
                 let entry = self
                     .distributed_store
                     .get_entry::<CV>(key)
