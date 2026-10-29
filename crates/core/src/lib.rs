@@ -27,9 +27,9 @@
 //! adds info spans that carry only the operation, never a key: `hybrid write`, `hybrid
 //! apply_invalidation` on the nodes that receive it, and `hybrid resync`. A failed call marks its
 //! span as an error. Stores log only the errors they swallow, as warnings that name the store but
-//! never a key, such as a value that can't be stored or an invalidation that can't be sent. They
-//! count hits, misses, loads and evictions through the OpenTelemetry metrics API; the [`metrics`]
-//! module lists them.
+//! never a key, such as an invalidation that can't be sent; `get_or_set` logs the first of a run of
+//! failed store calls, and the success that ends it. They count hits, misses, loads, failed store
+//! calls and evictions through the OpenTelemetry metrics API; the [`metrics`] module lists them.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

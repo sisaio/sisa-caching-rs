@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard},
+    sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, atomic::AtomicBool},
 };
 
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -11,9 +11,14 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 ///
 /// `lock` calls for one key wait on each other; calls for different keys never do. `try_lock`
 /// never waits.
+///
+/// It also keeps whether the store's last read and last write inside `get_or_set` failed, so a
+/// run of failures logs once.
 #[derive(Debug, Default)]
 pub struct Locker {
     locks: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub(crate) reads_failing: AtomicBool,
+    pub(crate) writes_failing: AtomicBool,
 }
 
 /// Holds the lock for one key until dropped.

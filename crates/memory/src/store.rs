@@ -450,7 +450,7 @@ mod tests {
     use futures_util::{FutureExt, future::join_all};
     use serde::{Deserialize, Serialize};
     use sisa_caching_core::{CacheKey, CacheOptions};
-    use sisa_caching_testing::{ManualClock, eventually};
+    use sisa_caching_testing::{Logs, ManualClock, eventually};
     use tokio::sync::oneshot;
 
     use super::*;
@@ -1101,47 +1101,9 @@ mod tests {
         );
     }
 
-    /// The fields of every event at the info level or above, as production logs would carry them.
-    #[derive(Clone, Default)]
-    struct InfoLogs(Arc<Mutex<Vec<String>>>);
-
-    impl tracing::Subscriber for InfoLogs {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            *metadata.level() <= tracing::Level::INFO
-        }
-
-        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-
-        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-
-        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-
-        fn event(&self, event: &tracing::Event<'_>) {
-            struct Fields<'a>(&'a mut Vec<String>);
-
-            impl tracing::field::Visit for Fields<'_> {
-                fn record_debug(
-                    &mut self,
-                    field: &tracing::field::Field,
-                    value: &dyn std::fmt::Debug,
-                ) {
-                    self.0.push(format!("{field}={value:?}"));
-                }
-            }
-
-            event.record(&mut Fields(&mut self.0.lock().unwrap()));
-        }
-
-        fn enter(&self, _: &tracing::span::Id) {}
-
-        fn exit(&self, _: &tracing::span::Id) {}
-    }
-
     #[tokio::test]
     async fn warnings_name_the_store_but_never_the_key() {
-        let logs = InfoLogs::default();
+        let logs = Logs::default();
         let _logging = tracing::subscriber::set_default(logs.clone());
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
         let email = key("ada@example.com");
@@ -1157,10 +1119,38 @@ mod tests {
             .await
             .unwrap();
 
-        let logged = logs.0.lock().unwrap().join(" ");
+        let logged = logs.lines().join(" ");
 
         assert!(logged.contains("store=app"), "{logged}");
         assert!(!logged.contains("ada@example.com"), "{logged}");
+    }
+
+    #[tokio::test]
+    async fn get_or_set_logs_a_run_of_failed_reads_once_and_the_read_that_ends_it() {
+        let logs = Logs::default();
+        let _logging = tracing::subscriber::set_default(logs.clone());
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let load = || async { Ok::<_, Infallible>("ada".to_owned()) };
+
+        // Each key holds another type, so both reads of each call fail.
+        for id in 0..3 {
+            store.set(&key(id), 42_u64, None).await.unwrap();
+            store.get_or_set(&key(id), load, None).await.unwrap();
+        }
+        // What the last call stored over its key reads.
+        store.get_or_set(&key(2), load, None).await.unwrap();
+
+        let lines: Vec<String> = logs
+            .lines()
+            .into_iter()
+            .filter(|line| line.contains("operation="))
+            .collect();
+
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("WARN"), "{lines:?}");
+        assert!(lines[0].contains(r#"operation="get""#), "{lines:?}");
+        assert!(lines[1].starts_with("INFO"), "{lines:?}");
+        assert!(lines[1].contains("store calls work again"), "{lines:?}");
     }
 
     #[tokio::test]

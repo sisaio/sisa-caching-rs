@@ -279,7 +279,8 @@ variant without breaking a `match`.
 
 Some failures are logged as warnings and not returned, because the caller still gets a correct
 answer:
-- `get_or_set` couldn't read what the key holds (it stores over it) or couldn't store what it loaded;
+- `get_or_set` couldn't read what the key holds (it stores over it) or couldn't store what it
+  loaded, logged at the first failure of a run and counted each time;
 - `get_or_set`'s lock wait timed out;
 - a refresh failed;
 - a hybrid publish failed after three tries;

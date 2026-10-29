@@ -26,3 +26,5 @@ tokio = { workspace = true }
 
 # A CA, server and client certificate for the TLS server.
 rcgen = { workspace = true }
+# A subscriber that keeps what a test logs.
+tracing = { workspace = true }
