@@ -83,6 +83,9 @@ impl BackplaneWorker {
             Gap::Unknown => {
                 tracing::debug!(%store, node = %message.source, "a node's first heartbeat counts invalidations this subscription never got; clearing the local layer");
             }
+            Gap::Untracked => {
+                tracing::warn!(%store, node = %message.source, seq = message.seq, "a node's sequence numbers can't be tracked; clearing the local layer");
+            }
         }
         self.state.resync(true).await;
     }
@@ -229,6 +232,11 @@ async fn send_heartbeats(state: Arc<State>, backplane: Arc<RedisBackplane>, inte
     }
 }
 
+/// Numbers one node may have received above its last heartbeat before it is tracked afresh.
+const RECEIVED_LIMIT: usize = 1 << 16;
+/// Nodes tracked at once before every node is tracked afresh.
+const NODE_LIMIT: usize = 1 << 12;
+
 /// What one subscription has heard from the other nodes of its store. A node is tracked from the
 /// first message this subscription gets from it. Nothing says which of its earlier numbers were
 /// sent before the subscribe, so its first heartbeat clears the local layer unless every number up
@@ -258,6 +266,9 @@ enum Gap {
     /// It is the node's first, and counts numbers this subscription never got: sent before the
     /// subscribe, or lost since.
     Unknown,
+    /// The numbers can't be tracked: the last one there is, or more than the limits hold. The
+    /// node, or every node, is tracked afresh from the clear on.
+    Untracked,
 }
 
 impl Peers {
@@ -272,6 +283,19 @@ impl Peers {
     /// number this subscription never got. A message without a `seq` is not tracked.
     fn receive(&mut self, message: &BackplaneMessage) -> Option<Gap> {
         let seq = message.seq?;
+
+        // Nothing counts past the last number, so no heartbeat could vouch for what follows it.
+        if seq == u64::MAX {
+            self.nodes.remove(&message.source);
+
+            return Some(Gap::Untracked);
+        }
+        if !self.nodes.contains_key(&message.source) && self.nodes.len() >= NODE_LIMIT {
+            self.nodes.clear();
+
+            return Some(Gap::Untracked);
+        }
+
         let peer = self
             .nodes
             .entry(message.source.clone())
@@ -284,6 +308,15 @@ impl Peers {
         if message.invalidation != Invalidation::Heartbeat {
             if peer.finished.is_none_or(|finished| seq > finished) {
                 peer.received.insert(seq);
+            }
+
+            // A heartbeat that stays below what keeps arriving, as while one publish is stuck,
+            // vouches for none of it. The clear covers every number up to the highest received.
+            if peer.received.len() > RECEIVED_LIMIT {
+                peer.finished = peer.received.last().copied();
+                peer.received.clear();
+
+                return Some(Gap::Untracked);
             }
 
             return None;
@@ -457,6 +490,74 @@ mod tests {
             "1 to 4 came before the subscribe, or were lost since"
         );
         assert_eq!(started_before.receive(&heartbeat(6)), Some(Gap::Missing));
+    }
+
+    #[test]
+    fn the_last_number_there_is_clears_and_tracks_the_node_afresh() {
+        let mut peers = Peers::new();
+
+        peers.receive(&heartbeat(0));
+        assert_eq!(peers.receive(&heartbeat(u64::MAX)), Some(Gap::Untracked));
+        assert_eq!(peers.receive(&key(u64::MAX)), Some(Gap::Untracked));
+        assert_eq!(
+            peers.receive(&heartbeat(u64::MAX - 1)),
+            Some(Gap::Unknown),
+            "tracked afresh: a first heartbeat"
+        );
+        assert_eq!(peers.receive(&key(u64::MAX - 2)), None, "older than it");
+        assert_eq!(peers.receive(&heartbeat(u64::MAX - 1)), None);
+    }
+
+    #[test]
+    fn numbers_above_a_stalled_heartbeat_are_held_up_to_a_limit() {
+        let mut peers = Peers::new();
+        let held = |peers: &Peers| peers.nodes[&NodeId::new("peer")].received.len();
+
+        peers.receive(&heartbeat(0));
+
+        // Number 1 is stuck, so the heartbeats stay at 0 while 2 and up arrive.
+        for seq in 2..=RECEIVED_LIMIT as u64 + 1 {
+            assert_eq!(peers.receive(&key(seq)), None);
+            assert_eq!(peers.receive(&heartbeat(0)), None);
+        }
+
+        assert_eq!(held(&peers), RECEIVED_LIMIT);
+
+        let last = RECEIVED_LIMIT as u64 + 2;
+
+        assert_eq!(peers.receive(&key(last)), Some(Gap::Untracked));
+        assert_eq!(held(&peers), 0);
+
+        // The clear covered every number up to the last received, 1 included.
+        assert_eq!(peers.receive(&key(1)), None);
+        assert_eq!(peers.receive(&heartbeat(0)), None);
+        assert_eq!(peers.receive(&key(last + 1)), None);
+        assert_eq!(peers.receive(&heartbeat(last + 1)), None);
+        assert_eq!(held(&peers), 0);
+    }
+
+    #[test]
+    fn nodes_past_the_limit_clear_and_are_tracked_afresh() {
+        let mut peers = Peers::new();
+        let from = |node: usize| {
+            let mut message = BackplaneMessage::heartbeat(
+                NodeId::new(format!("node-{node}")),
+                KeyPrefix::new("users").unwrap(),
+                0,
+            );
+
+            message.invalidation = Invalidation::Key("1".to_owned());
+            message.seq = Some(1);
+            message
+        };
+
+        for node in 0..NODE_LIMIT {
+            assert_eq!(peers.receive(&from(node)), None);
+        }
+
+        assert_eq!(peers.receive(&from(0)), None, "a known node");
+        assert_eq!(peers.receive(&from(NODE_LIMIT)), Some(Gap::Untracked));
+        assert!(peers.nodes.is_empty());
     }
 
     #[test]
