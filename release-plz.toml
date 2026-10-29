@@ -1,6 +1,7 @@
-# Releases with release-plz: every push to main updates one release PR, and only merging that PR
-# publishes. The five crates share one version, one changelog at the root, and one `v` tag and
-# GitHub release, all carried by `sisa-caching-core`. Crates with `publish = false` are skipped on
+# Releases with release-plz: the maintainer opens the release PR by running the release workflow,
+# every push to main keeps it up to date, and only merging that PR publishes. The five crates
+# share one version, one changelog at the root, and one `v` tag and GitHub release, all carried by
+# `sisa-caching-core`. Crates with `publish = false` are skipped on
 # their own; listing them here would turn publishing back on and fail the release.
 [workspace]
 release_always = false
@@ -8,7 +9,7 @@ changelog_update = false
 git_release_enable = false
 git_tag_enable = false
 pr_labels = ["release"]
-# Only work users see opens a release PR: a feature, fix, speed-up, revert, or anything marked
+# Only work users see can open a release PR: a feature, fix, speed-up, revert, or anything marked
 # breaking. Dependency bumps (`build(deps)`), docs, CI and refactors wait and ship with the next
 # release; use `fix(deps)` for a bump that should ship on its own, such as a security fix.
 release_commits = '^(feat|fix|perf|revert)|^\w+(\([^)]*\))?!:'

@@ -6,19 +6,24 @@ description: Prepares a release of the sisa-caching crates (versions, changelog,
 # Release
 
 [release.yml](../../../.github/workflows/release.yml) runs release-plz
-([release-plz.toml](../../../release-plz.toml)) on every push to `main`. The five library crates
-share one version, one changelog at the root and one `v<version>` tag.
+([release-plz.toml](../../../release-plz.toml)). The five library crates share one version, one
+changelog at the root and one `v<version>` tag.
 
-- Each push with a `feat`, `fix`, `perf`, `revert` or breaking commit since the last release
-  opens or updates one release PR. Other commits, such as `build(deps)` bumps, wait for the
-  next one (`release_commits` in release-plz.toml).
+- Releases are cut by hand, so each one batches several changes. The maintainer opens the release
+  PR by running the release workflow from the Actions tab (`gh workflow run release.yml`). It
+  opens only if a `feat`, `fix`, `perf`, `revert` or breaking commit landed since the last
+  release; other commits, such as `build(deps)` bumps, ship with it (`release_commits` in
+  release-plz.toml).
+- While the release PR is open, every push to `main` updates it. With none open, a push opens
+  none.
 - The release PR bumps the versions, runs cargo-semver-checks
   against the last published version, and adds a changelog section.
 - Merging the release PR publishes to crates.io, tags `v<version>`, creates the GitHub release
   as a draft, runs the benchmarks, whose table and report go on the draft, and then publishes
   it. Releases are immutable once published, so nothing may change one after that.
 
-The maintainer merges the release PR. An agent never merges it, publishes, or pushes a tag.
+The maintainer starts and merges the release PR. An agent never starts or merges it, publishes, or
+pushes a tag.
 
 ## Preparing the release PR
 
