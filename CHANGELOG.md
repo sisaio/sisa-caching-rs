@@ -80,7 +80,7 @@ All notable changes are listed here. The format follows
   while 0.2 nodes share its channel it keeps dropping its subscription and reads from Redis.
 
 The memory and hybrid benches no longer time key formatting, as 0.1.1's did, so this release's
-benchmark table shows their reads and writes 9 to 37% faster than 0.1.1 although the stores didn't
+benchmark table shows their reads and writes 25 to 53% faster than 0.1.1 although the stores didn't
 change. With the same bench code, 0.2.0 matches 0.1.1, apart from a `get_or_set` hit, about 20%
 faster.
 
