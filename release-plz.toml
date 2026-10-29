@@ -1,10 +1,12 @@
 # Releases with release-plz: the maintainer opens the release PR by running the release workflow,
-# every push to main keeps it up to date, and only merging that PR publishes. The five crates
-# share one version, one changelog at the root, and one `v` tag and GitHub release, all carried by
-# `sisa-caching-core`. Crates with `publish = false` are skipped on
-# their own; listing them here would turn publishing back on and fail the release.
+# and every push to main keeps it up to date. Every push to main also publishes any crate version
+# that isn't on crates.io yet. Only the release PR bumps versions, so merging it publishes, and if
+# that push starts no run, the next push publishes instead. The five crates share one version, one
+# changelog at the root, and one `v` tag and GitHub release, all carried by `sisa-caching-core`.
+# Crates with `publish = false` are skipped on their own; listing them here would turn publishing
+# back on and fail the release.
 [workspace]
-release_always = false
+release_always = true
 changelog_update = false
 git_release_enable = false
 git_tag_enable = false
