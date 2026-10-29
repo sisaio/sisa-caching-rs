@@ -3,7 +3,7 @@
 # benchmarks run first in the same job, so the table compares the two on one machine. The release
 # workflow calls it with the new tag while that release is still a draft, because a published
 # release is immutable and takes no more assets. Run it by hand to see the table in the run's
-# summary without touching a release.
+# summary without touching a release. Only the job that records on the release can write.
 name: bench
 
 on:
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -69,15 +69,37 @@ jobs:
         run: |
           cargo run -p sisa-caching-benches --locked --bin summary -- ${PREVIOUS:+"$PREVIOUS"} > benchmarks.md
           cat benchmarks.md >> "$GITHUB_STEP_SUMMARY"
+          tar -czf criterion-report.tar.gz -C target criterion
+
+      - name: Keep the results for the release
+        if: inputs.tag
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmarks
+          path: |
+            benchmarks.md
+            criterion-report.tar.gz
+          retention-days: 7
+
+  record:
+    name: record on the release
+    needs: bench
+    if: inputs.tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: benchmarks
 
       # Reruns replace the assets and the table instead of adding another.
       - name: Record on the release
-        if: inputs.tag
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          tar -czf criterion-report.tar.gz -C target criterion
           gh release upload "$TAG" benchmarks.md criterion-report.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
           gh release view "$TAG" --json body --jq .body --repo "$GITHUB_REPOSITORY" \
             | sed '/^<!-- benchmarks -->$/,$d' > notes.md
