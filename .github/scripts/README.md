@@ -54,9 +54,11 @@ Both scripts can run any number of times:
   CI.
 - **The `release` environment**, under Settings → Environments, with the maintainer as required
   reviewer and deployments limited to `main`. The publish job waits there until approved.
-- **A trusted publisher on each crate** on crates.io (Settings → Trusted Publishing → Add):
-  owner `sisaio`, repository `sisa-caching-rs`, workflow `release.yml`, environment `release`.
-  Then delete the `CARGO_REGISTRY_TOKEN` secret: no workflow reads it.
+- **A way to publish to crates.io.** Until trusted publishing is set up, the publish job uses the
+  `CARGO_REGISTRY_TOKEN` secret. To switch, add a trusted publisher on each crate on crates.io
+  (Settings → Trusted Publishing → Add): owner `sisaio`, repository `sisa-caching-rs`, workflow
+  `release.yml`, environment `release`. Then delete the secret, and the job uses trusted
+  publishing from the next release on.
 
 ## By hand
 
