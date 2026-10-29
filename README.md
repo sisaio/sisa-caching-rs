@@ -93,7 +93,9 @@ lists every metric and span; the examples show the setup.
 Three axum services serve the same user API from `examples/users-api`, each on a different
 store: `axum-memory`, `axum-redis` and `axum-hybrid`. Each caches a scalar
 (`GET /users/count`), an object (`GET /users/{id}`) and a list (`GET /users`). The Redis and
-hybrid ones need a server at `REDIS_URL` (default `redis://127.0.0.1:6379`).
+hybrid ones need a server at `REDIS_URL` (default `redis://127.0.0.1:6379`). A fourth,
+`axum-config`, runs on whichever store its `CACHE` variable names (`memory`, `redis` or
+`hybrid`), for an application that picks its store from configuration.
 
 ```sh
 cargo run -p axum-memory
