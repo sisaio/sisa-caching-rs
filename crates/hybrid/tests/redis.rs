@@ -314,21 +314,22 @@ async fn a_subscription_that_falls_too_far_behind_ends() {
     let backplane = connect_backplane(&redis, RedisBackplaneSettings::default()).await;
     let mut subscription = backplane.subscribe().await.unwrap();
     let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
+    let mut connection = redis.connection().await;
     let mut publish = redis::pipe();
 
-    // More than the 8,192 messages a subscription holds, all read off the connection before
-    // anything reads the subscription.
-    for _ in 0..20_000 {
+    for _ in 0..1_000 {
         publish
             .cmd("PUBLISH")
             .arg(DEFAULT_REDIS_CHANNEL)
             .arg(&payload)
             .ignore();
     }
-    publish
-        .query_async::<()>(&mut redis.connection().await)
-        .await
-        .unwrap();
+    // More than the 8,192 messages a subscription holds, all read off the connection before
+    // anything reads the subscription. Each batch answers well within the connection's 500 ms
+    // response timeout, even on a slow server.
+    for _ in 0..20 {
+        publish.query_async::<()>(&mut connection).await.unwrap();
+    }
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let error = next(&mut subscription).await.unwrap_err();
