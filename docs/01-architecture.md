@@ -68,7 +68,7 @@ use. `examples` use it; `benches` use every store crate directly.
 | `sisa-caching-redis` | Yes | `RedisCacheStore` | One hash per key with JSON in `value`, over any `RedisConnection`: one server, a cluster or Sentinel |
 | `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane` | A local memory store in front of a distributed `CacheStore`, kept coherent over Redis pub/sub (`RedisBackplane`) by a worker each store runs |
 | `sisa-caching-testing` | No | `ManualClock`, `Redis`, `eventually` | A test clock, a Redis container per test (one server, a cluster, Sentinel or TLS), and a wait-until helper |
-| `examples` | No | | Three axum services over a shared users API, one per store |
+| `examples` | No | | Axum services over a shared users API: one per store, and one that picks its store from configuration |
 | `benches` | No | | Criterion benchmarks for every store and the `summary` table printer |
 
 `memory` and `redis` don't depend on OpenTelemetry directly; they count through `core::metrics`.

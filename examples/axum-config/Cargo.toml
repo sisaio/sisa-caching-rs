@@ -1,0 +1,14 @@
+[package]
+name = "axum-config"
+description = "The users API on the store its configuration picks: memory, Redis or hybrid"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+users-api = { path = "../users-api" }
+sisa-caching = { workspace = true, features = ["memory", "redis", "hybrid"] }
+
+tokio = { workspace = true, features = ["rt-multi-thread"] }
