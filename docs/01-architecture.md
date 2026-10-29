@@ -151,6 +151,27 @@ Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writ
   only while it is subscribed; every subscribe and every loss clears the local layer.
 - Invalidations touch only local layers and generations, never Redis. Each message carries the
   writer's trace context.
+- **Channel:** each store publishes and subscribes on its own pub/sub channel,
+  `<store>:backplane`, so a node gets only the messages of the stores it runs. On a cluster,
+  sharded pub/sub puts each store's channel on the node that owns its slot.
+
+#### Several hybrid stores
+
+One store holds values of every type, so an application usually needs one, such as
+`catalog_hybrid_cache` holding categories, groups and products under their own key prefixes. Run
+a second store, such as `user_hybrid_cache`, when a set of data needs other settings: another
+TTL, another `max_entries`, or another `max_ttl_secs` for its local copies.
+
+Each store has its own local layer, generations, worker, subscription connection and channel, so
+the stores don't affect each other: a burst of writes to one never fills another's subscription
+queue, and a lost subscription clears only its own store's local layer. Each store also sends its
+own heartbeats, one per `heartbeat_interval_ms` per node. Create each store once at startup and
+share it through clones; building one per request would open a subscription each time.
+
+Store names must differ, since the name prefixes every key and names the channel. Redis delivers
+a message to subscribers on every database, so two deployments that share a server, such as
+production and staging, need different store names even on separate databases: `prod:catalog`
+and `staging:catalog`.
 
 ## Data formats
 
@@ -215,19 +236,8 @@ error.
 ### Invalidation message
 
 After each write, a hybrid node publishes one JSON message on its store's pub/sub channel,
-`<store>:backplane`, such as `app:backplane` for a store named `app`. Each store has its own
-channel, so a node gets only its own stores' messages. Redis delivers a message to subscribers on
-every database, so two deployments that share a server need different store names, such as
-`prod:app` and `staging:app`, even on separate databases.
-
-Until 0.4, a node also publishes each message on `sisa-caching:backplane`, the channel every store
-shared in 0.2, so 0.2 nodes keep their copies fresh during a rolling upgrade. It doesn't
-subscribe there: while 0.2 nodes still write, 0.3 nodes miss their invalidations and serve copies
-up to the local `max_ttl_secs` (60 seconds by default) old. If the 0.2 deployment set its own
-`channel`, its nodes miss the 0.3 nodes' messages too, for the same bound. A writer in another
-language publishes on the store's channel.
-
-The message:
+`<store>:backplane`, such as `app:backplane` for a store named `app`. A writer in another language
+publishes on the same channel:
 
 | Field | Required | Value |
 | --- | --- | --- |
