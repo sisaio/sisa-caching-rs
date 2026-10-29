@@ -135,12 +135,13 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// so local reads come on, and the `sisa.caching.backplane.connected` gauge reports, before
     /// the first call. It does nothing outside a tokio runtime or once the worker has started.
     pub fn start_worker(&self) {
-        self.worker.start("hybrid-cache-backplane-worker", || {
-            let state = Arc::clone(&self.state);
-            let backplane = Arc::clone(&self.backplane);
+        self.worker
+            .start("hybrid-cache-backplane-worker", self.name(), || {
+                let state = Arc::clone(&self.state);
+                let backplane = Arc::clone(&self.backplane);
 
-            BackplaneWorker::new(state, backplane, self.worker_settings.clone()).run()
-        });
+                BackplaneWorker::new(state, backplane, self.worker_settings.clone()).run()
+            });
     }
 
     /// This store's id, shared by its clones. It goes out with every invalidation, so the store

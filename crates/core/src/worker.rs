@@ -7,6 +7,8 @@ use std::{
 
 use tokio::task::AbortHandle;
 
+use crate::cache::KeyPrefix;
+
 /// The background task a store runs for itself, such as its purge, shared by the store's clones.
 /// It starts once, on the store's first call inside a tokio runtime, and stops when the store's
 /// last clone drops.
@@ -38,8 +40,8 @@ impl Worker {
 
     /// Spawns the future `task` returns on the current tokio runtime, the first time this runs
     /// inside one. Later calls, and calls outside a runtime, do nothing. The task's start, stop
-    /// and panic are logged under `name`.
-    pub fn start<F>(&self, name: &'static str, task: impl FnOnce() -> F)
+    /// and panic are logged under `name` and the name of `store`.
+    pub fn start<F>(&self, name: &'static str, store: &KeyPrefix, task: impl FnOnce() -> F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -53,7 +55,9 @@ impl Worker {
             return;
         }
 
-        running.get_or_init(|| Running(tokio::spawn(logged(name, task())).abort_handle()));
+        running.get_or_init(|| {
+            Running(tokio::spawn(logged(name, store.clone(), task())).abort_handle())
+        });
     }
 }
 
@@ -63,24 +67,26 @@ impl Default for Worker {
     }
 }
 
-/// Runs `task`, and logs its start, its stop and a panic under `name`.
-async fn logged(name: &'static str, task: impl Future<Output = ()>) {
-    tracing::info!(service = name, "background service started");
+/// Runs `task`, and logs its start, its stop and a panic under `name` and `store`.
+async fn logged(name: &'static str, store: KeyPrefix, task: impl Future<Output = ()>) {
+    tracing::info!(worker = name, %store, "worker started");
 
     // Logs the stop on every exit: the task ending, the store's last clone dropping, or a panic.
-    let _stopped = Stopped(name);
+    let _stopped = Stopped(name, store);
 
     task.await;
 }
 
-struct Stopped(&'static str);
+struct Stopped(&'static str, KeyPrefix);
 
 impl Drop for Stopped {
     fn drop(&mut self) {
+        let Self(name, store) = self;
+
         if std::thread::panicking() {
-            tracing::error!(service = self.0, "background service panicked");
+            tracing::error!(worker = *name, %store, "worker panicked");
         } else {
-            tracing::info!(service = self.0, "background service stopped");
+            tracing::info!(worker = *name, %store, "worker stopped");
         }
     }
 }
@@ -97,6 +103,10 @@ mod tests {
 
     use super::*;
 
+    fn store() -> KeyPrefix {
+        KeyPrefix::new("app").unwrap()
+    }
+
     #[tokio::test]
     async fn the_task_starts_once_and_stops_when_the_last_clone_drops() {
         let worker = Worker::new();
@@ -106,7 +116,7 @@ mod tests {
         let mut stopped = Some(stopped);
 
         for worker in [&worker, &clone, &worker] {
-            worker.start("waiting", || {
+            worker.start("waiting", &store(), || {
                 starts.fetch_add(1, Ordering::SeqCst);
 
                 let stopped = stopped.take().unwrap();
@@ -139,13 +149,13 @@ mod tests {
             async {}
         };
 
-        worker.start("counting", task);
+        worker.start("counting", &store(), task);
         assert_eq!(starts.load(Ordering::SeqCst), 0);
 
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(async { worker.start("counting", task) });
+            .block_on(async { worker.start("counting", &store(), task) });
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
@@ -153,7 +163,7 @@ mod tests {
     async fn none_never_starts() {
         let starts = AtomicUsize::new(0);
 
-        Worker::none().start("counting", || {
+        Worker::none().start("counting", &store(), || {
             starts.fetch_add(1, Ordering::SeqCst);
             async {}
         });
@@ -166,13 +176,15 @@ mod tests {
         let worker = Worker::new();
         let (ran, panicked) = oneshot::channel::<()>();
 
-        worker.start("panicking", || async move {
+        worker.start("panicking", &store(), || async move {
             let _ran = ran;
 
             panic!("the task failed");
         });
 
         assert!(panicked.await.is_err(), "the task panicked");
-        worker.start("panicking", || async { unreachable!("it started once") });
+        worker.start("panicking", &store(), || async {
+            unreachable!("it started once")
+        });
     }
 }
