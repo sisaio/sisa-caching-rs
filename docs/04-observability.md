@@ -96,8 +96,8 @@ The other warnings fire every time: a refresh whose load failed while the cached
 live, which serves that value, a lock wait that timed out, an invalidation that couldn't be
 published, a backplane subscription lost or failing, a backplane message that couldn't be read, and
 a local layer cleared because an invalidation went missing or a node's heartbeats stopped. When a
-node stops, even cleanly, every other node logs that clear `heartbeat_timeout_ms` later, so a
-rolling deploy logs it once for each node it replaces. The backplane worker also logs at info when
+node stops without calling `shutdown`, every other node logs that clear `heartbeat_timeout_ms`
+later, so such a rolling deploy logs it once for each node it replaces. The backplane worker also logs at info when
 it subscribes. Each store's worker logs starting and stopping at info, and a panic at error, with
 the worker's name in `worker` and the store's in `store`.
 

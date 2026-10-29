@@ -69,7 +69,7 @@ impl BackplaneWorker {
             peers.own_heard = Instant::now();
             return;
         }
-        if message.invalidation != Invalidation::Heartbeat {
+        if !message.invalidation.is_accounting() {
             self.apply(&message).await;
         }
 
@@ -236,6 +236,12 @@ async fn send_heartbeats(state: Arc<State>, backplane: Arc<RedisBackplane>, inte
     loop {
         ticks.tick().await;
 
+        let stopped = state.stopped.lock().await;
+
+        if *stopped {
+            return;
+        }
+
         let heartbeat = BackplaneMessage::heartbeat(
             state.node_id.clone(),
             store.clone(),
@@ -272,6 +278,30 @@ struct Peer {
     received: BTreeSet<u64>,
     /// When its last heartbeat arrived, or its first message before that.
     heard: Instant,
+}
+
+impl Peer {
+    /// Takes a heartbeat's or a stop's `seq`, and returns the gap it shows.
+    fn account(&mut self, seq: u64) -> Option<Gap> {
+        let finished = match self.finished {
+            Some(finished) if seq <= finished => return None,
+            finished => finished,
+        };
+        let above = self.received.split_off(&(seq + 1));
+        let received = std::mem::replace(&mut self.received, above).len() as u64;
+
+        self.finished = Some(seq);
+
+        if received == seq - finished.unwrap_or(0) {
+            return None;
+        }
+
+        Some(if finished.is_some() {
+            Gap::Missing
+        } else {
+            Gap::Unknown
+        })
+    }
 }
 
 /// What a heartbeat shows that clears the local layer.
@@ -321,7 +351,7 @@ impl Peers {
                 heard: Instant::now(),
             });
 
-        if message.invalidation != Invalidation::Heartbeat {
+        if !message.invalidation.is_accounting() {
             if peer.finished.is_none_or(|finished| seq > finished) {
                 peer.received.insert(seq);
             }
@@ -340,24 +370,14 @@ impl Peers {
 
         peer.heard = Instant::now();
 
-        let finished = match peer.finished {
-            Some(finished) if seq <= finished => return None,
-            finished => finished,
-        };
-        let above = peer.received.split_off(&(seq + 1));
-        let received = std::mem::replace(&mut peer.received, above).len() as u64;
+        let gap = peer.account(seq);
 
-        peer.finished = Some(seq);
-
-        if received == seq - finished.unwrap_or(0) {
-            return None;
+        // A node that stops sends nothing more, so it is forgotten rather than timed out.
+        if message.invalidation == Invalidation::Stopping {
+            self.nodes.remove(&message.source);
         }
 
-        Some(if finished.is_some() {
-            Gap::Missing
-        } else {
-            Gap::Unknown
-        })
+        gap
     }
 
     /// Forgets the nodes whose heartbeats stopped for `timeout`, and returns them.
@@ -506,6 +526,34 @@ mod tests {
             "1 to 4 came before the subscribe, or were lost since"
         );
         assert_eq!(started_before.receive(&heartbeat(6)), Some(Gap::Missing));
+    }
+
+    fn stopping(seq: u64) -> BackplaneMessage {
+        BackplaneMessage::stopping(NodeId::new("peer"), KeyPrefix::new("users").unwrap(), seq)
+    }
+
+    #[test]
+    fn a_stop_forgets_the_node_without_a_clear() {
+        let mut peers = Peers::new();
+
+        peers.receive(&heartbeat(0));
+        peers.receive(&key(1));
+        peers.receive(&key(2));
+
+        assert_eq!(peers.receive(&stopping(2)), None);
+        assert!(peers.nodes.is_empty(), "nothing is left to time out");
+        assert!(peers.expire(Duration::ZERO).is_empty());
+    }
+
+    #[test]
+    fn a_stop_still_shows_a_missing_number() {
+        let mut peers = Peers::new();
+
+        peers.receive(&heartbeat(0));
+        peers.receive(&key(2));
+
+        assert_eq!(peers.receive(&stopping(2)), Some(Gap::Missing));
+        assert!(peers.nodes.is_empty());
     }
 
     #[test]

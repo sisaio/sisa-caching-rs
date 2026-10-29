@@ -11,12 +11,12 @@ use crate::cache::KeyPrefix;
 
 /// The background task a store runs for itself, such as its purge, shared by the store's clones.
 /// It starts once, on the store's first call inside a tokio runtime, and stops when the store's
-/// last clone drops.
+/// last clone drops, or for good on [`stop`](Self::stop).
 ///
 /// A task that holds a copy of its store gives that copy [`none`](Self::none), so the task
 /// doesn't keep itself running.
 #[derive(Clone, Debug)]
-pub struct Worker(Option<Arc<OnceLock<Running>>>);
+pub struct Worker(Option<Arc<OnceLock<Option<Running>>>>);
 
 /// The running task, which is aborted when the store's last clone drops this.
 #[derive(Debug)]
@@ -56,8 +56,23 @@ impl Worker {
         }
 
         running.get_or_init(|| {
-            Running(tokio::spawn(logged(name, store.clone(), task())).abort_handle())
+            Some(Running(
+                tokio::spawn(logged(name, store.clone(), task())).abort_handle(),
+            ))
         });
+    }
+
+    /// Aborts the task if it runs, and keeps it from starting from then on, for every clone.
+    pub fn stop(&self) {
+        let Some(running) = &self.0 else {
+            return;
+        };
+
+        _ = running.set(None);
+
+        if let Some(Some(Running(task))) = running.get() {
+            task.abort();
+        }
     }
 }
 
@@ -138,6 +153,37 @@ mod tests {
         let stopped = tokio::time::timeout(Duration::from_secs(1), done).await;
 
         assert!(stopped.unwrap().is_err(), "the task's future was dropped");
+    }
+
+    #[tokio::test]
+    async fn a_stopped_task_ends_and_never_starts_again() {
+        let worker = Worker::new();
+        let clone = worker.clone();
+        let (stopped, done) = oneshot::channel::<()>();
+
+        worker.start("waiting", &store(), || async move {
+            let _stopped = stopped;
+
+            pending::<()>().await;
+        });
+        clone.stop();
+
+        let stopped = tokio::time::timeout(Duration::from_secs(1), done).await;
+
+        assert!(stopped.unwrap().is_err(), "the task's future was dropped");
+        worker.start("waiting", &store(), || async {
+            unreachable!("it never starts again")
+        });
+    }
+
+    #[tokio::test]
+    async fn a_task_stopped_before_it_starts_never_does() {
+        let worker = Worker::new();
+
+        worker.stop();
+        worker.start("waiting", &store(), || async {
+            unreachable!("it never starts")
+        });
     }
 
     #[test]
