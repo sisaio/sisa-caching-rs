@@ -8,6 +8,9 @@ use sisa_caching_core::{
     settings::{CacheSettings, MAX_TTL_SECS},
 };
 
+/// The most maps a store's entries can be split over.
+const MAX_SHARDS: usize = 1_024;
+
 /// Settings for an [`InMemoryCacheStore`](crate::store::InMemoryCacheStore). In a config file the
 /// shared settings sit under `common`, and an unknown field fails, so a misspelled setting can't
 /// silently keep its default:
@@ -45,7 +48,7 @@ pub struct InMemoryCacheSettings {
     /// How many maps the entries are split over, each with its own lock. More maps let threads
     /// using different keys run side by side, and a `remove_prefix`, purge or trim holds up one
     /// map at a time instead of the whole store; each call then hashes its key once more.
-    /// `None` means one map; `validate` rejects `0`.
+    /// `None` means one map; `validate` rejects `0` and more than 1,024.
     pub shards: Option<usize>,
 }
 
@@ -63,7 +66,8 @@ impl Default for InMemoryCacheSettings {
 
 impl InMemoryCacheSettings {
     /// Fails when a setting is 0, `purge_interval_secs` or `max_ttl_secs` is over
-    /// [`MAX_TTL_SECS`], or a shared setting is out of range, as [`CacheSettings::validate`] says.
+    /// [`MAX_TTL_SECS`], `shards` is over 1,024, or a shared setting is out of range, as
+    /// [`CacheSettings::validate`] says.
     pub fn validate(&self) -> Result<(), CacheError> {
         self.common.validate()?;
 
@@ -92,6 +96,13 @@ impl InMemoryCacheSettings {
             if let Some(secs) = secs.filter(|secs| *secs > MAX_TTL_SECS) {
                 return Err(CacheError::too_long(field, secs));
             }
+        }
+
+        if let Some(shards) = self.shards.filter(|shards| *shards > MAX_SHARDS) {
+            return Err(CacheError::invalid_settings(
+                "shards",
+                format!("is {shards}; the most is {MAX_SHARDS}"),
+            ));
         }
 
         Ok(())
@@ -231,5 +242,22 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn more_than_1024_shards_are_rejected() {
+        let shards = |shards| InMemoryCacheSettings {
+            shards: Some(shards),
+            ..InMemoryCacheSettings::default()
+        };
+
+        assert!(shards(MAX_SHARDS).validate().is_ok());
+        assert!(matches!(
+            shards(MAX_SHARDS + 1).validate(),
+            Err(CacheError::InvalidSettings {
+                field: "shards",
+                ..
+            })
+        ));
     }
 }
