@@ -26,9 +26,10 @@
 //! (`memory get`, `redis set`, `cache get_or_set`, ...) carrying the full key. The hybrid store
 //! adds info spans that carry only the operation, never a key: `hybrid write`, `hybrid
 //! apply_invalidation` on the nodes that receive it, and `hybrid resync`. A failed call marks its
-//! span as an error. Stores log only the errors they swallow, as warnings that name the store but
-//! never a key, such as an invalidation that can't be sent; `get_or_set` logs the first of a run of
-//! failed store calls, and the success that ends it. They count hits, misses, loads, failed store
+//! span as an error. Stores warn only about the errors they swallow, naming the store but never a
+//! key, such as an invalidation that can't be sent; `get_or_set` warns at the first of a run of
+//! failed store calls, and logs the success that ends it at info. A store's background task logs
+//! its start and stop at info, and a panic at error. Stores count hits, misses, loads, failed store
 //! calls and evictions through the OpenTelemetry metrics API; the [`metrics`] module lists them.
 
 #![forbid(unsafe_code)]
