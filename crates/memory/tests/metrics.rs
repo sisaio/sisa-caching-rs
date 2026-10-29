@@ -9,6 +9,7 @@ use opentelemetry_sdk::metrics::{
 };
 use sisa_caching_core::cache::{CacheKey, CacheStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
+use sisa_caching_testing::eventually;
 
 /// The counter `name` with attributes `store=app` plus `attributes`, or 0 when it was never
 /// recorded.
@@ -59,7 +60,16 @@ async fn a_store_counts_hits_misses_and_evictions() {
             .unwrap();
     }
 
-    // The 11th entry trimmed the store to 9: the two least recently used, 0 and 1, are gone.
+    // The 11th entry started a trim down to 9, which runs on the blocking pool: the two least
+    // recently used, 0 and 1, go.
+    eventually("the trim drops two entries", || async {
+        provider.force_flush().unwrap();
+
+        let exported = exporter.get_finished_metrics().unwrap();
+
+        counter(&exported, "sisa.caching.evictions", &[]) == 2
+    })
+    .await;
     assert_eq!(
         store
             .get::<i32>(&CacheKey::new("user", 10).unwrap())

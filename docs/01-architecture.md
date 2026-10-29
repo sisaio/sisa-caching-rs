@@ -110,11 +110,14 @@ Rules every store follows:
 ### Memory
 
 `InMemoryCacheStore` keeps `shards` hash maps (1 by default), each behind its own lock. An entry
-stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a write first drops
-expired entries, then the least recently used ones down to 90% of the limit, so the next writes
-don't trim again. Values are freed after the lock is released. Expired entries read as misses and go
-when they are overwritten, trimmed, or purged. The store purges every `purge_interval_secs` on a
-worker it starts on its first write.
+stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a write starts a trim
+that drops expired entries, then the least recently used ones down to 90% of the limit, so the
+next writes don't trim again. Values are freed after the lock is released. Expired entries read as
+misses and go when they are overwritten, trimmed, or purged. The store purges every
+`purge_interval_secs` on a worker it starts on its first write. Inside a tokio runtime the trims,
+the purges and the freeing of what `clear` took run on the blocking pool, so a store of a million
+entries holds up no async thread; `remove_prefix` and `purge` called by the application run on
+the caller's thread.
 
 ### Redis
 

@@ -10,7 +10,7 @@ pub(crate) struct PurgeWorker<C> {
     interval: Option<Duration>,
 }
 
-impl<C: PurgeableStore> PurgeWorker<C> {
+impl<C: PurgeableStore + Clone + Send + 'static> PurgeWorker<C> {
     /// A worker for `cache`. It reads the store's purge interval once, here.
     pub(crate) fn new(cache: C) -> Self {
         let interval = cache.purge_interval();
@@ -26,7 +26,15 @@ impl<C: PurgeableStore> PurgeWorker<C> {
         loop {
             tokio::time::sleep(interval).await;
 
-            self.cache.purge();
+            let cache = self.cache.clone();
+
+            // A purge walks every entry, so it runs on the blocking pool. A panic there still
+            // stops the worker.
+            if let Err(error) = tokio::task::spawn_blocking(move || cache.purge()).await
+                && error.is_panic()
+            {
+                std::panic::resume_unwind(error.into_panic());
+            }
         }
     }
 }

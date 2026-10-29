@@ -6,8 +6,8 @@ use std::{
     hash::{BuildHasher, RandomState},
     mem,
     sync::{
-        Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -28,13 +28,14 @@ type Erased = Arc<dyn Any + Send + Sync>;
 type EntryMap = HashMap<String, StoredEntry>;
 
 /// The entries of a store and its clones, split over `shards` maps by key hash, plus how many
-/// there are, a counter that orders their use, and a lock that lets one trim run at a time.
+/// there are, a counter that orders their use, and whether a trim is running, as one runs at a
+/// time.
 struct Entries {
     shards: Box<[RwLock<EntryMap>]>,
     hasher: RandomState,
     len: AtomicUsize,
     uses: AtomicU64,
-    trimming: Mutex<()>,
+    trimming: AtomicBool,
 }
 
 impl Entries {
@@ -44,7 +45,7 @@ impl Entries {
             hasher: RandomState::new(),
             len: AtomicUsize::new(0),
             uses: AtomicU64::new(0),
-            trimming: Mutex::new(()),
+            trimming: AtomicBool::new(false),
         }
     }
 
@@ -73,6 +74,15 @@ fn write(shard: &RwLock<EntryMap>) -> RwLockWriteGuard<'_, EntryMap> {
     shard.write().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Runs `work` on the blocking pool inside a tokio runtime, so a walk of every entry or the freeing
+/// of many values holds up no async thread, and here outside one.
+fn off_async_thread(work: impl FnOnce() + Send + 'static) {
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => drop(runtime.spawn_blocking(work)),
+        Err(_) => work(),
+    }
+}
+
 /// An entry plus when the store lets it go, on the monotonic clock so wall-clock changes don't
 /// move it, and when it was last stored or read, so a full store drops the least recently used.
 struct StoredEntry {
@@ -93,7 +103,8 @@ impl StoredEntry {
 ///
 /// The store drops its expired entries every `purge_interval_secs` of its settings, on a task it
 /// starts on its first write inside a tokio runtime. The task stops when the store's last clone
-/// drops.
+/// drops. Inside a runtime, its purges, the trims of a full store and the freeing of what `clear`
+/// took run on the blocking pool, so they hold up no async thread.
 #[derive(Clone)]
 pub struct InMemoryCacheStore {
     name: KeyPrefix,
@@ -154,15 +165,29 @@ impl InMemoryCacheStore {
         &self.settings
     }
 
-    /// Drops expired entries, then the least recently used, down to about nine tenths of `max` so
-    /// the next inserts need no work. One trim runs at a time, and one that waited for another
-    /// checks the count again.
-    fn trim(&self, max: usize) {
-        let trimming = self
-            .entries
-            .trimming
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+    /// Starts a trim down to about nine tenths of `max` unless one is running. Inside a tokio
+    /// runtime it runs on the blocking pool, and the write that starts it goes on, as do the
+    /// writes after it.
+    fn start_trim(&self, max: usize) {
+        if self.entries.trimming.swap(true, Ordering::Acquire) {
+            return;
+        }
+
+        let trimming = Trimming(self.for_worker());
+
+        off_async_thread(move || {
+            let removed = trimming.0.trim(max);
+
+            // Let the next trim start, then free what this one dropped.
+            drop(trimming);
+            drop(removed);
+        });
+    }
+
+    /// Takes out expired entries, then the least recently used, down to about nine tenths of `max`
+    /// so the next inserts need no work, and returns them for the caller to free. The count is
+    /// checked again, as it may have gone down since the trim was started.
+    fn trim(&self, max: usize) -> Vec<(String, StoredEntry)> {
         let mut removed = Vec::new();
 
         if self.entries.len.load(Ordering::Relaxed) > max {
@@ -198,13 +223,11 @@ impl InMemoryCacheStore {
             }
         }
 
-        // Let the next trim start, then free what this one dropped.
-        drop(trimming);
-        drop(removed);
+        removed
     }
 
-    /// A copy that shares the entries but not the `Worker`, for the store's purge worker, which
-    /// would otherwise keep itself running after the store's last clone drops.
+    /// A copy that shares the entries but not the `Worker`, for the store's purge worker and its
+    /// trims, which would otherwise keep the purge running after the store's last clone drops.
     pub(crate) fn for_worker(&self) -> Self {
         Self {
             worker: Worker::none(),
@@ -226,6 +249,16 @@ impl InMemoryCacheStore {
         }
 
         taken
+    }
+}
+
+/// A started trim. Dropping it lets the next one start, even if it never ran, as when its runtime
+/// shut down first.
+struct Trimming(InMemoryCacheStore);
+
+impl Drop for Trimming {
+    fn drop(&mut self) {
+        self.0.entries.trimming.store(false, Ordering::Release);
     }
 }
 
@@ -349,7 +382,7 @@ impl CacheStore for InMemoryCacheStore {
         if let Some(max) = self.settings.max_entries()
             && self.entries.len.load(Ordering::Relaxed) > max
         {
-            self.trim(max);
+            self.start_trim(max);
         }
 
         Ok(())
@@ -396,7 +429,8 @@ impl CacheStore for InMemoryCacheStore {
             })
             .collect();
 
-        drop(cleared);
+        // The store is empty now; freeing what it held can take a while.
+        off_async_thread(move || drop(cleared));
 
         Ok(())
     }
@@ -409,7 +443,7 @@ mod tests {
         fmt::Display,
         future::pending,
         ops::Range,
-        sync::{atomic::AtomicUsize, mpsc},
+        sync::{Mutex, atomic::AtomicUsize, mpsc},
         time::Duration,
     };
 
@@ -417,6 +451,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use sisa_caching_core::{CacheKey, CacheOptions};
     use sisa_caching_testing::{ManualClock, eventually};
+    use tokio::sync::oneshot;
 
     use super::*;
 
@@ -468,6 +503,49 @@ mod tests {
         }
 
         held
+    }
+
+    /// Waits until the store's trim, which runs on the blocking pool, is done.
+    async fn trimmed(store: &InMemoryCacheStore) {
+        eventually("the trim ends", || async {
+            !store.entries.trimming.load(Ordering::Acquire)
+        })
+        .await;
+    }
+
+    /// A value whose drop says on its oneshot that it started, then waits up to five seconds for
+    /// the test to send on its gate. A store that frees it on the test's own thread holds the test
+    /// up that long, and the test's send then fails. Its clones, made by reads, drop at once.
+    #[derive(Serialize, Deserialize)]
+    struct SlowDrop {
+        #[serde(skip)]
+        gate: Option<(oneshot::Sender<()>, Mutex<mpsc::Receiver<()>>)>,
+    }
+
+    impl Clone for SlowDrop {
+        fn clone(&self) -> Self {
+            Self { gate: None }
+        }
+    }
+
+    impl Drop for SlowDrop {
+        fn drop(&mut self) {
+            if let Some((dropping, gate)) = self.gate.take() {
+                _ = dropping.send(());
+                _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            }
+        }
+    }
+
+    /// A `SlowDrop`, the receiver that hears its drop start, and the sender that lets it finish.
+    fn slow_drop() -> (SlowDrop, oneshot::Receiver<()>, mpsc::Sender<()>) {
+        let (dropping, dropped) = oneshot::channel();
+        let (release, gate) = mpsc::channel();
+        let value = SlowDrop {
+            gate: Some((dropping, Mutex::new(gate))),
+        };
+
+        (value, dropped, release)
     }
 
     #[test]
@@ -728,6 +806,33 @@ mod tests {
         assert_eq!(store.purge(), 0, "its own worker already purged it");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn the_purge_worker_purges_on_the_blocking_pool() {
+        let clock = ManualClock::new();
+        let store = store(&clock, InMemoryCacheSettings::default());
+        let (slow, dropped, release) = slow_drop();
+
+        store.set(&key(1), slow, ttl(1)).await.unwrap();
+        clock.advance(secs(1));
+        // The worker's first purge, a minute after the write, frees the expired value.
+        dropped.await.unwrap();
+
+        release.send(()).expect("the purge held up the runtime");
+    }
+
+    #[tokio::test]
+    async fn clear_empties_the_store_at_once_and_frees_the_values_on_the_blocking_pool() {
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let (slow, dropped, release) = slow_drop();
+
+        store.set(&key(1), slow, None).await.unwrap();
+        store.clear().await.unwrap();
+        dropped.await.unwrap();
+
+        assert!(held(&store, 1..2).await.is_empty());
+        release.send(()).expect("the clear held up the runtime");
+    }
+
     #[tokio::test]
     async fn the_purge_stops_when_the_last_clone_drops() {
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
@@ -797,6 +902,7 @@ mod tests {
         // Reading 0 makes 1 and 2 the least recently used.
         store.get::<u32>(&key(0)).await.unwrap();
         store.set(&key(10), 10_u32, None).await.unwrap();
+        trimmed(&store).await;
 
         assert_eq!(held(&store, 0..11).await, [0, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
@@ -813,6 +919,7 @@ mod tests {
         }
         clock.advance(secs(1));
         store.set(&key(10), 10_u32, None).await.unwrap();
+        trimmed(&store).await;
 
         assert_eq!(held(&store, 5..11).await, [5, 6, 7, 8, 9, 10]);
     }
@@ -830,8 +937,24 @@ mod tests {
         // Dropping the expired entry alone gets back to the limit, but the trim goes on to 9, so
         // the next writes need no work.
         store.set(&key(10), 10_u32, None).await.unwrap();
+        trimmed(&store).await;
 
         assert_eq!(held(&store, 0..11).await, [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[tokio::test]
+    async fn a_trim_runs_on_the_blocking_pool_while_the_write_goes_on() {
+        let store = store(&ManualClock::new(), with_limit(1));
+        let (slow, dropped, release) = slow_drop();
+
+        store.set(&key(0), slow, None).await.unwrap();
+        // Past the limit: the trim drops 0, the least recently used.
+        store.set(&key(1), 1_u32, None).await.unwrap();
+        dropped.await.unwrap();
+
+        // The test runtime has one thread, so 0 is being freed on another while this runs.
+        release.send(()).expect("the trim held up the write");
+        assert_eq!(held(&store, 0..2).await, [1]);
     }
 
     #[tokio::test]
@@ -884,6 +1007,7 @@ mod tests {
         );
 
         store.set(&key(14), 14_u32, None).await.unwrap();
+        trimmed(&store).await;
         assert_eq!(
             held(&store, 0..15).await.len(),
             9,

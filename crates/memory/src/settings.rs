@@ -35,9 +35,10 @@ pub struct InMemoryCacheSettings {
     /// rejects `0`.
     pub purge_interval_secs: Option<u64>,
 
-    /// The most entries the store holds. Past it, an insert drops expired entries, then the least
-    /// recently used, down to about nine tenths of the limit. Inserts from several threads can go a
-    /// few over it until that trim finishes. `None` sets no limit; `validate` rejects `0`.
+    /// The most entries the store holds. Past it, an insert starts a trim that drops expired
+    /// entries, then the least recently used, down to about nine tenths of the limit. Inside a
+    /// tokio runtime the trim runs on the blocking pool and inserts go on meanwhile, so the store
+    /// can go over the limit while it runs. `None` sets no limit; `validate` rejects `0`.
     pub max_entries: Option<usize>,
 
     /// The longest an entry stays in the store, whatever its TTL. The entry keeps its own creation
