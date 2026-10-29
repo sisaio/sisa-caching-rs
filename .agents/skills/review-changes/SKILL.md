@@ -14,8 +14,8 @@ Review what changed, not the whole crate. Report findings; don't push fixes unle
       failure with its first error.
 - [ ] Check the diff against the
       [rules](../../../docs/01-architecture.md#rules-that-hold-the-design-together), the
-      [decisions](../../../docs/01-architecture.md#decisions) and the settled decisions in
-      [AGENTS.md](../../../AGENTS.md). The ones most often broken:
+      [decisions](../../../docs/01-architecture.md#decisions) and the
+      [code rules](../../../AGENTS.md#code) in AGENTS.md. The ones most often broken:
   - each store keeps one read path (`get_entry`) and one write path (`set_entry`);
   - only the clock module reads the wall clock;
   - invalidations touch the local layer only, never Redis;
