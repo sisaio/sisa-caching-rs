@@ -3,17 +3,6 @@
 What shipped is in the [changelog](CHANGELOG.md). The issues and their milestones show the work in
 progress.
 
-## Next: 0.2.0
-
-A breaking release:
-
-- Stores start and stop their own background workers, so a store can't run without its
-  invalidation listener, or with two of them
-  ([#32](https://github.com/sisaio/sisa-caching-rs/issues/32)).
-- Hybrid nodes detect invalidations lost while their backplane stays subscribed, such as a failed
-  publish or a writer that crashes before publishing
-  ([#26](https://github.com/sisaio/sisa-caching-rs/issues/26)).
-
 ## Later
 
 Ideas that wait until users ask for them:

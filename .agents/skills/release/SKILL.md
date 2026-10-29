@@ -36,6 +36,8 @@ pushes a tag.
 - [ ] When the minor version changes, check that the README's install line names it: every
       crate publishes that README to crates.io. If it doesn't, fix it in a PR to `main` before you
       edit the changelog, since anything that lands on `main` replaces the release PR.
+- [ ] Check that the roadmap's Next section lists no work this release ships. If it does, fix it
+      in a PR to `main` before you edit the changelog, as with the README.
 - [ ] Push the changelog edit to the release PR's branch, then tell the maintainer it is ready,
       with the version and a one-line summary.
 
