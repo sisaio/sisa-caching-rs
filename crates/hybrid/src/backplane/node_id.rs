@@ -15,12 +15,12 @@ pub struct NodeId(Arc<str>);
 impl NodeId {
     /// An id from any string, such as a pod name. It must be unique to the process: a node skips
     /// every message that carries its own id.
-    pub fn new(id: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
     }
 
     /// A fresh id from the process id and a per-call random number.
-    pub fn generate() -> Self {
+    pub(crate) fn generate() -> Self {
         let random = RandomState::new().build_hasher().finish();
 
         Self::new(format!("{}-{random:016x}", std::process::id()))
