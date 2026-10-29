@@ -39,10 +39,10 @@ impl CacheError {
 
     /// A duration over [`MAX_TTL_SECS`](crate::settings::MAX_TTL_SECS).
     #[doc(hidden)]
-    pub fn too_long(field: &'static str, secs: u64) -> Self {
+    pub fn too_long(field: &'static str, duration: std::time::Duration) -> Self {
         Self::InvalidSettings {
             field,
-            reason: format!("is {secs} seconds; the most a store accepts is 365 days"),
+            reason: format!("is {duration:?}; the most a store accepts is 365 days"),
         }
     }
 }

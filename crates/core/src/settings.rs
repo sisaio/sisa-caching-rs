@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::CacheError;
 
-/// The longest TTL, residency cap or purge interval a store accepts: 365 days.
+/// The longest any duration setting, or a write's TTL, may be: 365 days.
 pub const MAX_TTL_SECS: u64 = 365 * 24 * 60 * 60;
 
 /// Settings every store has.
@@ -39,28 +39,15 @@ impl Default for CacheSettings {
 }
 
 impl CacheSettings {
-    /// Fails when `ttl_secs` is 0 or over [`MAX_TTL_SECS`], `lock_timeout_ms` is 0, or
+    /// Fails when `ttl_secs` or `lock_timeout_ms` is 0 or over [`MAX_TTL_SECS`], or
     /// `refresh_threshold` is not between 0 and 1.
     pub fn validate(&self) -> Result<(), CacheError> {
-        for (field, value, none) in [
-            ("ttl_secs", self.ttl_secs, "for no TTL"),
-            (
-                "lock_timeout_ms",
-                self.lock_timeout_ms,
-                "to wait without a limit",
-            ),
-        ] {
-            if value == Some(0) {
-                return Err(CacheError::InvalidSettings {
-                    field,
-                    reason: format!("is 0; use None {none}"),
-                });
-            }
-        }
-
-        if let Some(secs) = self.ttl_secs.filter(|secs| *secs > MAX_TTL_SECS) {
-            return Err(CacheError::too_long("ttl_secs", secs));
-        }
+        check_duration("ttl_secs", self.default_ttl(), "use None for no TTL")?;
+        check_duration(
+            "lock_timeout_ms",
+            self.lock_timeout(),
+            "use None to wait without a limit",
+        )?;
 
         match self.refresh_threshold {
             Some(share) if !(share > 0.0 && share < 1.0) => Err(CacheError::InvalidSettings {
@@ -87,6 +74,26 @@ impl CacheSettings {
     }
 }
 
+/// Fails when a duration setting is 0, with `if_zero` as the fix, or over [`MAX_TTL_SECS`]. A
+/// setting that `None` turns off passes `None` through.
+#[doc(hidden)]
+pub fn check_duration(
+    field: &'static str,
+    duration: impl Into<Option<Duration>>,
+    if_zero: &str,
+) -> Result<(), CacheError> {
+    match duration.into() {
+        Some(duration) if duration.is_zero() => Err(CacheError::invalid_settings(
+            field,
+            format!("is 0; {if_zero}"),
+        )),
+        Some(duration) if duration > Duration::from_secs(MAX_TTL_SECS) => {
+            Err(CacheError::too_long(field, duration))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,17 +108,29 @@ mod tests {
     }
 
     #[test]
-    fn a_default_ttl_over_365_days_is_rejected() {
-        let settings = |ttl_secs| CacheSettings {
+    fn a_default_ttl_or_lock_wait_over_365_days_is_rejected() {
+        let ttl = |ttl_secs| CacheSettings {
             ttl_secs: Some(ttl_secs),
             ..CacheSettings::default()
         };
+        let wait = |lock_timeout_ms| CacheSettings {
+            lock_timeout_ms: Some(lock_timeout_ms),
+            ..CacheSettings::default()
+        };
 
-        assert!(settings(MAX_TTL_SECS).validate().is_ok());
+        assert!(ttl(MAX_TTL_SECS).validate().is_ok());
+        assert!(wait(MAX_TTL_SECS * 1_000).validate().is_ok());
         assert!(matches!(
-            settings(MAX_TTL_SECS + 1).validate(),
+            ttl(MAX_TTL_SECS + 1).validate(),
             Err(CacheError::InvalidSettings {
                 field: "ttl_secs",
+                ..
+            })
+        ));
+        assert!(matches!(
+            wait(MAX_TTL_SECS * 1_000 + 1).validate(),
+            Err(CacheError::InvalidSettings {
+                field: "lock_timeout_ms",
                 ..
             })
         ));

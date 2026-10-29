@@ -23,7 +23,7 @@ impl CacheOptions {
     pub fn validate(&self) -> Result<(), CacheError> {
         match self.ttl {
             Some(ttl) if ttl > Duration::from_secs(MAX_TTL_SECS) => {
-                Err(CacheError::too_long("ttl", ttl.as_secs()))
+                Err(CacheError::too_long("ttl", ttl))
             }
             _ => Ok(()),
         }

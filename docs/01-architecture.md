@@ -345,9 +345,10 @@ Settled; reopen only with new evidence.
 - The Redis hash and the backplane message are formats other languages write, so they change only
   with a version bump.
 - Durations in settings are `u64` seconds or milliseconds. A setting that can be off is an `Option`,
-  off with `None`, and `validate` rejects `0` in every setting, naming the field. Each store's
-  settings and `HybridCacheSettings` have one `validate`, and `with_settings` and
-  `with_worker_settings` return a `Result`; `HybridCacheStore::new` checks the backplane's settings.
+  off with `None`, and `validate` rejects `0` in every setting and a duration over 365 days,
+  naming the field. Each store's settings and `HybridCacheSettings` have one `validate`, and
+  `with_settings` and `with_worker_settings` return a `Result`; `HybridCacheStore::new` checks the
+  backplane's settings.
   Settings nest (a store's shared `CacheSettings` sit under `common`, a hybrid's parts under
   `local`, `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
   misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
