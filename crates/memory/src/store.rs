@@ -13,7 +13,7 @@ use std::{
 };
 
 use sisa_caching_core::{
-    cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix, PurgeableStore},
+    cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     clock::{Clock, SystemClock},
     locker::Locker,
     metrics::{Layer, METRICS},
@@ -21,7 +21,7 @@ use sisa_caching_core::{
     worker::Worker,
 };
 
-use crate::{settings::InMemoryCacheSettings, worker::PurgeWorker};
+use crate::settings::InMemoryCacheSettings;
 
 /// A stored value of any type. A read asks for the type it expects and gets it back, or an error.
 type Erased = Arc<dyn Any + Send + Sync>;
@@ -80,6 +80,22 @@ fn off_async_thread(work: impl FnOnce() + Send + 'static) {
     match tokio::runtime::Handle::try_current() {
         Ok(runtime) => drop(runtime.spawn_blocking(work)),
         Err(_) => work(),
+    }
+}
+
+/// The store's purge task: drops `store`'s expired entries every `interval`, on the blocking pool,
+/// as a purge walks every entry. A panic there stops the task.
+async fn purge_every(store: InMemoryCacheStore, interval: Duration) {
+    loop {
+        tokio::time::sleep(interval).await;
+
+        let store = store.clone();
+
+        if let Err(error) = tokio::task::spawn_blocking(move || store.purge()).await
+            && error.is_panic()
+        {
+            std::panic::resume_unwind(error.into_panic());
+        }
     }
 }
 
@@ -163,6 +179,23 @@ impl InMemoryCacheStore {
 
     pub fn settings(&self) -> &InMemoryCacheSettings {
         &self.settings
+    }
+
+    /// Drops the expired entries and returns how many. The store's own purge task calls it every
+    /// `purge_interval_secs`; with that off, call it on a schedule of your own. It walks every
+    /// entry on the calling thread.
+    #[tracing::instrument(level = "debug", name = "memory purge", skip_all, fields(store = %self.name, removed))]
+    pub fn purge(&self) -> usize {
+        let now = self.clock.instant();
+        let removed = self.extract(|_, stored| stored.is_expired(now)).len();
+
+        tracing::Span::current().record("removed", removed);
+
+        if removed > 0 {
+            tracing::debug!(store = %self.name, removed, "expired entries removed");
+        }
+
+        removed
     }
 
     /// Starts a trim down to about nine tenths of `max` unless one is running. Inside a tokio
@@ -262,26 +295,6 @@ impl Drop for Trimming {
     }
 }
 
-impl PurgeableStore for InMemoryCacheStore {
-    #[tracing::instrument(level = "debug", name = "memory purge", skip_all, fields(store = %self.name, removed))]
-    fn purge(&self) -> usize {
-        let now = self.clock.instant();
-        let removed = self.extract(|_, stored| stored.is_expired(now)).len();
-
-        tracing::Span::current().record("removed", removed);
-
-        if removed > 0 {
-            tracing::debug!(store = %self.name, removed, "expired entries removed");
-        }
-
-        removed
-    }
-
-    fn purge_interval(&self) -> Option<Duration> {
-        self.settings.purge_interval()
-    }
-}
-
 impl CacheStore for InMemoryCacheStore {
     type Error = CacheError;
 
@@ -342,10 +355,10 @@ impl CacheStore for InMemoryCacheStore {
         entry: CacheEntry<CV>,
     ) -> Result<(), CacheError> {
         // Entries only come in here, so the purge starts with the first one.
-        if self.settings.purge_interval().is_some() {
+        if let Some(interval) = self.settings.purge_interval() {
             self.worker
                 .start("in-memory-cache-purge-worker", &self.name, || {
-                    PurgeWorker::new(self.for_worker()).run()
+                    purge_every(self.for_worker(), interval)
                 });
         }
 
@@ -449,7 +462,7 @@ mod tests {
 
     use futures_util::{FutureExt, future::join_all};
     use serde::{Deserialize, Serialize};
-    use sisa_caching_core::{CacheKey, CacheOptions};
+    use sisa_caching_core::{CacheKey, CacheOptions, settings::MAX_TTL_SECS};
     use sisa_caching_testing::{Logs, ManualClock, eventually};
     use tokio::sync::oneshot;
 
@@ -831,6 +844,17 @@ mod tests {
 
         assert!(held(&store, 1..2).await.is_empty());
         release.send(()).expect("the clear held up the runtime");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_longest_purge_interval_waits_without_panicking() {
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default()).for_worker();
+        let purging = purge_every(store, Duration::from_secs(MAX_TTL_SECS));
+
+        assert!(
+            tokio::time::timeout(secs(3600), purging).await.is_err(),
+            "the task keeps waiting"
+        );
     }
 
     #[tokio::test]

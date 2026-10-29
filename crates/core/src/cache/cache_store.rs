@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use crate::{
@@ -11,15 +11,6 @@ use crate::{
     metrics::METRICS,
     settings::CacheSettings,
 };
-
-/// A store that can drop its expired entries on demand, as its own purge task or a scheduler does.
-pub trait PurgeableStore {
-    /// Drops expired entries and returns how many.
-    fn purge(&self) -> usize;
-
-    /// How often the store's own purge task calls `purge`. `None` means never.
-    fn purge_interval(&self) -> Option<Duration>;
-}
 
 /// A named store that holds values of any [`CacheValue`] type under string keys. The type is
 /// named on each call, so one store serves every type an application caches.

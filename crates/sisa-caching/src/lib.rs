@@ -59,7 +59,6 @@
 pub use sisa_caching_core::{
     CacheEntry, CacheError, CacheKey, CacheOptions, CacheSettings, CacheStore, CacheValue,
     KeyPrefix,
-    cache::PurgeableStore,
     clock::{Clock, SystemClock},
 };
 
