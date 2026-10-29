@@ -106,8 +106,8 @@ sequenceDiagram
     end
 ```
 
-A value that doesn't decode into the requested type is an error, not a miss, so `get` shows a type
-mix-up. `get_or_set` loads and stores over it.
+A value that doesn't decode into the requested type returns an error rather than `None`, so `get`
+shows a type mix-up; the misses counter still counts it. `get_or_set` loads and stores over it.
 
 ## Hybrid read
 

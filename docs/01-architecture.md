@@ -272,7 +272,7 @@ stays subscribed.
 | --- | --- | --- |
 | all | `CacheError` | `InvalidKey`, `TypeMismatch` (memory), `InvalidSettings` (a setting out of range, such as a TTL over 365 days) |
 | Redis | `RedisCacheError` | `Cache`, `Redis` (connection or command), `Json` (encode or decode) |
-| Hybrid | `HybridCacheError` | `Cache`, `StoreNameMismatch` at construction, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked) |
+| Hybrid | `HybridCacheError` | `Cache`, `StoreNameMismatch` at construction, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked, or the runtime shut down before it finished) |
 
 The error enums and `metrics::Layer` are `#[non_exhaustive]`, so a later release can add a
 variant without breaking a `match`.
@@ -322,5 +322,7 @@ Settled; reopen only with new evidence.
   `local`, `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
   misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
   hybrid calls read `distributed.common`.
-- Info spans and warnings carry the store and the invalidation kind, never a key; only debug
-  spans carry keys. Stores log only the errors they swallow.
+- Info spans and warnings carry the store and the invalidation kind, never a key; only debug spans
+  carry keys. Stores warn only about the errors they swallow. Their info lines say that a worker
+  started or stopped, a backplane subscribed, or store calls work again, and a worker's panic logs
+  an error.
