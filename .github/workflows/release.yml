@@ -13,8 +13,9 @@
 # draft until every crate is out. If crates.io rejects a crate, the tag stays: ship the fix as the
 # next version, or have an admin delete the tag and the draft.
 #
-# Publishing uses crates.io trusted publishing from the `release` environment, so no registry
-# token is stored. A crate's very first publish needs a token instead.
+# Publishing uses the `CARGO_REGISTRY_TOKEN` secret while it is set, and crates.io trusted
+# publishing from the `release` environment once it is deleted. A crate's very first publish
+# needs the token.
 name: release
 
 on:
@@ -118,6 +119,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,12 +132,13 @@ jobs:
 
       - name: Get a crates.io token
         id: auth
+        if: env.HAS_REGISTRY_TOKEN != 'true'
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       # In dependency order. cargo waits for each crate to show in the index before the next.
       - name: Publish the crates
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
           TAG: ${{ needs.tag.outputs.tag }}
         run: |
           version="${TAG#v}"

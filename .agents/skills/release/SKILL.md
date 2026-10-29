@@ -63,7 +63,7 @@ or merges it, approves, publishes, or pushes a tag.
 | `GitHub Actions is not permitted to create or approve pull requests` | The maintainer allows it in Settings → Actions → General → Workflow permissions |
 | `Cannot upload assets to an immutable release` | Something wrote to a published release; record on the draft before `publish release` runs |
 | `wait for CI` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
-| crates.io `403`, or no token from `crates-io-auth-action` | The crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
+| crates.io `403`, or no token from `crates-io-auth-action` | With `CARGO_REGISTRY_TOKEN` set, the token has expired or lacks publish rights on the crate. Without it, the crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
 | `crate ... already exists` | crates.io has that version; re-run the publish job, which skips it |
 
 For anything else, find the first error in the failed step's log and report it with a fix.
