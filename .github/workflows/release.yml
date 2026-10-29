@@ -1,5 +1,6 @@
-# Releases with release-plz (see release-plz.toml). On every push to main it:
-# - opens or updates the release PR, which bumps the versions, checks the public API for breaking
+# Releases with release-plz (see release-plz.toml). It:
+# - opens the release PR when the maintainer runs this workflow by hand, and updates it on every
+#   push to main while it is open. The PR bumps the versions, checks the public API for breaking
 #   changes with cargo-semver-checks, and adds the changelog section;
 # - when the push is that PR being merged, publishes to crates.io, tags `v<version>`, creates the
 #   GitHub release from the changelog as a draft, runs the benchmarks for it, and then publishes
@@ -12,6 +13,7 @@ name: release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -22,7 +24,7 @@ jobs:
   release:
     name: release
     runs-on: ubuntu-24.04
-    if: github.repository_owner == 'sisaio'
+    if: github.repository_owner == 'sisaio' && github.event_name == 'push'
     timeout-minutes: 30
     permissions:
       contents: write
@@ -97,15 +99,31 @@ jobs:
       group: release-pr
       cancel-in-progress: false
     steps:
+      # A push only updates a release PR that is already open; opening one is the maintainer's call.
+      - name: Check for an open release PR
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            count=$(gh pr list --repo "$GITHUB_REPOSITORY" --label release --state open --json number --jq length)
+            echo "run=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.open.outputs.run == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install the pinned toolchain
+        if: steps.open.outputs.run == 'true'
         run: rustup toolchain install
 
       - name: Open or update the release PR
+        if: steps.open.outputs.run == 'true'
         uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
         with:
           command: release-pr
