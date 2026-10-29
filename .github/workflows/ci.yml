@@ -1,7 +1,7 @@
-# Formatting, lints, the MSRV build, the dependency policy, the tests, which run against
-# Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and coverage on main. The Redis tests
-# start their servers in Docker. PRs that change no Rust inputs skip the Rust jobs; `ci` sums them
-# up for the ruleset.
+# Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
+# links, the tests, which run against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and
+# coverage on main. The Redis tests start their servers in Docker. PRs that change no Rust inputs
+# skip the Rust jobs; `ci` sums them up for the ruleset.
 name: ci
 
 on:
@@ -151,6 +151,72 @@ jobs:
       - name: Check the dependency policy
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
+  # A breaking change to a published crate's API, against its latest version on crates.io, fails
+  # unless the PR carries the `breaking` label. The label is read when the job runs, so after
+  # adding it, re-run the job.
+  semver:
+    name: semver
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Look for the breaking label
+        id: label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          breaking=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels \
+            --jq 'any(.labels[]; .name == "breaking")')
+          echo "breaking=$breaking" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned toolchain
+        if: steps.label.outputs.breaking != 'true'
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.label.outputs.breaking != 'true'
+        with:
+          save-if: false
+
+      - name: Install cargo-semver-checks
+        if: steps.label.outputs.breaking != 'true'
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-semver-checks
+
+      # The facade with every feature, so it re-exports every store crate's API.
+      - name: Check the public API
+        if: steps.label.outputs.breaking != 'true'
+        run: cargo semver-checks --workspace --all-features
+
+  # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
+  # rustdoc checks the links in doc comments.
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install lychee
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: lychee
+
+      - name: Check the links
+        run: lychee --offline --include-fragments --no-progress --exclude-path target './**/*.md'
+
   test:
     name: test (${{ matrix.server }})
     needs: changes
@@ -197,7 +263,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [changes, lint, msrv, deny, test]
+    needs: [changes, lint, msrv, deny, semver, links, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

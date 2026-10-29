@@ -1,0 +1,35 @@
+# Checks the workspace with every direct dependency at the lowest version its `Cargo.toml`
+# allows, so those lower bounds stay true. Weekly and by hand, outside `ci`: a new release of a
+# dependency can't break a PR this way.
+name: minimal-versions
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  minimal-versions:
+    name: minimal-versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Nightly only for `-Z direct-minimal-versions`; the check runs on the pinned toolchain.
+      - name: Install the toolchains
+        run: rustup toolchain install && rustup toolchain install nightly --profile minimal
+
+      - name: Pick the minimal versions
+        run: cargo +nightly update -Z direct-minimal-versions
+
+      - name: Check the workspace
+        run: cargo check --workspace --all-targets --all-features
