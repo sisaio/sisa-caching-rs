@@ -52,6 +52,8 @@ impl KeyPrefix {
     }
 
     /// Whether `full_key` is under this prefix: `user` matches `user:42` but not `users:42`.
+    // Inlined, as a store's `remove_prefix` calls it for every entry.
+    #[inline]
     pub fn matches(&self, full_key: &str) -> bool {
         full_key
             .strip_prefix(self.as_str())
