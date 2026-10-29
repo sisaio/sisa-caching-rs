@@ -8,10 +8,8 @@ use std::{
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use sisa_caching_benches::{User, key, user};
-use sisa_caching_core::{cache::CacheStore, worker::WorkerHost};
-use sisa_caching_hybrid::{
-    backplane::RedisBackplane, store::HybridCacheStore, worker::BackplaneWorker,
-};
+use sisa_caching_core::cache::CacheStore;
+use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Redis, eventually};
@@ -22,7 +20,6 @@ fn hybrid(c: &mut Criterion) {
     // Removing the container at the end needs the runtime.
     let _runtime = runtime.enter();
     let redis = runtime.block_on(Redis::start());
-    let workers = WorkerHost::new();
     let store = runtime.block_on(async {
         let backplane = RedisBackplane::connect(redis.url(), Default::default())
             .await
@@ -34,7 +31,7 @@ fn hybrid(c: &mut Criterion) {
         )
         .unwrap();
 
-        workers.register(BackplaneWorker::new(&store));
+        store.start_worker();
         eventually("the backplane worker subscribes", || async {
             store.local_reads_enabled()
         })

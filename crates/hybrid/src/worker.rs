@@ -1,6 +1,5 @@
-//! The background job a hybrid deployment runs. Register it on a
-//! [`WorkerHost`](sisa_caching_core::WorkerHost) next to the store it serves.
+//! The background job each hybrid store runs for itself.
 
 mod backplane_worker;
 
-pub use backplane_worker::BackplaneWorker;
+pub(crate) use backplane_worker::BackplaneWorker;

@@ -9,7 +9,7 @@
 //! | --- | --- |
 //! | `memory` | `InMemoryCacheStore` |
 //! | `redis` | `RedisCacheStore`, and the `redis` crate it is built on |
-//! | `hybrid` | `HybridCacheStore` and its `BackplaneWorker`; turns on `memory` and `redis` |
+//! | `hybrid` | `HybridCacheStore`; turns on `memory` and `redis` |
 //! | `tls-rustls` | `rediss://` URLs through rustls; turns on `redis` |
 //! | `tls-native-tls` | `rediss://` URLs through the system's TLS library; turns on `redis` |
 //!
@@ -33,19 +33,16 @@
 //! # fn main() {}
 //! ```
 //!
-//! A hybrid on one Redis server, with the worker it needs:
+//! A hybrid on one Redis server. It starts the worker that applies other nodes' invalidations,
+//! and stops it when its last clone drops:
 //!
 //! ```no_run
 //! # #[cfg(feature = "hybrid")]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use sisa_caching::{BackplaneWorker, CacheStore, HybridCacheSettings, HybridCacheStore, WorkerHost};
+//! use sisa_caching::{CacheStore, HybridCacheSettings, HybridCacheStore};
 //!
 //! let settings = HybridCacheSettings::default();
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
-//!
-//! // Keep the host alive as long as the cache; dropping it stops the worker.
-//! let workers = WorkerHost::new();
-//! workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker.clone()));
 //!
 //! cache.set("user:v1:42", "Ada".to_string(), None).await?;
 //! # Ok(())
@@ -78,7 +75,6 @@ pub use sisa_caching_redis::{
 
 #[cfg(feature = "hybrid")]
 pub use sisa_caching_hybrid::{
-    BackplaneWorker, HybridCacheError, HybridCacheSettings, HybridCacheStore, RedisBackplane,
-    RedisHybridCacheStore,
+    HybridCacheError, HybridCacheSettings, HybridCacheStore, RedisBackplane, RedisHybridCacheStore,
     settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
 };

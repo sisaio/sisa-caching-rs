@@ -11,20 +11,16 @@ use std::{
     time::Duration,
 };
 
-use common::{
-    InMemoryBackplane, WRITES, fast_retries, key, local_value, memory, name, node, start,
-};
+use common::{InMemoryBackplane, WRITES, key, local_value, memory, name, node, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,
     settings::CacheSettings,
-    worker::WorkerHost,
 };
 use sisa_caching_hybrid::{
     backplane::{Backplane, BackplaneMessage, BackplaneSubscription, Invalidation, NodeId},
     settings::BackplaneWorkerSettings,
     store::HybridCacheStore,
-    worker::BackplaneWorker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::eventually;
@@ -167,43 +163,63 @@ async fn a_failed_publish_is_tried_three_times_then_given_up() {
 }
 
 #[tokio::test]
-async fn local_reads_are_on_only_while_a_worker_runs() {
-    let distributed = memory("users");
-    let store = HybridCacheStore::new(
-        memory("users"),
-        distributed.clone(),
-        InMemoryBackplane::new(),
-    )
-    .unwrap();
+async fn the_first_read_starts_the_worker() {
+    let store =
+        HybridCacheStore::new(memory("users"), memory("users"), InMemoryBackplane::new()).unwrap();
 
     assert!(!store.local_reads_enabled(), "no worker yet");
 
-    // A worker that never ran leaves the store alone when it is dropped.
-    drop(BackplaneWorker::new(&store));
+    store.get::<String>(&key(1)).await.unwrap();
 
-    let workers = WorkerHost::new();
-
-    workers.register(BackplaneWorker::new(&store).with_settings(fast_retries()));
     eventually("the worker subscribes", || async {
         store.local_reads_enabled()
     })
     .await;
+}
 
-    store.set(&key(1), "old".to_owned(), None).await.unwrap();
-    store.get::<String>(&key(1)).await.unwrap();
-    workers.shutdown().await;
+#[tokio::test]
+async fn the_first_write_starts_the_worker_too() {
+    let store =
+        HybridCacheStore::new(memory("users"), memory("users"), InMemoryBackplane::new()).unwrap();
 
-    assert!(!store.local_reads_enabled());
+    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
 
-    // No worker applies the invalidation for this write, so the local copy must not be served.
-    distributed
-        .set(&key(1), "new".to_owned(), None)
-        .await
-        .unwrap();
-    assert_eq!(
-        store.get::<String>(&key(1)).await.unwrap().as_deref(),
-        Some("new")
-    );
+    eventually("the worker subscribes", || async {
+        store.local_reads_enabled()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_store_and_its_clones_run_one_worker() {
+    let backplane = InMemoryBackplane::new();
+    let store = node(&memory("users"), &backplane).await;
+    let clone = store.clone();
+
+    clone.start_worker();
+    clone.set(&key(1), "ada".to_owned(), None).await.unwrap();
+    clone.get::<String>(&key(1)).await.unwrap();
+
+    assert_eq!(backplane.subscribers(), 1);
+}
+
+#[tokio::test]
+async fn the_worker_runs_until_the_last_clone_drops() {
+    let backplane = InMemoryBackplane::new();
+    let store = node(&memory("users"), &backplane).await;
+    let clone = store.clone();
+
+    drop(store);
+    // Lets a worker that was told to stop run its stop.
+    tokio::task::yield_now().await;
+
+    assert!(clone.local_reads_enabled(), "the clone keeps it running");
+
+    drop(clone);
+    eventually("the worker stops", || async {
+        backplane.subscribers() == 0
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -321,20 +337,19 @@ async fn waits_between_subscribes(lifetimes: Vec<Duration>, subscribes: usize) -
 
     *backplane.lifetimes.lock().unwrap() = lifetimes.clone();
 
-    let store = HybridCacheStore::new(memory("users"), memory("users"), backplane.clone()).unwrap();
-    let workers = WorkerHost::new();
-
-    workers.register(
-        BackplaneWorker::new(&store).with_settings(BackplaneWorkerSettings {
+    let store = HybridCacheStore::new(memory("users"), memory("users"), backplane.clone())
+        .unwrap()
+        .with_worker_settings(BackplaneWorkerSettings {
             reconnect_delay_ms: 1,
             max_reconnect_delay_ms: 50,
-        }),
-    );
+        });
+
+    store.start_worker();
     eventually("the subscriptions open", || async {
         backplane.opened.lock().unwrap().len() >= subscribes
     })
     .await;
-    workers.shutdown().await;
+    drop(store);
 
     let opened = backplane.opened.lock().unwrap();
 

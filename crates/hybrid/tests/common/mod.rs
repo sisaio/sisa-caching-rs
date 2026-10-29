@@ -13,14 +13,12 @@ use std::{
 use sisa_caching_core::{
     cache::{CacheEntry, CacheKey, CacheStore, KeyPrefix},
     clock::{Clock, SystemClock},
-    worker::WorkerHost,
 };
 use sisa_caching_hybrid::{
     backplane::{Backplane, BackplaneMessage, BackplaneSubscription},
     error::HybridCacheError,
     settings::BackplaneWorkerSettings,
     store::HybridCacheStore,
-    worker::BackplaneWorker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::eventually;
@@ -49,16 +47,16 @@ pub fn fast_retries() -> BackplaneWorkerSettings {
     }
 }
 
-/// Runs the store's backplane worker on a host that lives for the rest of the test, and waits
-/// until it has subscribed.
+/// Starts the store's backplane worker with fast retries, unless it already runs, and waits until
+/// it has subscribed.
 pub async fn start<D, B>(store: HybridCacheStore<D, B>) -> HybridCacheStore<D, B>
 where
     D: CacheStore + 'static,
     B: Backplane,
 {
-    let workers = Box::leak(Box::new(WorkerHost::new()));
+    let store = store.with_worker_settings(fast_retries());
 
-    workers.register(BackplaneWorker::new(&store).with_settings(fast_retries()));
+    store.start_worker();
     eventually("the backplane worker subscribes", || async {
         store.local_reads_enabled()
     })
@@ -195,6 +193,11 @@ impl InMemoryBackplane {
     /// How many of those failures are still to come.
     pub fn failing_publishes(&self) -> usize {
         *self.failing_publishes.lock().unwrap()
+    }
+
+    /// How many subscriptions are open.
+    pub fn subscribers(&self) -> usize {
+        self.messages.receiver_count()
     }
 }
 

@@ -7,6 +7,7 @@ use sisa_caching_core::{
     locker::Locker,
     metrics::{Layer, METRICS},
     settings::CacheSettings,
+    worker::Worker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
@@ -15,7 +16,8 @@ use tracing::Instrument;
 use crate::{
     backplane::{Backplane, BackplaneMessage, Invalidation, NodeId, RedisBackplane},
     error::{HybridCacheError, Result},
-    settings::{HybridCacheSettings, check_local_common},
+    settings::{BackplaneWorkerSettings, HybridCacheSettings, check_local_common},
+    worker::BackplaneWorker,
 };
 
 use super::{RedisHybridCacheStore, state::State};
@@ -34,11 +36,16 @@ const PUBLISH_ATTEMPTS: u32 = 3;
 /// A local Rust type mismatch reads through to the distributed store, whose decoding rules decide
 /// compatibility, so different Rust types can read the same shared JSON when their schemas fit.
 ///
-/// Until its backplane worker has subscribed, while the subscription is lost, and after the worker
-/// stops, the store reads through to the distributed store.
+/// The store applies other nodes' invalidations on a backplane worker it starts on its first call
+/// inside a tokio runtime, or in `connect`, and stops when its last clone drops. Until that worker
+/// has subscribed, and while the subscription is lost, the store reads through to the distributed
+/// store.
 pub struct HybridCacheStore<D: CacheStore + 'static, B: Backplane> {
     distributed_store: Arc<D>,
     state: Arc<State<B>>,
+    worker_settings: BackplaneWorkerSettings,
+    /// The backplane worker. It holds `state` but not this, so it doesn't keep itself running.
+    worker: Worker,
 }
 
 impl<D: CacheStore + 'static, B: Backplane> Clone for HybridCacheStore<D, B> {
@@ -46,6 +53,8 @@ impl<D: CacheStore + 'static, B: Backplane> Clone for HybridCacheStore<D, B> {
         Self {
             distributed_store: Arc::clone(&self.distributed_store),
             state: Arc::clone(&self.state),
+            worker_settings: self.worker_settings.clone(),
+            worker: self.worker.clone(),
         }
     }
 }
@@ -79,10 +88,10 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
     /// # Ok::<(), sisa_caching_core::CacheError>(())
     /// ```
     ///
-    /// The store reads through to the distributed store until a
-    /// [`BackplaneWorker`](crate::BackplaneWorker) has subscribed for it, so register one on a
-    /// `WorkerHost`. The local store drops expired copies on its own. The [crate docs](crate)
-    /// show the whole setup.
+    /// The store starts its backplane worker on its first call, with the default
+    /// [`BackplaneWorkerSettings`] unless [`with_worker_settings`](Self::with_worker_settings)
+    /// gives others, and the local store drops its expired copies on its own. The
+    /// [crate docs](crate) show the whole setup.
     pub fn new(
         local_store: InMemoryCacheStore,
         distributed_store: D,
@@ -100,11 +109,28 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
         Ok(Self {
             distributed_store: Arc::new(distributed_store),
             state: Arc::new(State::new(local_store, backplane)),
+            worker_settings: BackplaneWorkerSettings::default(),
+            worker: Worker::new(),
         })
     }
 
-    pub(crate) fn state(&self) -> &Arc<State<B>> {
-        &self.state
+    /// How the backplane worker waits before subscribing again; `connect` takes it from
+    /// `settings.worker`. Set it before the store's first call: the worker reads it once, when it
+    /// starts.
+    pub fn with_worker_settings(mut self, settings: BackplaneWorkerSettings) -> Self {
+        self.worker_settings = settings;
+        self
+    }
+
+    /// Starts the backplane worker now instead of on the store's first call, as `connect` does,
+    /// so local reads come on, and the `sisa.caching.backplane.connected` gauge reports, before
+    /// the first call. It does nothing outside a tokio runtime or once the worker has started.
+    pub fn start_worker(&self) {
+        self.worker.start_once("hybrid-cache-backplane-worker", || {
+            let state = Arc::clone(&self.state);
+
+            BackplaneWorker::new(state, self.worker_settings.clone()).run()
+        });
     }
 
     /// This store's id, shared by its clones. It goes out with every invalidation, so the store
@@ -125,7 +151,7 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
         &self.distributed_store
     }
 
-    /// Whether reads use the local layer: only while a backplane worker is subscribed.
+    /// Whether reads use the local layer: only while the backplane worker is subscribed.
     pub fn local_reads_enabled(&self) -> bool {
         self.state.local_reads_enabled()
     }
@@ -146,6 +172,9 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
         T: Send + 'static,
         Fut: Future<Output = std::result::Result<T, D::Error>> + Send + 'static,
     {
+        // A node that only writes still runs its worker.
+        self.start_worker();
+
         let message =
             BackplaneMessage::new(self.node_id().clone(), self.name().clone(), invalidation);
         let state = Arc::clone(&self.state);
@@ -202,10 +231,10 @@ async fn publish<B: Backplane>(state: Arc<State<B>>, message: BackplaneMessage) 
 impl RedisHybridCacheStore {
     /// Connects every part to one Redis server, such as `redis://127.0.0.1:6379` (`rediss://`
     /// with the `tls-rustls` or `tls-native-tls` feature): the local layer, the Redis store and
-    /// the backplane, each with its part of `settings`. `info` is a URL or a `redis::ConnectionInfo`. Register a
-    /// `BackplaneWorker` with `settings.worker` next. Its connections use `connection_config`: while Redis is down a call fails at once.
-    /// For other timeouts, a client built by hand, a cluster or Sentinel, build the parts and use
-    /// `new`.
+    /// the backplane, each with its part of `settings`, and starts the backplane worker with
+    /// `settings.worker`. `info` is a URL or a `redis::ConnectionInfo`. Its connections use
+    /// `connection_config`: while Redis is down a call fails at once. For other timeouts, a client
+    /// built by hand, a cluster or Sentinel, build the parts and use `new`.
     pub async fn connect(
         name: &str,
         info: impl IntoConnectionInfo,
@@ -225,8 +254,11 @@ impl RedisHybridCacheStore {
         let backplane = RedisBackplane::connect(info, settings.backplane.clone())
             .await
             .map_err(HybridCacheError::distributed)?;
+        let store =
+            Self::new(local, distributed, backplane)?.with_worker_settings(settings.worker.clone());
 
-        Self::new(local, distributed, backplane)
+        store.start_worker();
+        Ok(store)
     }
 }
 
@@ -251,6 +283,8 @@ impl<D: CacheStore + 'static, B: Backplane> CacheStore for HybridCacheStore<D, B
 
     #[tracing::instrument(level = "debug", name = "hybrid get", skip_all, fields(key = %self.name().format_key(key)), err(level = "debug"))]
     async fn get_entry<CV: CacheValue>(&self, key: &str) -> Result<Option<CacheEntry<CV>>> {
+        self.start_worker();
+
         let (generation, local) = self.state.read::<CV>(key).await;
 
         let entry = match local {

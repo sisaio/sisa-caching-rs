@@ -1,52 +1,26 @@
 use std::sync::Arc;
 
-use sisa_caching_core::{
-    cache::CacheStore,
-    metrics::METRICS,
-    worker::{CancellationToken, WorkerService},
-};
+use sisa_caching_core::{cache::CacheStore, metrics::METRICS};
 use tracing::Instrument;
 
 use crate::{
     backplane::{Backplane, BackplaneMessage, BackplaneSubscription},
     settings::BackplaneWorkerSettings,
-    store::{HybridCacheStore, state::State},
+    store::state::State,
 };
 
 /// Subscribes to one hybrid store's backplane and applies other nodes' invalidations to its local
-/// layer. The store reads through to the distributed store until this worker has subscribed, and
-/// again whenever the subscription is lost, until it subscribes again.
-pub struct BackplaneWorker<B: Backplane> {
+/// layer. The store starts it once. It holds the store's state but not its `Worker`, so it stops
+/// when the store's last clone drops. The store reads through to the distributed store until this
+/// worker has subscribed, and again whenever the subscription is lost, until it subscribes again.
+pub(crate) struct BackplaneWorker<B: Backplane> {
     state: Arc<State<B>>,
     settings: BackplaneWorkerSettings,
-    /// Set when `run` starts, so dropping a worker that never ran leaves the store's reads alone.
-    running: bool,
-}
-
-impl<B: Backplane> std::fmt::Debug for BackplaneWorker<B> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("BackplaneWorker")
-            .field("store", self.state.local_store.name())
-            .field("settings", &self.settings)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<B: Backplane> BackplaneWorker<B> {
-    /// A worker for `store`. Register it on a `WorkerHost`.
-    pub fn new<D: CacheStore + 'static>(store: &HybridCacheStore<D, B>) -> Self {
-        Self {
-            state: Arc::clone(store.state()),
-            settings: BackplaneWorkerSettings::default(),
-            running: false,
-        }
-    }
-
-    /// How long the worker waits before subscribing again.
-    pub fn with_settings(mut self, settings: BackplaneWorkerSettings) -> Self {
-        self.settings = settings;
-        self
+    pub(crate) fn new(state: Arc<State<B>>, settings: BackplaneWorkerSettings) -> Self {
+        Self { state, settings }
     }
 
     /// Whether the message should run against this store's local layer: not its own, and for
@@ -72,16 +46,8 @@ impl<B: Backplane> BackplaneWorker<B> {
             .instrument(span)
             .await;
     }
-}
 
-impl<B: Backplane> WorkerService for BackplaneWorker<B> {
-    fn name(&self) -> &'static str {
-        "hybrid-cache-backplane-worker"
-    }
-
-    async fn run(mut self, _shutdown: CancellationToken) {
-        self.running = true;
-
+    pub(crate) async fn run(self) {
         let state = &self.state;
         let store = state.local_store.name();
         let mut delay = self.settings.reconnect_delay();
@@ -131,12 +97,62 @@ impl<B: Backplane> WorkerService for BackplaneWorker<B> {
 }
 
 /// A stopped worker can't apply invalidations, so the store must stop trusting its local layer.
-/// `run` owns the worker, so this runs however it ends: shutdown, a dropped host, or a panic.
+/// `run` owns the worker, so this runs however it ends: the store's last clone dropping, its
+/// runtime shutting down, or a panic. A store runs one worker, so no other worker's reads are
+/// turned off.
 impl<B: Backplane> Drop for BackplaneWorker<B> {
     fn drop(&mut self) {
-        if self.running {
-            self.state.disable_local_reads();
-            METRICS.backplane_connected(self.state.local_store.name(), false);
+        self.state.disable_local_reads();
+        METRICS.backplane_connected(self.state.local_store.name(), false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sisa_caching_memory::store::InMemoryCacheStore;
+    use sisa_caching_testing::eventually;
+
+    use super::*;
+
+    /// A backplane whose subscriptions stay up and never deliver.
+    struct Quiet;
+
+    struct Silent;
+
+    impl BackplaneSubscription for Silent {
+        type Error = std::io::Error;
+
+        async fn next(&mut self) -> std::io::Result<BackplaneMessage> {
+            std::future::pending().await
         }
+    }
+
+    impl Backplane for Quiet {
+        type Error = std::io::Error;
+        type Subscription = Silent;
+
+        async fn publish(&self, _: &BackplaneMessage) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        async fn subscribe(&self) -> std::io::Result<Silent> {
+            Ok(Silent)
+        }
+    }
+
+    #[tokio::test]
+    async fn local_reads_go_off_when_the_worker_stops() {
+        let state = Arc::new(State::new(InMemoryCacheStore::new("users").unwrap(), Quiet));
+        let worker = BackplaneWorker::new(Arc::clone(&state), BackplaneWorkerSettings::default());
+        let running = tokio::spawn(worker.run());
+
+        eventually("the worker subscribes", || async {
+            state.local_reads_enabled()
+        })
+        .await;
+        running.abort();
+        _ = running.await;
+
+        assert!(!state.local_reads_enabled());
     }
 }

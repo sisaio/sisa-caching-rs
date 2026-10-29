@@ -2,9 +2,9 @@
 //!
 //! Reads try the local layer first, then the shared store. Writes update the shared store, drop the
 //! local copy, and publish an invalidation on a backplane (Redis pub/sub), so every other node
-//! drops its copy too. Each hybrid store needs a [`BackplaneWorker`] that listens for those
-//! invalidations. Until it is listening, the store skips the local layer and reads the shared
-//! store.
+//! drops its copy too. Each hybrid store listens for those invalidations on a worker it starts
+//! itself, on its first call or in `connect`, and stops when its last clone drops. Until the
+//! worker is listening, the store skips the local layer and reads the shared store.
 //!
 //! On one server, [`HybridCacheStore::connect`] builds every part from a URL and one
 //! [`HybridCacheSettings`], which can come straight from a config file. `rediss://` URLs need the
@@ -12,8 +12,8 @@
 //! parts with `new`, and the backplane with [`RedisBackplane::from_client`].
 //!
 //! ```no_run
-//! use sisa_caching_core::{CacheStore, WorkerHost};
-//! use sisa_caching_hybrid::{BackplaneWorker, HybridCacheSettings, HybridCacheStore};
+//! use sisa_caching_core::CacheStore;
+//! use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Local copies live at most 60 seconds, whatever their TTL, unless `local.max_ttl_secs` says
@@ -23,17 +23,14 @@
 //!
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
 //!
-//! // Keep the host alive as long as the cache; dropping it stops the worker.
-//! let workers = WorkerHost::new();
-//! workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker.clone()));
-//!
 //! cache.set("user:v1:42", "Ada".to_string(), None).await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! For a Redis Cluster, Sentinel or another distributed store, build the three parts and compose
-//! them with [`HybridCacheStore::new`]. Build the local store with
+//! them with [`HybridCacheStore::new`], then give it `settings.worker` with
+//! [`with_worker_settings`](HybridCacheStore::with_worker_settings). Build the local store with
 //! `HybridCacheSettings::default().local`, or its own `max_ttl_secs`, to keep the 60-second cap
 //! on stale copies; `InMemoryCacheStore::new` alone has none. On a cluster, give the store a
 //! `ClusterConnection` and the backplane the cluster client ([`RedisBackplane::cluster`]), which
@@ -94,10 +91,9 @@ pub mod backplane;
 pub mod error;
 pub mod settings;
 pub mod store;
-pub mod worker;
+mod worker;
 
 pub use backplane::RedisBackplane;
 pub use error::HybridCacheError;
 pub use settings::HybridCacheSettings;
 pub use store::{HybridCacheStore, RedisHybridCacheStore};
-pub use worker::BackplaneWorker;
