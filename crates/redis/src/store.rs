@@ -8,7 +8,7 @@ use std::{
 use redis::{Client, IntoConnectionInfo, aio::ConnectionManager};
 
 use sisa_caching_core::{
-    cache::{CacheCodec, CacheEntry, CacheError, CacheStore, CacheValue, KEY_SEPARATOR, KeyPrefix},
+    cache::{CacheEntry, CacheError, CacheStore, CacheValue, KEY_SEPARATOR, KeyPrefix},
     clock::{Clock, SystemClock},
     locker::Locker,
     metrics::{Layer, METRICS},
@@ -16,7 +16,7 @@ use sisa_caching_core::{
 };
 
 use crate::{
-    codec::JsonCodec,
+    codec::{CacheCodec, JsonCodec},
     connection::{RedisConnection, connection_config},
     error::RedisCacheError,
     settings::RedisCacheSettings,
