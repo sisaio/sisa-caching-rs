@@ -19,6 +19,8 @@ changelog at the root and one `v<version>` tag.
 - Merging the release PR publishes to crates.io, tags `v<version>`, creates the GitHub release
   as a draft, runs the benchmarks, whose table and report go on the draft, and then publishes
   it. Releases are immutable once published, so nothing may change one after that.
+- Merged issues wait in the board's Pending Release column. Once the release is published, the
+  maintainer selects that column on the Board view and sets it to Done.
 
 The maintainer starts and merges the release PR. An agent never starts or merges it, publishes, or
 pushes a tag.

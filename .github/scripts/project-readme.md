@@ -11,7 +11,10 @@ Every PR closes an issue. An issue moves through these columns:
 | In Progress | Someone is assigned and working on it. |
 | Blocked | Waiting on something outside the issue; a comment says what. |
 | In Review | A pull request with `Closes #n` is open. |
-| Done | Merged, or closed as duplicate or not planned. |
+| Pending Release | Merged, waiting for the next release. |
+| Done | Released, or closed as duplicate or not planned. |
+
+Releases are cut by hand, so merged work waits in Pending Release. After publishing a release, the maintainer selects that column on the Board and sets it to Done.
 
 Only the maintainer moves an issue to Ready and sets its milestone and Priority. Assign yourself before you start.
 
