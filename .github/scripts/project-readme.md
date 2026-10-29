@@ -19,14 +19,16 @@ Only the maintainer moves an issue to Ready and sets its milestone and Priority.
 
 ## Fields
 
+- **Type**: Bug, Feature or Task, set by the issue form.
 - **Priority**: P0 urgent, P1 needed for the current milestone, P2 can slip, P3 nice to have.
-- **Milestone**: the release that ships it.
+- **Milestone**: the release that ships it; its due date is the target, and it closes once the release is out.
 - **Start date** and **Target date**: place the issue on the Roadmap.
 
 ## Views
 
 - **Board**: issues by Status.
 - **Backlog**: issues waiting for triage.
+- **Needs priority**: open issues with no Priority yet.
 - **Delivery**: issues per milestone, which is a release, with their status and type (Bug, Feature, Task).
 - **Roadmap**: the same issues on a timeline.
 - **Blocked**: what is stuck.

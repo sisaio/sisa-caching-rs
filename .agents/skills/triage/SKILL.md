@@ -31,6 +31,8 @@ milestone need the maintainer's word; propose them instead.
       add a `crate: …` label for every part involved:
       `gh issue edit <n> --add-label "crate: hybrid"`. Add `good first issue` only to small,
       well described issues.
+- [ ] **Milestone and Priority.** Propose the release that should ship it and a Priority (P0 to
+      P3) for the maintainer to set when moving it to Ready.
 
 ## Gotchas
 

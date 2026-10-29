@@ -120,13 +120,17 @@ stateDiagram-v2
 ```
 
 Only the maintainer moves an issue to Ready and sets its milestone and Priority (P0 urgent to P3
-low); milestones are release versions. Assign yourself before starting so two people don't take
-the same issue. A Blocked issue says in a comment what it waits on. Start date and Target date
-place an issue on the Roadmap view.
+low); work the maintainer asks for directly gets the next release's milestone when its issue is
+opened. Assign yourself before starting so two people don't take the same issue; the maintainer
+moves it to In Progress. The board's workflows do the rest: a new issue lands in Backlog, a PR
+with `Closes #n` moves it to In Review, and closing or merging moves it to Done. A Blocked issue
+says in a comment what it waits on. Start date and Target date place an issue on the Roadmap
+view.
 
-Releases are cut by hand, so a merged issue can be Done before it ships. Its milestone tells:
-while the milestone is open, its release isn't out yet. The maintainer closes a milestone once
-its release is published.
+A milestone is a release, and its due date is the target. Every issue that ends in a merged PR
+needs one before the PR merges, so the milestone shows what the release ships. Releases are cut
+by hand, so a merged issue can be Done before it ships: while its milestone is open, its release
+isn't out yet. The maintainer closes a milestone once its release is published.
 
 The labels, milestones, board and the rulesets on `main` and the `v*` tags are kept in
 [.github/scripts](.github/scripts/README.md). Change them there in a PR, and a maintainer runs the
@@ -137,6 +141,8 @@ last.
 
 - Every PR closes an issue: open one first if none exists, and say `Closes #n` in the PR. Only
   Dependabot's and release-plz's PRs come without one.
+- A PR's assignee is its author, and it carries the crate labels of its issue. The type,
+  milestone and Priority stay on the issue.
 - Branch from `main` as `<type>/<issue>-<topic>`, one topic per PR. `<type>` is the
   [commit type](#commit-messages) of the change and `<issue>` the number of the issue it closes,
   such as `feat/31-memory-ttl`, `fix/42-redis-reconnect` or `ci/17-tag-ruleset`. Dependabot's and
