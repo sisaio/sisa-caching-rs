@@ -77,26 +77,22 @@ impl BackplaneWorker {
             return;
         };
 
-        METRICS.local_cleared(
-            store,
-            if gap == Gap::Untracked {
-                "untracked"
-            } else {
-                "gap"
-            },
-        );
-
-        match gap {
+        let reason = match gap {
             Gap::Missing => {
                 tracing::warn!(%store, node = %message.source, "an invalidation never arrived; clearing the local layer");
+                "gap"
             }
             Gap::Unknown => {
                 tracing::debug!(%store, node = %message.source, "a node's first heartbeat counts invalidations this subscription never got; clearing the local layer");
+                "gap"
             }
             Gap::Untracked => {
                 tracing::warn!(%store, node = %message.source, seq = message.seq, "a node's sequence numbers can't be tracked; clearing the local layer");
+                "untracked"
             }
-        }
+        };
+
+        METRICS.local_cleared(store, reason);
         self.state.resync(true).await;
     }
 
@@ -242,10 +238,11 @@ async fn send_heartbeats(state: Arc<State>, backplane: Arc<RedisBackplane>, inte
             return;
         }
 
-        let heartbeat = BackplaneMessage::heartbeat(
+        let heartbeat = BackplaneMessage::accounting(
             state.node_id.clone(),
             store.clone(),
             state.sequence.finished(),
+            Invalidation::Heartbeat,
         );
 
         if let Err(error) = backplane.publish(&heartbeat).await {
@@ -465,7 +462,7 @@ mod tests {
     }
 
     fn heartbeat(seq: u64) -> BackplaneMessage {
-        BackplaneMessage::heartbeat(NodeId::new("peer"), KeyPrefix::new("users").unwrap(), seq)
+        from_peer(seq, Invalidation::Heartbeat)
     }
 
     fn key(seq: u64) -> BackplaneMessage {
@@ -529,7 +526,7 @@ mod tests {
     }
 
     fn stopping(seq: u64) -> BackplaneMessage {
-        BackplaneMessage::stopping(NodeId::new("peer"), KeyPrefix::new("users").unwrap(), seq)
+        from_peer(seq, Invalidation::Stopping)
     }
 
     #[test]
@@ -604,13 +601,12 @@ mod tests {
     fn nodes_past_the_limit_clear_and_are_tracked_afresh() {
         let mut peers = Peers::new();
         let from = |node: usize| {
-            let mut message = BackplaneMessage::heartbeat(
+            let mut message = BackplaneMessage::new(
                 NodeId::new(format!("node-{node}")),
                 KeyPrefix::new("users").unwrap(),
-                0,
+                Invalidation::Key("1".to_owned()),
             );
 
-            message.invalidation = Invalidation::Key("1".to_owned());
             message.seq = Some(1);
             message
         };

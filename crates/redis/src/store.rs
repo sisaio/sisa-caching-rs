@@ -151,8 +151,6 @@ impl RedisCacheStore {
     /// at once, and the next one connects again. For other timeouts, or for a cluster or
     /// Sentinel, build the connection and use `new`.
     pub async fn connect(name: &str, info: impl IntoConnectionInfo) -> crate::error::Result<Self> {
-        KeyPrefix::validate(name)?;
-
         Self::from_client(name, Client::open(info)?).await
     }
 
