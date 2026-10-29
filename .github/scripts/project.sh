@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Syncs the labels, milestones and the project board (description, README, Status, fields and
 # views) of sisa-caching-rs with this file and project-readme.md. Safe to run again: labels and
-# milestone descriptions are updated in place, and fields and views that exist are skipped. Labels
-# and views made by hand are left alone.
+# milestone descriptions and due dates are updated in place, and fields and views that exist are
+# skipped. Other labels and views made by hand are left alone.
 #
 # Needs the GitHub CLI signed in with the project scope:
 #   gh auth login
@@ -36,29 +36,33 @@ for line in "${labels[@]}"; do
 done
 
 # Labels we don't use: issues close as "duplicate" or "not planned" instead, questions are
-# answered in their issue, and an issue's type (Bug, Feature, Task) says its kind. Deleting a
-# label removes it from every issue and PR that has it.
-for name in duplicate invalid question wontfix bug enhancement task; do
+# answered in their issue, an issue's type (Bug, Feature, Task) says its kind, and Dependabot's
+# PRs get `dependencies` only. Deleting a label removes it from every issue and PR that has it.
+for name in duplicate invalid question wontfix bug enhancement task accessibility github_actions rust; do
   gh label delete "$name" --repo "$REPO" --yes 2>/dev/null || true
 done
 
 # --- Milestones -----------------------------------------------------------------------------------
-# title|description
+# A milestone is a release: it stays open until that release is published, and its due date is the
+# target. title|due date (YYYY-MM-DD, or empty for none yet)|description
 milestones=(
-  "0.1.0|First release on crates.io."
-  "0.2.0|Breaking: stores run their own workers, and hybrid nodes detect lost invalidations."
-  "0.3.0|Picked from the roadmap's Later list, as users ask for it."
+  "0.1.0||First release on crates.io."
+  "0.2.0||Breaking: stores run their own workers, and hybrid nodes detect lost invalidations."
+  "0.3.0||Picked from the roadmap's Later list, as users ask for it."
 )
-# Existing milestones keep their number, issues and state; only the description is updated.
+# Existing milestones keep their number, issues and state; the description and due date are
+# updated. Closing a milestone after its release is left to the maintainer.
 existing=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --jq '.[] | "\(.title)|\(.number)"')
 for line in "${milestones[@]}"; do
-  IFS='|' read -r title description <<<"$line"
+  IFS='|' read -r title due description <<<"$line"
+  args=(-f description="$description")
+  if [ -n "$due" ]; then args+=(-f due_on="${due}T00:00:00Z"); fi
   milestone_number=$(awk -F'|' -v title="$title" '$1 == title { print $2 }' <<<"$existing")
   if [ -n "$milestone_number" ]; then
-    gh api --method PATCH "repos/$REPO/milestones/$milestone_number" -f description="$description" --silent
+    gh api --method PATCH "repos/$REPO/milestones/$milestone_number" "${args[@]}" --silent
     echo "milestone $title updated"
   else
-    gh api "repos/$REPO/milestones" -f title="$title" -f description="$description" --silent
+    gh api "repos/$REPO/milestones" -f title="$title" "${args[@]}" --silent
     echo "milestone $title created"
   fi
 done
@@ -85,12 +89,12 @@ status_id=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$field_list"
 have_status=$(jq -c '[.fields[] | select(.name == "Status") | (.options // [])[]]' <<<"$field_list")
 jq -n --arg fieldId "$status_id" --argjson have "$have_status" '
   [
-    {name: "Backlog",     color: "GRAY",   description: "Triaged, not planned yet."},
+    {name: "Backlog",     color: "GRAY",   description: "New, or not planned yet."},
     {name: "Ready",       color: "BLUE",   description: "Accepted and in a milestone; anyone can start."},
     {name: "In Progress", color: "YELLOW", description: "Someone is assigned and working on it."},
     {name: "Blocked",     color: "RED",    description: "Waiting on something outside this issue; the issue says what."},
     {name: "In Review",   color: "PURPLE", description: "A pull request is open."},
-    {name: "Done",        color: "GREEN",  description: "Merged or closed."}
+    {name: "Done",        color: "GREEN",  description: "Merged or closed; shipped once its milestone is closed."}
   ]
   | map(. as $option | . + ([$have[] | select(.name == $option.name) | {id}] | first // {}))
   | {
@@ -145,6 +149,7 @@ status=$(field Status)
 assignees=$(field Assignees)
 labels=$(field Labels)
 milestone=$(field Milestone)
+type=$(field Type)
 linked=$(field "Linked pull requests")
 reviewers=$(field Reviewers)
 priority=$(field Priority)
@@ -164,7 +169,7 @@ view() {
   fi
   jq -n --arg name "$1" --argjson title "$title" --argjson status "$status" \
     --argjson assignees "$assignees" --argjson labels "$labels" --argjson milestone "$milestone" \
-    --argjson linked "$linked" --argjson reviewers "$reviewers" --argjson priority "$priority" \
+    --argjson type "$type" --argjson linked "$linked" --argjson reviewers "$reviewers" --argjson priority "$priority" \
     --argjson start "$start" --argjson target "$target" "{name: \$name} + $2" \
     | gh api --method POST "orgs/$OWNER/projectsV2/$number/views" --input - --silent
   echo "view $1 created"
@@ -173,16 +178,21 @@ view() {
 # The issues in a column per Status, the flow in CONTRIBUTING.md.
 view "Board" '{layout: "board", filter: "is:issue",
   vertical_group_by: [$status], sort_by: [[$priority, "asc"]],
-  visible_fields: [$title, $priority, $assignees, $labels, $milestone, $linked]}'
+  visible_fields: [$title, $type, $priority, $assignees, $labels, $milestone, $linked]}'
 
 # Triage: issues not accepted yet. Accepting one means setting its milestone and moving it to Ready.
 view "Backlog" '{layout: "table", filter: "is:issue status:Backlog",
-  sort_by: [[$priority, "asc"]], visible_fields: [$title, $priority, $labels, $milestone, $assignees]}'
+  sort_by: [[$priority, "asc"]],
+  visible_fields: [$title, $type, $priority, $labels, $milestone, $assignees]}'
+
+# Open issues still missing the Priority the maintainer sets when accepting them.
+view "Needs priority" '{layout: "table", filter: "is:issue is:open no:priority",
+  visible_fields: [$title, $type, $status, $milestone, $assignees]}'
 
 # What each release ships and how far along it is.
 view "Delivery" '{layout: "table", filter: "is:issue has:milestone",
   group_by: [$milestone], sort_by: [[$status, "asc"], [$priority, "asc"]],
-  visible_fields: [$title, $status, $priority, $labels, $assignees, $start, $target, $linked]}'
+  visible_fields: [$title, $type, $status, $priority, $labels, $assignees, $start, $target, $linked]}'
 
 # Delivery on a timeline: each issue from its Start date to its Target date, a row per milestone.
 # Milestones with a due date show as markers.
@@ -194,7 +204,7 @@ view "Blocked" '{layout: "table", filter: "status:Blocked",
   visible_fields: [$title, $priority, $assignees, $milestone, $linked]}'
 
 # Whoever is looking: their open work.
-view "My work" '{layout: "table", filter: "assignee:@me -status:Done",
+view "My work" '{layout: "table", filter: "is:issue assignee:@me -status:Done",
   group_by: [$status], sort_by: [[$priority, "asc"]],
   visible_fields: [$title, $priority, $milestone, $target, $linked]}'
 
@@ -205,7 +215,7 @@ view "Pull requests" '{layout: "table", filter: "is:pr is:open",
 url=$(gh project view "$number" --owner "$OWNER" --format json --jq .url)
 cat <<MSG
 
-Done. Three steps are left by hand, because GitHub has no API for them.
+Done. These steps are left by hand, because GitHub has no API for them.
 
 1. The default view "View 1" can't be edited from the API, and the first tab is the one the board
    opens on. Open $url, delete "View 1" so Board comes first, and drag the tabs into the order
@@ -216,8 +226,12 @@ Done. Three steps are left by hand, because GitHub has no API for them.
 
 3. Open $url/workflows and turn on:
   - Auto-add to project: repository sisa-caching-rs, filter "is:issue,pr is:open"
-  - Item added to project: set Status to Backlog
-  - Item reopened: set Status to Backlog
+  - Item added to project: issues only, set Status to Backlog
+  - Item reopened: issues only, set Status to Backlog
   - Pull request linked to issue: set Status to In Review
-  - Item closed and Pull request merged: set Status to Done
+  - Item closed: issues and pull requests, set Status to Done
+  - Pull request merged: set Status to Done
+  Auto-add only acts on items opened or edited after it is on; add older ones by hand.
+
+4. After a release is published, close its milestone on GitHub.
 MSG

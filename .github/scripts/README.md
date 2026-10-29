@@ -49,8 +49,10 @@ GitHub has no API for these, so `project.sh` prints them when it finishes:
 
 - Delete the default "View 1", so the board opens on Board, and order the tabs.
 - On the Roadmap view, set the date fields to Start date and Target date.
-- Turn on the project workflows: auto-add, and the Status changes on add, reopen, linked PR,
-  close and merge.
+- Turn on the project workflows: auto-add, and the Status changes on add and reopen (issues
+  only), linked PR, close and merge. Auto-add doesn't reach back, so add older items by hand.
+- Close a milestone once its release is published. The script sets milestone descriptions and
+  due dates but never opens or closes one.
 
 ## Security
 

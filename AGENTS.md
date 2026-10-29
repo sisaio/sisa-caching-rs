@@ -26,10 +26,12 @@ exit codes rather than piped output. The Redis tests need Docker.
   [.github/scripts](.github/scripts/README.md). Propose a change there instead of making one on
   GitHub.
 - Never open a PR without an issue. Work only on an issue in Ready, or one the maintainer named;
-  when the maintainer asks for work that has none, open it first with the matching form. Assign
-  it and move it to In Progress, and to In Review when the PR opens. The PR says `Closes #<n>`
-  and carries the issue's crate labels. An issue opened without a form gets its type (Bug,
-  Feature or Task) set by hand.
+  when the maintainer asks for work that has none, open it first with the matching form's
+  sections, its type (Bug, Feature or Task) and the milestone of the next release. Assign it to
+  the maintainer. The PR says `Closes #<n>`, carries the issue's crate labels, and has its author
+  as assignee.
+- Don't move cards on the board: agents have no project access. The board's workflows move an
+  issue to In Review and Done; Ready, In Progress and Priority are the maintainer's.
 - Fill in the [PR template](.github/pull_request_template.md): What changes gives a Before and an
   After, and Evidence shows the commands you ran and what they printed.
 - When asked to show or evaluate a change, present the diff for review before pushing.
