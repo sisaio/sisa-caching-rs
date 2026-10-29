@@ -10,8 +10,8 @@ use sisa_caching_redis::settings::RedisCacheSettings;
 /// The pub/sub channel a Redis backplane uses unless its settings name another.
 pub const DEFAULT_REDIS_CHANNEL: &str = "sisa-caching:backplane";
 
-/// The default local `max_ttl_secs`: the longest a node serves a stale copy when an invalidation
-/// never reaches it.
+/// The default local `max_ttl_secs`: the longest a node serves a stale copy when a lost
+/// invalidation goes unnoticed.
 pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 
 /// Everything a hybrid deployment on Redis is configured with, as one config section for
@@ -35,7 +35,7 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 #[serde(default, deny_unknown_fields)]
 pub struct HybridCacheSettings {
     /// The in-memory layer on each node. Its `max_ttl_secs` bounds how long a node can serve a
-    /// stale copy when an invalidation never reaches it. Left unset, here or in a config file, it
+    /// stale copy when a lost invalidation goes unnoticed. Left unset, here or in a config file, it
     /// is [`DEFAULT_LOCAL_MAX_TTL_SECS`]; `0` turns the cap off. Its `common` must stay unset:
     /// hybrid calls take TTLs and locks from `distributed.common`.
     #[serde(deserialize_with = "local_settings")]
@@ -76,14 +76,15 @@ fn local_settings<'de, D: Deserializer<'de>>(
 }
 
 impl HybridCacheSettings {
-    /// Fails when a setting in `local`, `distributed` or `backplane` is out of range, such as a
-    /// TTL over 365 days or a ping interval of 0, or when `local.common` is set, since nothing
-    /// would read it.
+    /// Fails when a setting in `local`, `distributed`, `backplane` or `worker` is out of range,
+    /// such as a TTL over 365 days or a ping interval of 0, or when `local.common` is set, since
+    /// nothing would read it.
     pub fn validate(&self) -> Result<(), CacheError> {
         check_local_common(&self.local)?;
         self.local.validate()?;
         self.distributed.validate()?;
-        self.backplane.validate()
+        self.backplane.validate()?;
+        self.worker.validate()
     }
 }
 
@@ -157,7 +158,8 @@ impl RedisBackplaneSettings {
     }
 }
 
-/// How a hybrid store's backplane worker waits before subscribing again. `connect` takes it from
+/// How a hybrid store's backplane worker waits before subscribing again, and how it tells that
+/// invalidations were lost while it stayed subscribed. `connect` takes it from
 /// [`HybridCacheSettings::worker`]; a store built with `new` takes it from
 /// [`with_worker_settings`](crate::store::HybridCacheStore::with_worker_settings).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,6 +172,17 @@ pub struct BackplaneWorkerSettings {
     /// The longest wait between tries: 5 seconds by default. A subscription must also stay up
     /// this long before the next loss starts the wait over from `reconnect_delay_ms`.
     pub max_reconnect_delay_ms: u64,
+
+    /// How often the worker publishes a heartbeat with the last sequence number its store has
+    /// finished publishing: 1 second by default. A node that missed one of the store's
+    /// invalidations clears its local layer at the next heartbeat.
+    pub heartbeat_interval_ms: u64,
+
+    /// How long without a heartbeat from another node before this node clears its local layer, as
+    /// that node may have stopped between a write and its publish: 5 seconds by default. Without
+    /// its own heartbeat for this long, the worker treats its subscription as lost. It must be
+    /// longer than `heartbeat_interval_ms`.
+    pub heartbeat_timeout_ms: u64,
 }
 
 impl Default for BackplaneWorkerSettings {
@@ -177,11 +190,41 @@ impl Default for BackplaneWorkerSettings {
         Self {
             reconnect_delay_ms: 100,
             max_reconnect_delay_ms: 5_000,
+            heartbeat_interval_ms: 1_000,
+            heartbeat_timeout_ms: 5_000,
         }
     }
 }
 
 impl BackplaneWorkerSettings {
+    /// Fails when `heartbeat_interval_ms` is 0, or `heartbeat_timeout_ms` isn't longer than it,
+    /// since every node would then miss heartbeats that are on time.
+    pub fn validate(&self) -> Result<(), CacheError> {
+        if self.heartbeat_interval_ms == 0 {
+            return Err(CacheError::InvalidSettings {
+                field: "heartbeat_interval_ms",
+                reason: "is 0; it must be at least 1 ms".to_owned(),
+            });
+        }
+        if self.heartbeat_timeout_ms <= self.heartbeat_interval_ms {
+            return Err(CacheError::InvalidSettings {
+                field: "heartbeat_timeout_ms",
+                reason: "must be longer than heartbeat_interval_ms".to_owned(),
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn heartbeat_interval(&self) -> Duration {
+        Duration::from_millis(self.heartbeat_interval_ms.max(1))
+    }
+
+    pub fn heartbeat_timeout(&self) -> Duration {
+        Duration::from_millis(self.heartbeat_timeout_ms)
+            .max(self.heartbeat_interval() + Duration::from_millis(1))
+    }
+
     pub fn reconnect_delay(&self) -> Duration {
         Duration::from_millis(self.reconnect_delay_ms.max(1))
     }
@@ -261,6 +304,30 @@ mod tests {
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
                 "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_heartbeat_interval_or_a_timeout_no_longer_than_it_is_rejected() {
+        for (field, interval, timeout) in [
+            ("heartbeat_interval_ms", 0, 5_000),
+            ("heartbeat_timeout_ms", 1_000, 1_000),
+            ("heartbeat_timeout_ms", 1_000, 500),
+            ("heartbeat_timeout_ms", 1_000, 0),
+        ] {
+            let settings = HybridCacheSettings {
+                worker: BackplaneWorkerSettings {
+                    heartbeat_interval_ms: interval,
+                    heartbeat_timeout_ms: timeout,
+                    ..BackplaneWorkerSettings::default()
+                },
+                ..HybridCacheSettings::default()
+            };
+
+            assert!(
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                "{interval} and {timeout}"
             );
         }
     }

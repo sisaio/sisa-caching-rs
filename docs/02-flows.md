@@ -165,7 +165,8 @@ sequenceDiagram
 ```
 
 If every publish try fails, the write has already returned the Redis result, and a warning is
-logged. Node B then serves its old copy until it expires, at most the local `max_ttl_secs`.
+logged. Node A's next heartbeat shows node B the missing sequence number, and node B clears its
+local layer.
 
 ## Backplane worker
 
@@ -181,6 +182,10 @@ sequenceDiagram
     loop while subscribed
         Bus-->>W: invalidation from another node
         W->>Local: bump generation, evict
+        Bus-->>W: heartbeat from another node
+        opt a number is missing, a node's heartbeats stopped, or a message can't be read
+            W->>Local: clear
+        end
     end
     Bus-->>W: subscription lost
     W->>Local: turn local reads off, clear
@@ -195,6 +200,10 @@ can't clear the local layer in a tight loop. If subscribing fails, the worker wa
 and tries again. A Redis subscription holds up to 8,192 messages the worker hasn't read yet; a
 worker that falls further behind loses its subscription the same way, instead of the messages
 queueing without a bound.
+
+The worker publishes its own heartbeat every `heartbeat_interval_ms`, subscribed or not. When its
+own heartbeats stop coming back for `heartbeat_timeout_ms`, the subscription has stopped
+delivering, so the worker treats it as lost.
 
 ## Purge worker
 

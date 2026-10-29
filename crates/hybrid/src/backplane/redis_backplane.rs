@@ -367,14 +367,13 @@ async fn slot_owner(connection: &mut ClusterConnection, slot: u16) -> RedisResul
 }
 
 impl RedisSubscription {
-    /// The next message, in order, with none missing. An error means messages may have been lost
-    /// and this subscription is done; open a new one.
-    pub(crate) async fn next(&mut self) -> Result<BackplaneMessage> {
+    /// The next message's payload, in order, with none missing. An error means messages may have
+    /// been lost and this subscription is done; open a new one. Dropping an unfinished call loses
+    /// no message.
+    pub(crate) async fn next(&mut self) -> Result<Vec<u8>> {
         loop {
             tokio::select! {
-                message = message(&mut self.pushes) => {
-                    return Ok(serde_json::from_slice(&message?)?);
-                }
+                message = message(&mut self.pushes) => return message,
                 _ = self.pings.tick() => {
                     tokio::time::timeout(self.settings.ping_timeout(), self.connection.ping(&self.settings.channel))
                         .await
@@ -425,13 +424,13 @@ mod tests {
         )
     }
 
-    async fn next(
-        subscription: &mut RedisSubscription,
-    ) -> std::result::Result<BackplaneMessage, String> {
-        tokio::time::timeout(Duration::from_secs(5), subscription.next())
+    async fn next(subscription: &mut RedisSubscription) -> BackplaneMessage {
+        let payload = tokio::time::timeout(Duration::from_secs(5), subscription.next())
             .await
             .expect("a message arrives")
-            .map_err(|error| error.to_string())
+            .unwrap();
+
+        serde_json::from_slice(&payload).unwrap()
     }
 
     #[tokio::test]
@@ -464,37 +463,9 @@ mod tests {
 
         for subscription in [&mut first, &mut second] {
             for message in &sent {
-                assert_eq!(next(subscription).await.as_ref(), Ok(message));
+                assert_eq!(&next(subscription).await, message);
             }
         }
-    }
-
-    #[tokio::test]
-    async fn an_unreadable_message_is_an_error_and_delivery_goes_on() {
-        let redis = Redis::start().await;
-        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
-        let mut subscription = backplane.subscribe().await.unwrap();
-        let mut conn = redis.connection().await;
-
-        for payload in [
-            "not json",
-            r#"{"v":2,"source":"node-a","store":"users","kind":"clear"}"#,
-            r#"{"v":1,"source":"node-a","store":"users","kind":"prefix","target":"user::eu"}"#,
-        ] {
-            redis::cmd("PUBLISH")
-                .arg(DEFAULT_REDIS_CHANNEL)
-                .arg(payload)
-                .query_async::<usize>(&mut conn)
-                .await
-                .unwrap();
-
-            assert!(next(&mut subscription).await.is_err(), "{payload}");
-        }
-
-        let sent = message(Invalidation::Clear);
-
-        backplane.publish(&sent).await.unwrap();
-        assert_eq!(next(&mut subscription).await, Ok(sent));
     }
 
     #[tokio::test]
@@ -521,9 +492,12 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let error = next(&mut subscription).await.unwrap_err();
+        let error = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+            .await
+            .expect("the subscription ends")
+            .unwrap_err();
 
-        assert!(error.contains("fell too far behind"), "{error}");
+        assert!(error.to_string().contains("fell too far behind"), "{error}");
     }
 
     #[tokio::test]
@@ -613,8 +587,11 @@ mod tests {
             .unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let error = next(&mut subscription).await.unwrap_err();
+        let error = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+            .await
+            .expect("the subscription ends")
+            .unwrap_err();
 
-        assert!(error.contains("fell too far behind"), "{error}");
+        assert!(error.to_string().contains("fell too far behind"), "{error}");
     }
 }

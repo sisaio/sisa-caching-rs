@@ -65,8 +65,9 @@ let settings: HybridCacheSettings = load_config_section("cache")?;
 let cache = HybridCacheStore::connect("app", redis_url, &settings).await?;
 ```
 
-A node serves a stale local copy for at most the local `max_ttl_secs`, 60 seconds by default, if
-an invalidation never reaches it.
+When an invalidation never reaches a node, the node clears its local layer at the writer's next
+heartbeat (1 second by default), or once the writer's heartbeats have stopped for 5 seconds. The
+local `max_ttl_secs`, 60 seconds by default, still caps every local copy.
 
 ## Compatibility
 

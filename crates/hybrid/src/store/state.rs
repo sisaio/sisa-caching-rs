@@ -1,8 +1,12 @@
 //! State shared by the hybrid store and its backplane worker.
 
 use std::{
+    collections::BTreeSet,
     hash::{BuildHasher, RandomState},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
 };
 
 use sisa_caching_core::{
@@ -16,11 +20,11 @@ use crate::backplane::{Invalidation, NodeId};
 
 const GENERATION_SLOTS: usize = 64;
 
-/// The local layer, the `get_or_set` lock, and a generation number per slot of keys.
-/// Every invalidation bumps the generations it covers before it evicts, so a reader that saw an
-/// older generation knows its distributed value may be stale and doesn't copy it into the local
-/// layer. Promotions and generation bumps take turns, so a bump never lands between a promotion's
-/// check and its copy.
+/// The local layer, the `get_or_set` lock, a generation number per slot of keys, and the sequence
+/// numbers of the store's invalidations. Every invalidation bumps the generations it covers before
+/// it evicts, so a reader that saw an older generation knows its distributed value may be stale
+/// and doesn't copy it into the local layer. Promotions and generation bumps take turns, so a bump
+/// never lands between a promotion's check and its copy.
 ///
 /// The memory store's writes and removals never fail, so their results are dropped here.
 pub(crate) struct State {
@@ -33,6 +37,8 @@ pub(crate) struct State {
     /// Promotions share it; an invalidation takes it alone to bump generations.
     turns: RwLock<()>,
     local_reads_enabled: AtomicBool,
+    /// Numbers this node's invalidations for its heartbeats.
+    pub(crate) sequence: Sequence,
 }
 
 impl State {
@@ -46,6 +52,7 @@ impl State {
             generations: std::array::from_fn(|_| AtomicU64::default()),
             hasher: RandomState::new(),
             turns: RwLock::new(()),
+            sequence: Sequence::default(),
         }
     }
 
@@ -102,6 +109,7 @@ impl State {
                     self.generation(key).fetch_add(1, Ordering::SeqCst);
                 }
                 Invalidation::Prefix(_) | Invalidation::Clear => self.bump_all(),
+                Invalidation::Heartbeat => return,
             }
         }
 
@@ -111,6 +119,7 @@ impl State {
                 _ = self.local_store.remove_prefix(prefix.as_str()).await
             }
             Invalidation::Clear => _ = self.local_store.clear().await,
+            Invalidation::Heartbeat => {}
         }
     }
 
@@ -127,6 +136,63 @@ impl State {
         self.local_reads_enabled.store(false, Ordering::SeqCst);
         self.invalidate(&Invalidation::Clear).await;
         self.local_reads_enabled.store(connected, Ordering::SeqCst);
+    }
+}
+
+/// Hands out this node's sequence numbers and tracks which are still being published, so a
+/// heartbeat only vouches for numbers whose publish is over. Those were sent before the heartbeat,
+/// so every subscriber that gets them gets them before it.
+#[derive(Default)]
+pub(crate) struct Sequence(Mutex<Numbers>);
+
+#[derive(Default)]
+struct Numbers {
+    last: u64,
+    publishing: BTreeSet<u64>,
+}
+
+impl Sequence {
+    /// The next number, counted as publishing until the returned guard drops.
+    pub(crate) fn start(&self) -> Publishing<'_> {
+        let mut numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+
+        numbers.last += 1;
+
+        let seq = numbers.last;
+
+        numbers.publishing.insert(seq);
+
+        Publishing {
+            sequence: self,
+            seq,
+        }
+    }
+
+    /// The highest number up to which every publish is over.
+    pub(crate) fn finished(&self) -> u64 {
+        let numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+
+        numbers
+            .publishing
+            .first()
+            .map_or(numbers.last, |first| first - 1)
+    }
+}
+
+/// One number being published.
+pub(crate) struct Publishing<'a> {
+    sequence: &'a Sequence,
+    pub(crate) seq: u64,
+}
+
+impl Drop for Publishing<'_> {
+    fn drop(&mut self) {
+        self.sequence
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publishing
+            .remove(&self.seq);
     }
 }
 
@@ -194,6 +260,25 @@ mod tests {
         state.resync(true).await;
 
         assert!(state.read::<String>(&key()).await.1.is_none());
+    }
+
+    #[test]
+    fn a_number_counts_as_finished_once_its_publish_and_every_earlier_one_is_over() {
+        let sequence = Sequence::default();
+
+        assert_eq!(sequence.finished(), 0);
+
+        let first = sequence.start();
+        let second = sequence.start();
+
+        assert_eq!((first.seq, second.seq), (1, 2));
+        assert_eq!(sequence.finished(), 0);
+
+        drop(second);
+        assert_eq!(sequence.finished(), 0, "1 is still publishing");
+
+        drop(first);
+        assert_eq!(sequence.finished(), 2);
     }
 
     type Hook = Box<dyn FnOnce() + Send>;

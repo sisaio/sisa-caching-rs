@@ -23,9 +23,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry = users_api::init_telemetry("axum-hybrid")?;
     let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let settings = HybridCacheSettings {
-        // Each instance keeps up to 10,000 entries in memory, for at most a minute each. The
-        // minute bounds how long an instance can serve a stale entry if an invalidation never
-        // reaches it.
+        // Each instance keeps up to 10,000 entries in memory, for at most a minute each, which
+        // caps how long it can serve a stale entry when a lost invalidation goes unnoticed.
         local: InMemoryCacheSettings {
             max_entries: Some(10_000),
             max_ttl_secs: Some(60),

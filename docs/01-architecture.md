@@ -13,8 +13,9 @@ explains how the parts fit, what they promise, and which rules hold them togethe
 - **A shared, documented format.** Services in other languages can read and write the same Redis
   keys and invalidation messages.
 - **A local layer with a known staleness bound.** The hybrid store serves reads from memory, and a
-  node never serves a value it was told is invalid. When a message is lost, the memory store's
-  `max_ttl_secs` caps how long it can serve the old one.
+  node never serves a value it was told is invalid. When a message is lost, the writer's next
+  heartbeat shows it and the node clears its local layer; the memory store's `max_ttl_secs` caps
+  every copy all the same.
 - **Small and explicit.** Building a store is all the setup: it runs its own worker and stops
   it when it is dropped. No hidden dependencies, and each store has one read path and one write
   path.
@@ -218,20 +219,32 @@ After each write, a hybrid node publishes one JSON message on the backplane's pu
 | `v` | Yes | The format version, `1` |
 | `source` | Yes | An id unique to the writing process; nodes skip their own messages |
 | `store` | Yes | The store name, such as `app` |
-| `kind` | Yes | `key`, `prefix` or `clear` |
+| `seq` | No | On an invalidation, its number in the writer's sequence, from 1 up; on a heartbeat, the number up to which the writer has finished publishing |
+| `kind` | Yes | `key`, `prefix`, `clear`, or `heartbeat` |
 | `target` | For `key` and `prefix` | The key or prefix, without the store name |
 | `trace` | No | Trace propagation fields, such as `traceparent` |
 
 ```json
-{"v":1,"source":"node-7","store":"app","kind":"key","target":"user:42"}
-{"v":1,"source":"node-7","store":"app","kind":"prefix","target":"user"}
-{"v":1,"source":"node-7","store":"app","kind":"clear"}
+{"v":1,"source":"node-7","store":"app","seq":41,"kind":"key","target":"user:42"}
+{"v":1,"source":"node-7","store":"app","seq":42,"kind":"prefix","target":"user"}
+{"v":1,"source":"node-7","store":"app","seq":43,"kind":"clear"}
+{"v":1,"source":"node-7","store":"app","seq":43,"kind":"heartbeat"}
 ```
 
+Each store's worker publishes a heartbeat every `heartbeat_interval_ms`. A heartbeat only counts
+publishes that are over, so on one channel it arrives after the invalidations it covers. A node
+that received fewer of a writer's numbers than the heartbeat accounts for, or that hears no
+heartbeat from a writer for `heartbeat_timeout_ms`, clears its local layer. A node tracks a
+writer from the first message it gets from it. Nothing says which of the writer's earlier numbers
+came before the subscribe, so the writer's first heartbeat clears the local layer unless every
+number up to it arrived: after each subscribe, a node clears once more for every writer that
+published before, which covers an invalidation lost in between, as during a failover.
+
 A service in another language that writes to Redis publishes the matching message after each
-write, so hybrid nodes drop their copies. Keep messages exact: a node that receives one it can't
-parse, an unknown `v` included, treats its subscription as broken, clears its local layer and
-resubscribes.
+write, so hybrid nodes drop their copies. It can leave out `seq` and the heartbeats, and nodes
+then apply its messages without tracking them. Keep messages exact: a node that receives one it
+can't read, an unknown `v` included, clears its local layer, logs a warning and counts it, and
+stays subscribed.
 
 ## Guarantees and limits
 
@@ -239,9 +252,11 @@ resubscribes.
 | --- | --- |
 | **Guaranteed** | After a write returns, this node's local copy is gone, and every node that receives the message drops its copy. |
 | **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `0`, or a local store built without those settings, the bound is the entry's own TTL. |
-| **Guaranteed** | Once the worker notices the backplane is down (a failed read or ping), the node reads only from the distributed store until it resubscribes. |
+| **Guaranteed** | Once the worker notices the backplane is down (a failed read or ping, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
+| **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
+| **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default). |
 | **Not guaranteed** | Delivery is at most once: pub/sub drops messages to a node that is reconnecting. The clear on resubscribe covers the gap. |
-| **Not guaranteed** | If a process dies between the Redis write and the publish, other nodes keep their copy until `max_ttl_secs`. |
+| **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by `max_ttl_secs`. So is one lost just before its writer stops for good, on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. While a writer can't publish for longer than `heartbeat_timeout_ms`, other nodes clear when its heartbeats stop and again at its first heartbeat after, so a copy read in between can be stale until then. |
 | **Not guaranteed** | A read that overlaps a write on another node may copy the old value; the write's invalidation then evicts it. |
 | **Not guaranteed** | A write the primary acknowledged just before a failover; see [Compatibility](03-compatibility.md). |
 | **Not guaranteed** | A Redis write held up on its way to the server (queued behind other commands, waiting for a reconnect, or resent after a failover) gives its entry that much longer: Redis counts down the time left from when it runs the write. |
@@ -265,7 +280,9 @@ answer:
 - `get_or_set`'s lock wait timed out;
 - a refresh failed;
 - a hybrid publish failed after three tries;
-- the backplane subscription was lost or couldn't be made.
+- the backplane subscription was lost or couldn't be made;
+- a backplane message couldn't be read, or an invalidation went missing, which clears the local
+  layer.
 
 A local-layer type mismatch in the hybrid store reads through to the distributed store.
 
@@ -279,7 +296,7 @@ Settled; reopen only with new evidence.
 | No deduplication of invalidations | The only duplicate source is a publish retry, and applying an eviction twice is harmless |
 | No per-entry version in Redis | Versions from different nodes' clocks can't be compared safely; generations and eviction-on-write cover the race |
 | Redis expiry is relative (`PEXPIRE`), not absolute (`PEXPIREAT`) | An absolute deadline needs the writer's clock to agree with the server's; a relative one is off only by how long the write takes to arrive |
-| A hybrid write returns `Ok` when every publish fails | The data is written; `max_ttl_secs` bounds how stale peers get, and the failure is logged and counted |
+| A hybrid write returns `Ok` when every publish fails | The data is written; peers clear their local layers at the writer's next heartbeat, and the failure is logged and counted |
 | Reads stay on the Redis primary | Replica lag would let a node copy a value that was just replaced back into its local layer. Behind Sentinel, a connection keeps reading from the old primary after a failover until its next write; [Compatibility](03-compatibility.md#sentinel) says what that allows |
 | Each store starts its own worker, once | A store can't run without its listener or with two, and needs no setup; its worker stops when its last clone drops |
 | One backplane, `RedisBackplane`, with no trait for others | Applications can't supply a transport of their own, so the message type, the subscription and what the worker expects of them stay private and can change without a breaking release |
