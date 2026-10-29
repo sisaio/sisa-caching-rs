@@ -27,7 +27,7 @@ sequenceDiagram
             Store->>Loader: load()
             Loader-->>Store: new value, or an error
             Store->>Store: set(key, new value)
-            Store-->>App: new value, or on an error the cached one while it is live
+            Store-->>App: new value, or on an error the cached one while the store still holds it
         end
     else missing
         Store->>Lock: lock(key), waiting up to lock_timeout_ms
