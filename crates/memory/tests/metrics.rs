@@ -84,6 +84,13 @@ async fn a_store_counts_hits_misses_and_evictions() {
             .unwrap(),
         None
     );
+    // A value of another type is a miss too: the caller gets none.
+    assert!(
+        store
+            .get::<String>(&CacheKey::new("user", 10).unwrap())
+            .await
+            .is_err()
+    );
 
     provider.force_flush().unwrap();
 
@@ -91,6 +98,6 @@ async fn a_store_counts_hits_misses_and_evictions() {
     let memory = [KeyValue::new("layer", "memory")];
 
     assert_eq!(counter(&exported, "sisa.caching.hits", &memory), 1);
-    assert_eq!(counter(&exported, "sisa.caching.misses", &memory), 1);
+    assert_eq!(counter(&exported, "sisa.caching.misses", &memory), 2);
     assert_eq!(counter(&exported, "sisa.caching.evictions", &[]), 2);
 }

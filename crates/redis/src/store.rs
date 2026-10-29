@@ -220,12 +220,15 @@ where
         };
         let created_at =
             SystemTime::UNIX_EPOCH + Duration::from_millis(created_at_ms.unwrap_or_default());
-        let entry = CacheEntry::new(
-            JsonCodec.decode(&encoded_value)?,
-            created_at,
-            ttl_ms.map(Duration::from_millis),
-        )
-        .with_expires_at(expires_at);
+        let value = JsonCodec.decode(&encoded_value);
+
+        // Data that doesn't decode is a miss too: the caller gets no value.
+        if value.is_err() {
+            METRICS.read(&self.name, Layer::Redis, false);
+        }
+
+        let entry = CacheEntry::new(value?, created_at, ttl_ms.map(Duration::from_millis))
+            .with_expires_at(expires_at);
 
         let entry = (!entry.is_expired(SystemClock.now())).then_some(entry);
         METRICS.read(&self.name, Layer::Redis, entry.is_some());

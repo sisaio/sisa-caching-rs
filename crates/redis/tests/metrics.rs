@@ -60,6 +60,14 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
     let store = RedisCacheStore::connect("app", redis.url()).await.unwrap();
     let load = || async { Ok::<_, ()>("loaded".to_owned()) };
 
+    // Data that doesn't decode as the requested type is a miss: the caller gets no value.
+    store.set(&key(0), "ada".to_owned(), None).await.unwrap();
+    assert!(store.get::<u64>(&key(0)).await.is_err());
+    assert_eq!(
+        metric("sisa.caching.misses", &[KeyValue::new("layer", "redis")]),
+        1
+    );
+
     redis.stop().await;
 
     for id in 1..=10 {

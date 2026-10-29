@@ -325,13 +325,12 @@ impl CacheStore for InMemoryCacheStore {
             return Ok(None);
         };
 
-        let value = entry
-            .value
-            .downcast_ref::<CV>()
-            .cloned()
-            .ok_or(CacheError::type_mismatch(type_name::<CV>()))?;
+        let value = entry.value.downcast_ref::<CV>().cloned();
 
-        METRICS.read(&self.name, Layer::Memory, true);
+        // A value of another type is a miss too: the caller gets none.
+        METRICS.read(&self.name, Layer::Memory, value.is_some());
+
+        let value = value.ok_or(CacheError::type_mismatch(type_name::<CV>()))?;
 
         Ok(Some(entry.map(|_| value)))
     }
