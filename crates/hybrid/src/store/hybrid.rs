@@ -223,7 +223,11 @@ async fn publish(state: Arc<State>, backplane: Arc<RedisBackplane>, mut message:
 
     for attempt in 1..=PUBLISH_ATTEMPTS {
         match backplane.publish(&message).await {
-            Ok(()) => return,
+            Ok(subscribers) => {
+                METRICS.invalidation_delivered(&message.store, subscribers);
+
+                return;
+            }
             Err(error) if attempt == PUBLISH_ATTEMPTS => {
                 METRICS.publish_failed(&message.store);
                 tracing::warn!(

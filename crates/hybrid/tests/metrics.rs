@@ -90,6 +90,11 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         metric("sisa.caching.invalidations.received", &[]) == 2
     })
     .await;
+    // Each reached both subscriptions, the writer's own included.
+    eventually("both publishes count their subscribers", || async {
+        metric("sisa.caching.invalidations.delivered", &[]) == 4
+    })
+    .await;
     assert_eq!(metric("sisa.caching.hits", &hybrid), 2);
     assert_eq!(metric("sisa.caching.misses", &hybrid), 2);
     assert_eq!(

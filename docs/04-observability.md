@@ -20,6 +20,7 @@ All under the meter `sisa-caching`. Every metric has a `store` attribute with th
 | `sisa.caching.errors` | counter | `operation`: `get` or `set` | Store calls inside `get_or_set` that failed: its reads, and the stores of what it loaded |
 | `sisa.caching.evictions` | counter | | Entries a full memory store dropped to make room |
 | `sisa.caching.invalidations.received` | counter | | Other nodes' invalidations a hybrid store applied |
+| `sisa.caching.invalidations.delivered` | counter | | Subscribers the server delivered a hybrid store's invalidations to, as `PUBLISH` reports |
 | `sisa.caching.publish.failures` | counter | | Invalidations a hybrid store couldn't publish after 3 tries |
 | `sisa.caching.backplane.connected` | gauge | | 1 while a hybrid store's backplane is subscribed, else 0 |
 | `sisa.caching.backplane.unreadable` | counter | | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
@@ -36,11 +37,17 @@ loads, and a failed store returns the loaded value without caching it. A call th
 returns its error instead. With the store down, each `get_or_set` counts two `get` errors, one per
 read, and a `set` error for storing what its loader returned.
 
+`invalidations.delivered` counts every subscriber of the channel, the publishing node's own
+included, so with every node listening it grows by the number of nodes for each invalidation, more
+if other stores share the channel. On a cluster, `SPUBLISH` counts only the subscribers on the node
+that took it.
+
 Worth an alert:
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every
   `get_or_set` meanwhile runs its loader.
 - `publish.failures` above 0: other nodes clear their local layers at the writer's next heartbeat,
   so hit rates dip.
+- `invalidations.delivered` falling while writes go on: a node stopped listening.
 - `backplane.connected` at 0: that node reads everything from Redis.
 - `backplane.unreadable` above 0: something publishes messages this release can't read, and each
   one clears the local layer.

@@ -135,8 +135,9 @@ impl RedisBackplane {
 }
 
 impl RedisBackplane {
-    /// Sends the message to all subscribers, including this node's own.
-    pub(crate) async fn publish(&self, message: &BackplaneMessage) -> Result<()> {
+    /// Sends the message to all subscribers, including this node's own, and returns how many the
+    /// server delivered it to.
+    pub(crate) async fn publish(&self, message: &BackplaneMessage) -> Result<usize> {
         let command = match self.server {
             Server::Cluster { .. } => "SPUBLISH",
             _ => "PUBLISH",
@@ -146,7 +147,7 @@ impl RedisBackplane {
             .arg(serde_json::to_vec(message)?)
             .to_owned();
 
-        match &self.server {
+        let subscribers = match &self.server {
             Server::Standalone { conn, .. } => {
                 publish.query_async::<usize>(&mut conn.clone()).await?
             }
@@ -156,7 +157,7 @@ impl RedisBackplane {
             Server::Cluster { conn, .. } => publish.query_async::<usize>(&mut conn.clone()).await?,
         };
 
-        Ok(())
+        Ok(subscribers)
     }
 
     /// Opens a subscription that receives the messages published from now on. It connects and
