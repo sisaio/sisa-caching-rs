@@ -33,6 +33,9 @@ pushes a tag.
       `chore`; a commit without a type lands under Other.
 - [ ] If semver-checks reports a breaking change, check the bump matches (before 1.0, a breaking
       change bumps the minor version) and that the changelog says how to migrate.
+- [ ] When the minor version changes, check that the README's install line names it: every
+      crate publishes that README to crates.io. If it doesn't, fix it in a PR to `main` before you
+      edit the changelog, since anything that lands on `main` replaces the release PR.
 - [ ] Push the changelog edit to the release PR's branch, then tell the maintainer it is ready,
       with the version and a one-line summary.
 
