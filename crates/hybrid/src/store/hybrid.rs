@@ -226,11 +226,12 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     }
 
     /// Runs one write or removal on the distributed store. The local copies are evicted before
-    /// and after it, and the other nodes are told once it is done, even when it fails or panics,
-    /// since a write without a reply may still have been applied. The call returns once the write
-    /// and the second eviction are done; the invalidation is published, and retried, in the
-    /// background, so a backplane that can't be reached doesn't slow writes down. It runs in a
-    /// `hybrid write` span, whose context the invalidation carries to the other nodes.
+    /// and after it, as other nodes' invalidations evict them, and the other nodes are told once
+    /// it is done, even when it fails or panics, since a write without a reply may still have
+    /// been applied. The call returns once the write is done and no local copy from before it
+    /// can be read; the invalidation is published, and retried, in the background, so a
+    /// backplane that can't be reached doesn't slow writes down. It runs in a `hybrid write`
+    /// span, whose context the invalidation carries to the other nodes.
     #[tracing::instrument(name = "hybrid write", skip_all, fields(store = %self.name(), kind = invalidation.kind()), err(level = "info"))]
     async fn mutate<T, Fut>(
         &self,
@@ -249,7 +250,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         let state = Arc::clone(&self.state);
         let backplane = Arc::clone(&self.backplane);
 
-        state.invalidate(&message.invalidation).await;
+        state.apply(&message.invalidation).await;
 
         let write = operation(Arc::clone(&self.distributed_store));
 
@@ -259,7 +260,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 // In its own task too, so a write that panics is still evicted and published below.
                 let result = tokio::spawn(write.in_current_span()).await;
 
-                state.invalidate(&message.invalidation).await;
+                state.apply(&message.invalidation).await;
                 tokio::spawn(publish(state, backplane, message).in_current_span());
 
                 result

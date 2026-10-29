@@ -111,7 +111,11 @@ async fn a_failed_write_still_evicts_on_every_node() {
             write.run(&writer).await.is_err(),
             "{write:?}: the caller sees the failure"
         );
-        assert_eq!(local_value(&writer, &key(1)).await, None, "{write:?}");
+        // A prefix's copies are removed on the blocking pool, after the call returns.
+        eventually(&format!("{write:?}: the writer drops its copy"), || async {
+            local_value(&writer, &key(1)).await.is_none()
+        })
+        .await;
         eventually(&format!("{write:?}: the reader drops its copy"), || async {
             local_value(&reader, &key(1)).await.is_none()
         })
