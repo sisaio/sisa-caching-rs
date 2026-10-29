@@ -140,8 +140,9 @@ Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writ
   local layer.
 - **Write:** evict locally, write the distributed store, evict again, publish an
   invalidation (a key, a prefix, or clear). The steps after the first eviction run in their own
-  task, so a cancelled caller can't stop the publish. The call returns after the second eviction;
-  the publish and its retries finish in the background.
+  task, so a cancelled caller can't stop the publish. The call returns after the second eviction,
+  or for a prefix once its keys read as misses, as its walk runs on the blocking pool; the
+  publish and its retries finish in the background.
 - **Generations:** each key hashes to one of 64 counters. An invalidation bumps the counter before
   it evicts, and a read only copies into the local layer if the counter didn't move. An
   invalidation waits for a copy in progress, so a slow read can't put back a value that was just

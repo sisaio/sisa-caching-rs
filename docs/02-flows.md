@@ -141,8 +141,9 @@ sequenceDiagram
 
 `set`, `set_entry`, `remove`, `remove_prefix` and `clear` all take this path. The steps after
 the first eviction run in their own task, so they finish even if the caller is cancelled. The call
-returns once Redis has answered and the key is evicted again; the publish and its retries carry on
-in the background, so a backplane that can't be reached doesn't slow writes down.
+returns once Redis has answered and the key is evicted again, or for a prefix once its keys read as
+misses while the blocking pool walks them; the publish and its retries carry on in the background,
+so a backplane that can't be reached doesn't slow writes down.
 
 ```mermaid
 sequenceDiagram
@@ -210,9 +211,10 @@ own heartbeats stop coming back for `heartbeat_timeout_ms`, the subscription has
 delivering, so the worker treats it as lost.
 
 A prefix invalidation walks every local entry, so the worker bumps the generations, leaves the walk
-to the blocking pool and goes on receiving. The prefix's keys read as local misses until the walk is
-done. With 16 walks already queued, another prefix clears the local layer instead. A clear empties
-the local layer at once and frees what it held there too.
+to the blocking pool and goes on receiving; a writer's own `remove_prefix` hands its walk over the
+same way. The prefix's keys read as local misses until the walk is done. With 16 walks already
+queued, another prefix clears the local layer instead. A clear empties the local layer at once and
+frees what it held there too.
 
 ## Purge worker
 
