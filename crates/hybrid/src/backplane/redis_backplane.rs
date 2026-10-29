@@ -1,16 +1,16 @@
 use std::io::ErrorKind;
 
 use ::redis::{
-    Client, ConnectionAddr, IntoConnectionInfo, PushInfo, PushKind, RedisError, RedisResult, Value,
-    aio::{ConnectionManager, PubSubSink, PubSubStream},
+    AsyncConnectionConfig, Client, ConnectionAddr, IntoConnectionInfo, ProtocolVersion, PushInfo,
+    PushKind, RedisError, RedisResult, Value,
+    aio::{ConnectionManager, MultiplexedConnection},
     cluster::{ClusterClient, ClusterConfig},
     cluster_async::ClusterConnection,
     cluster_routing::{Route, RoutingInfo, SingleNodeRoutingInfo, SlotAddr},
     from_redis_value,
 };
-use futures_util::StreamExt;
 use tokio::{
-    sync::mpsc::{UnboundedReceiver, unbounded_channel},
+    sync::broadcast::{self, Receiver, error::RecvError},
     time::{Instant, Interval, MissedTickBehavior},
 };
 
@@ -23,8 +23,16 @@ use crate::settings::RedisBackplaneSettings;
 
 use super::{Backplane, BackplaneMessage, BackplaneSubscription};
 
-/// A backplane over Redis pub/sub on one channel. Publishing shares one connection; each
-/// subscription opens its own pub/sub connection.
+/// How many unread messages a subscription holds. The connection keeps reading, so Redis's limit
+/// on slow subscribers never applies. A worker that falls further behind loses its subscription
+/// instead, so it clears its local layer and subscribes again, rather than the messages queueing
+/// without a bound or getting lost without a sign.
+const QUEUE_LIMIT: usize = 8192;
+
+/// A backplane over Redis pub/sub on one channel. Publishing shares one connection. Each
+/// subscription opens its own connection, on RESP3, and holds up to 8,192 messages its worker
+/// hasn't read: a worker that falls further behind loses its subscription, so the node clears its
+/// local layer and subscribes again.
 ///
 /// On a cluster, use [`cluster`](Self::cluster), or [`connect`](Self::connect) to any one node:
 /// classic pub/sub reaches every node. While that node is down, subscribing fails and the hybrid
@@ -155,7 +163,10 @@ impl Backplane for RedisBackplane {
 
     /// Connects and subscribes within the ping timeout.
     async fn subscribe(&self) -> Result<RedisSubscription> {
-        let connection = tokio::time::timeout(self.settings.ping_timeout(), async {
+        // Messages arrive as RESP3 pushes. A broadcast channel takes them without making the
+        // connection wait, keeps the last `QUEUE_LIMIT`, and tells the reader it fell behind.
+        let (sender, pushes) = broadcast::channel(QUEUE_LIMIT);
+        let connection = tokio::time::timeout(self.settings.ping_timeout(), async move {
             let (client, sentinel) = match &self.server {
                 Server::Standalone { client, .. } => (client.clone(), None),
                 Server::Sentinel(sentinel) => {
@@ -165,7 +176,6 @@ impl Backplane for RedisBackplane {
                     (client, Some((sentinel.clone(), primary)))
                 }
                 Server::Cluster { client, .. } => {
-                    let (sender, pushes) = unbounded_channel();
                     let mut connection = client
                         .get_async_connection_with_config(
                             ClusterConfig::new().set_push_sender(sender),
@@ -184,19 +194,29 @@ impl Backplane for RedisBackplane {
 
                     return Ok(Connection::Cluster {
                         connection,
-                        pushes,
                         slot,
                         owner,
                     });
                 }
             };
-            let (mut sink, stream) = client.get_async_pubsub().await?.split();
+            let info = client.get_connection_info().clone();
+            let resp3 = info
+                .redis_settings()
+                .clone()
+                .set_protocol(ProtocolVersion::RESP3);
+            // The ping timeout bounds subscribing and each ping.
+            let config = AsyncConnectionConfig::new()
+                .set_connection_timeout(None)
+                .set_response_timeout(None)
+                .set_push_sender(sender);
+            let mut connection = Client::open(info.set_redis_settings(resp3))?
+                .get_multiplexed_async_connection_with_config(&config)
+                .await?;
 
-            sink.subscribe(&self.settings.channel).await?;
+            connection.subscribe(&self.settings.channel).await?;
 
-            Ok::<_, RedisError>(Connection::PubSub {
-                sink,
-                stream,
+            Ok::<_, RedisError>(Connection::Server {
+                connection,
                 sentinel,
             })
         })
@@ -212,16 +232,19 @@ impl Backplane for RedisBackplane {
 
         Ok(RedisSubscription {
             connection,
+            pushes,
             pings,
             settings: self.settings.clone(),
         })
     }
 }
 
-/// One pub/sub connection. It is pinged while waiting, so a connection that stops delivering
+/// One subscribed connection. It is pinged while waiting, so a connection that stops delivering
 /// without closing ends the subscription too.
 pub struct RedisSubscription {
     connection: Connection,
+    /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
+    pushes: Receiver<PushInfo>,
     pings: Interval,
     settings: RedisBackplaneSettings,
 }
@@ -231,60 +254,60 @@ pub struct RedisSubscription {
     reason = "one per subscription, and which variant is larger depends on redis-rs's features"
 )]
 enum Connection {
-    /// A pub/sub connection to one server.
-    PubSub {
-        sink: PubSubSink,
-        stream: PubSubStream,
+    /// A connection to one server.
+    Server {
+        connection: MultiplexedConnection,
         /// Behind Sentinel: where to ask for the primary, and the primary this subscribed on.
         sentinel: Option<(SentinelConnection, ConnectionAddr)>,
     },
-    /// A cluster connection, which hands messages over as RESP3 pushes.
+    /// A cluster connection.
     Cluster {
         connection: ClusterConnection,
-        pushes: UnboundedReceiver<PushInfo>,
         /// The channel's slot, and the node that owned it when subscribing.
         slot: u16,
         owner: Option<Value>,
     },
 }
 
-impl Connection {
-    /// The next message's payload.
-    async fn message(&mut self) -> Result<Vec<u8>> {
-        let closed = || io_error(ErrorKind::ConnectionAborted, "connection closed");
+/// The next message's payload.
+async fn message(pushes: &mut Receiver<PushInfo>) -> Result<Vec<u8>> {
+    let closed = || io_error(ErrorKind::ConnectionAborted, "connection closed");
 
-        match self {
-            Self::PubSub { stream, .. } => {
-                let message = stream.next().await.ok_or_else(closed)?;
-
-                Ok(message.get_payload_bytes().to_vec())
+    loop {
+        let push = match pushes.recv().await {
+            Ok(push) => push,
+            Err(RecvError::Lagged(_)) => {
+                return Err(io_error(ErrorKind::Other, "the worker fell too far behind"));
             }
-            Self::Cluster { pushes, .. } => loop {
-                let push = pushes.recv().await.ok_or_else(closed)?;
+            Err(RecvError::Closed) => return Err(closed()),
+        };
 
-                match (push.kind, push.data.into_iter().nth(1)) {
-                    // Garnet hands a sharded subscription's messages over as `message`.
-                    (PushKind::SMessage | PushKind::Message, Some(Value::BulkString(payload))) => {
-                        return Ok(payload);
-                    }
-                    // redis-rs subscribes again by itself, but messages sent in the gap are lost.
-                    // On Redis, a slot that moves unsubscribes its channel.
-                    (PushKind::Disconnection | PushKind::SUnsubscribe, _) => {
-                        return Err(closed());
-                    }
-                    _ => {}
-                }
-            },
+        match (push.kind, push.data.into_iter().nth(1)) {
+            // Garnet hands a sharded subscription's messages over as `message`.
+            (PushKind::Message | PushKind::SMessage, Some(Value::BulkString(payload))) => {
+                return Ok(payload);
+            }
+            // A cluster connection subscribes again by itself, but messages sent in the gap are
+            // lost. On Redis, a slot that moves unsubscribes its channel.
+            (PushKind::Disconnection | PushKind::SUnsubscribe, _) => return Err(closed()),
+            _ => {}
         }
     }
+}
 
+impl Connection {
     /// Pings the connection, and fails once the subscription is on the wrong node: behind
     /// Sentinel, once the primary has moved (the shared Sentinel connection moves too, so the
     /// store stops reading from the demoted primary); on a cluster, once the slot has moved.
     async fn ping(&mut self, channel: &str) -> Result<()> {
         match self {
-            Self::PubSub { sink, sentinel, .. } => {
-                sink.ping::<Value>().await?;
+            Self::Server {
+                connection,
+                sentinel,
+            } => {
+                ::redis::cmd("PING")
+                    .query_async::<Value>(connection)
+                    .await?;
 
                 if let Some((sentinel, subscribed)) = sentinel
                     && sentinel
@@ -359,7 +382,7 @@ impl BackplaneSubscription for RedisSubscription {
     async fn next(&mut self) -> Result<BackplaneMessage> {
         loop {
             tokio::select! {
-                message = self.connection.message() => {
+                message = message(&mut self.pushes) => {
                     return Ok(serde_json::from_slice(&message?)?);
                 }
                 _ = self.pings.tick() => {

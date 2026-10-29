@@ -8,7 +8,8 @@
 ## Servers
 
 The Redis store and the hybrid store's backplane need a server that speaks the Redis protocol:
-hashes, `PEXPIRE`, `MULTI`, `SCAN` and pub/sub.
+hashes, `PEXPIRE`, `MULTI`, `SCAN` and pub/sub. The backplane subscribes over RESP3, which every
+server below speaks.
 
 | Server | One primary | Primary with replicas | Cluster | Sentinel failover | TLS |
 | --- | --- | --- | --- | --- | --- |

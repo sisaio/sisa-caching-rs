@@ -192,7 +192,9 @@ The local layer is cleared on every subscribe, because copies made before it may
 invalidations. While reads are off, every read goes to Redis. The wait only starts over from
 100 ms after a subscription that stayed up for at least 5 s, so a connection that keeps dropping
 can't clear the local layer in a tight loop. If subscribing fails, the worker waits the same way
-and tries again.
+and tries again. A Redis subscription holds up to 8,192 messages the worker hasn't read yet; a
+worker that falls further behind loses its subscription the same way, instead of the messages
+queueing without a bound.
 
 ## Purge worker
 
