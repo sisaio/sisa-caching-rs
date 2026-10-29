@@ -1,6 +1,6 @@
 //! The metrics a hybrid store records, above all the two the docs say to alert on. A test binary of
-//! its own: the instruments are created on the first cache call, from the meter provider installed
-//! then, so this test must install its provider before any other test touches a store.
+//! its own: the instruments are created when the first store is built, from the meter provider
+//! installed then, so this test must install its provider before any other test builds a store.
 
 mod common;
 

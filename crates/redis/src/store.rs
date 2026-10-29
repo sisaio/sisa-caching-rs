@@ -11,7 +11,7 @@ use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KEY_SEPARATOR, KeyPrefix},
     clock::{Clock, SystemClock},
     locker::Locker,
-    metrics::{Layer, METRICS},
+    metrics::{Layer, METRICS, Reads},
     settings::CacheSettings,
 };
 
@@ -50,6 +50,7 @@ where
     name: KeyPrefix,
     settings: RedisCacheSettings,
     locker: Arc<Locker>,
+    reads: &'static Reads,
 }
 
 /// The name and the settings; never the connection or a value.
@@ -71,8 +72,11 @@ where
     /// [`CacheError::InvalidKey`] when the name is empty or has an empty level. A
     /// `ConnectionManager` reconnects after a lost connection.
     pub fn new(name: &str, conn: Conn) -> Result<Self, CacheError> {
+        let name = KeyPrefix::new(name)?;
+
         Ok(Self {
-            name: KeyPrefix::new(name)?,
+            reads: METRICS.reads(&name, Layer::Redis),
+            name,
             conn,
             settings: RedisCacheSettings::default(),
             locker: Arc::default(),
@@ -203,7 +207,7 @@ where
             .await?;
 
         let Some(encoded_value) = encoded_value else {
-            METRICS.read(&self.name, Layer::Redis, false);
+            self.reads.record(false);
 
             return Ok(None);
         };
@@ -211,7 +215,7 @@ where
         let expires_at = match pttl_ms {
             -1 => None,
             ms if ms < 0 => {
-                METRICS.read(&self.name, Layer::Redis, false);
+                self.reads.record(false);
 
                 return Ok(None);
             }
@@ -224,14 +228,14 @@ where
 
         // Data that doesn't decode is a miss too: the caller gets no value.
         if value.is_err() {
-            METRICS.read(&self.name, Layer::Redis, false);
+            self.reads.record(false);
         }
 
         let entry = CacheEntry::new(value?, created_at, ttl_ms.map(Duration::from_millis))
             .with_expires_at(expires_at);
 
         let entry = (!entry.is_expired(SystemClock.now())).then_some(entry);
-        METRICS.read(&self.name, Layer::Redis, entry.is_some());
+        self.reads.record(entry.is_some());
 
         Ok(entry)
     }
