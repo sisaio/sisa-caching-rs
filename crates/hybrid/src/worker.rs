@@ -56,6 +56,7 @@ impl BackplaneWorker {
             Ok(message) => message,
             Err(error) => {
                 METRICS.backplane_unreadable(store);
+                METRICS.local_cleared(store, "unreadable");
                 tracing::warn!(%store, %error, "could not read a backplane message; clearing the local layer");
                 return self.state.resync(true).await;
             }
@@ -75,6 +76,15 @@ impl BackplaneWorker {
         let Some(gap) = peers.receive(&message) else {
             return;
         };
+
+        METRICS.local_cleared(
+            store,
+            if gap == Gap::Untracked {
+                "untracked"
+            } else {
+                "gap"
+            },
+        );
 
         match gap {
             Gap::Missing => {
@@ -126,12 +136,17 @@ impl BackplaneWorker {
         // 0 until the first subscribe, so a backplane that never connects still reports.
         METRICS.backplane_connected(store, false);
 
+        let mut subscribed_before = false;
+
         loop {
             match self.backplane.subscribe().await {
                 Ok(mut subscription) => {
                     let subscribed_at = Instant::now();
 
                     // Copies made before this subscription may have missed invalidations.
+                    if std::mem::replace(&mut subscribed_before, true) {
+                        METRICS.local_cleared(store, "resubscribed");
+                    }
                     state.resync(true).await;
                     METRICS.backplane_connected(store, true);
                     tracing::info!(%store, "backplane subscribed; local reads on");
@@ -155,6 +170,7 @@ impl BackplaneWorker {
                                 let gone = peers.expire(timeout);
 
                                 if !gone.is_empty() {
+                                    METRICS.local_cleared(store, "peer_lost");
                                     tracing::warn!(%store, nodes = ?gone, "heartbeats stopped; clearing the local layer");
                                     state.resync(true).await;
                                 }

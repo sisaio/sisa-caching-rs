@@ -24,6 +24,7 @@ All under the meter `sisa-caching`. Every metric has a `store` attribute with th
 | `sisa.caching.publish.failures` | counter | | Invalidations a hybrid store couldn't publish after 3 tries |
 | `sisa.caching.backplane.connected` | gauge | | 1 while a hybrid store's backplane is subscribed, else 0 |
 | `sisa.caching.backplane.unreadable` | counter | | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
+| `sisa.caching.local.clears` | counter | `reason`: `gap`, `untracked`, `peer_lost`, `resubscribed` or `unreadable` | Times a hybrid store cleared its local layer because it may have missed an invalidation: a number missing below a heartbeat, numbers it can't track, a node whose heartbeats stopped, a new subscription after a lost one, or a message it couldn't read. A clear another node asked for isn't counted |
 
 `layer` is `memory`, `redis`, or `hybrid` for a hybrid store as a whole. A hybrid store records
 all three, so its local hit rate is the `memory` series and its overall hit rate the `hybrid`
@@ -51,6 +52,8 @@ Worth an alert:
 - `backplane.connected` at 0: that node reads everything from Redis.
 - `backplane.unreadable` above 0: something publishes messages this release can't read, and each
   one clears the local layer.
+- `local.clears` growing: each clear empties a node's local layer, so its hit rate dips; `reason`
+  says why.
 - `evictions` growing fast: `max_entries` is smaller than the working set.
 
 ## Spans

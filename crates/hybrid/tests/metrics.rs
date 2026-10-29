@@ -111,6 +111,13 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         metric("sisa.caching.backplane.unreadable", &[]) == 2
     })
     .await;
+    assert_eq!(
+        metric(
+            "sisa.caching.local.clears",
+            &[KeyValue::new("reason", "unreadable")]
+        ),
+        2
+    );
 
     // With the server gone, every try fails, which counts as one failed publish.
     redis.stop().await;
