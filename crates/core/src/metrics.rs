@@ -95,6 +95,10 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
             .u64_counter("sisa.caching.backplane.unreadable")
             .with_description("Backplane messages a hybrid store could not read")
             .build(),
+        local_clears: meter
+            .u64_counter("sisa.caching.local.clears")
+            .with_description("Times a hybrid store cleared its local layer, as it may have missed an invalidation")
+            .build(),
     }
 });
 
@@ -133,6 +137,7 @@ pub struct CacheMetrics {
     publish_failures: Counter<u64>,
     backplane_connected: Gauge<u64>,
     backplane_unreadable: Counter<u64>,
+    local_clears: Counter<u64>,
 }
 
 impl CacheMetrics {
@@ -212,6 +217,16 @@ impl CacheMetrics {
     /// Counts one backplane message a hybrid store couldn't read. Each clears its local layer.
     pub fn backplane_unreadable(&self, store: &KeyPrefix) {
         self.backplane_unreadable.add(1, &[store_attribute(store)]);
+    }
+
+    /// Counts one clear of a hybrid store's local layer, done because it may have missed an
+    /// invalidation, with `reason`: `gap`, `untracked`, `peer_lost`, `resubscribed` or
+    /// `unreadable`. A clear another node asked for isn't counted.
+    pub fn local_cleared(&self, store: &KeyPrefix, reason: &'static str) {
+        self.local_clears.add(
+            1,
+            &[store_attribute(store), KeyValue::new("reason", reason)],
+        );
     }
 }
 
