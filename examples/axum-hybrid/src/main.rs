@@ -48,8 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so serving right away is safe.
     let cache = HybridCacheStore::connect("example", url, &settings).await?;
 
-    let served = users_api::serve(users_api::router(cache)).await;
+    let served = users_api::serve(users_api::router(cache.clone())).await;
 
+    // Tells the other instances this one is gone, so they keep their local copies.
+    cache.shutdown().await;
     telemetry.shutdown();
 
     Ok(served?)

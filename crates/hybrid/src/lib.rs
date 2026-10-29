@@ -80,8 +80,25 @@
 //! between a write and its publish, or when a message can't be read. A node that stops hearing
 //! its own heartbeats, such as a Garnet subscription left on a node that lost the channel's slot,
 //! treats its subscription as lost. A node that stops for good costs every other node one clear,
-//! and a node that subscribes clears once more at the first heartbeat of each node that published
-//! before, as one of those invalidations may have been lost after the subscribe.
+//! unless it calls [`shutdown`](HybridCacheStore::shutdown) first, and a node that subscribes
+//! clears once more at the first heartbeat of each node that published before, as one of those
+//! invalidations may have been lost after the subscribe.
+//!
+//! Call `shutdown` once as the application stops, after its last write. It publishes a
+//! `stopping` message, the node's last heartbeat, so the other nodes forget it instead of clearing
+//! when its heartbeats stop:
+//!
+//! ```no_run
+//! # use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore};
+//! # async fn serve<T>(_: T) {}
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &HybridCacheSettings::default()).await?;
+//!
+//! serve(cache.clone()).await;
+//! cache.shutdown().await;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! The local `max_ttl_secs` is the bound when an invalidation never arrives and nothing shows it: a
 //! Redis write timed out on the client but was applied later, or the writer, such as a service in
@@ -104,9 +121,9 @@
 //! carries propagation fields such as `traceparent`. A writer in another language publishes this
 //! after each write, so hybrid nodes drop their copies.
 //!
-//! Hybrid nodes also number their invalidations in `seq` and publish `heartbeat` messages, so the
-//! others notice one that goes missing. A writer in another language can leave both out: nodes
-//! apply its invalidations without tracking them.
+//! Hybrid nodes also number their invalidations in `seq` and publish `heartbeat` and `stopping`
+//! messages, so the others notice one that goes missing. A writer in another language can leave
+//! them all out: nodes apply its invalidations without tracking them.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

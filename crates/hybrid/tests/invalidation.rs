@@ -272,6 +272,40 @@ async fn a_node_whose_heartbeats_stop_makes_the_others_clear() {
 }
 
 #[tokio::test]
+async fn a_node_that_shuts_down_is_forgotten_without_a_clear() {
+    let redis = Redis::start().await;
+    let distributed = memory("users");
+    let writer = heartbeating_node(&distributed, redis.url()).await;
+    let reader = heartbeating_node(&distributed, redis.url()).await;
+
+    distributed
+        .set(&key(1), "ada".to_owned(), None)
+        .await
+        .unwrap();
+    reader.get::<String>(&key(1)).await.unwrap();
+    // A write just before the stop, which the stop message counts.
+    writer.remove(&key(2)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    writer.shutdown().await;
+    writer.shutdown().await;
+    assert!(!writer.local_reads_enabled());
+
+    // Past the reader's 1 s heartbeat timeout, its copy is still there.
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    assert_eq!(local_value(&reader, &key(1)).await.as_deref(), Some("ada"));
+    assert!(reader.local_reads_enabled());
+
+    // The stopped node reads through, and starts no worker again.
+    assert_eq!(
+        writer.get::<String>(&key(1)).await.unwrap().as_deref(),
+        Some("ada")
+    );
+    assert!(!writer.local_reads_enabled());
+    assert_eq!(local_value(&writer, &key(1)).await, None);
+}
+
+#[tokio::test]
 async fn a_node_that_stops_hearing_its_own_heartbeats_subscribes_again() {
     let redis = Redis::start().await;
     let Some(url) = redis.add_user("node").await else {

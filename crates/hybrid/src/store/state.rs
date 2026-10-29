@@ -44,6 +44,9 @@ pub(crate) struct State {
     removing: Arc<Removing>,
     /// Numbers this node's invalidations for its heartbeats.
     pub(crate) sequence: Sequence,
+    /// Whether `shutdown` has sent the stop message. A heartbeat holds it while it publishes, so
+    /// none goes out after the stop.
+    pub(crate) stopped: tokio::sync::Mutex<bool>,
 }
 
 impl State {
@@ -59,6 +62,7 @@ impl State {
             turns: RwLock::new(()),
             removing: Arc::default(),
             sequence: Sequence::default(),
+            stopped: tokio::sync::Mutex::new(false),
         }
     }
 
@@ -116,7 +120,7 @@ impl State {
                 _ = self.local_store.remove_prefix(prefix.as_str()).await
             }
             Invalidation::Clear => _ = self.local_store.clear().await,
-            Invalidation::Heartbeat => {}
+            Invalidation::Heartbeat | Invalidation::Stopping => {}
         }
     }
 
@@ -154,7 +158,7 @@ impl State {
                 self.generation(key).fetch_add(1, Ordering::SeqCst);
             }
             Invalidation::Prefix(_) | Invalidation::Clear => self.bump_all(),
-            Invalidation::Heartbeat => {}
+            Invalidation::Heartbeat | Invalidation::Stopping => {}
         }
     }
 
@@ -244,6 +248,15 @@ impl Sequence {
             sequence: self,
             seq,
         }
+    }
+
+    /// Whether no publish is in progress.
+    pub(crate) fn idle(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publishing
+            .is_empty()
     }
 
     /// The highest number up to which every publish is over.

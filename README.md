@@ -66,6 +66,9 @@ use sisa_caching::{HybridCacheSettings, HybridCacheStore};
 
 let settings: HybridCacheSettings = load_config_section("cache")?;
 let cache = HybridCacheStore::connect("app", redis_url, &settings).await?;
+
+// At shutdown, after the last write: the other nodes forget this one instead of clearing.
+cache.shutdown().await;
 ```
 
 When an invalidation never reaches a node, the node clears its local layer at the writer's next
