@@ -28,8 +28,8 @@ type Erased = Arc<dyn Any + Send + Sync>;
 type EntryMap = HashMap<String, StoredEntry>;
 
 /// The entries of a store and its clones, split over `shards` maps by key hash, plus how many
-/// there are, a counter that orders their use, and whether a trim is running, as one runs at a
-/// time.
+/// there are, a count of writes that orders their use, and whether a trim is running, as one runs
+/// at a time.
 struct Entries {
     shards: Box<[RwLock<EntryMap>]>,
     hasher: RandomState,
@@ -49,9 +49,10 @@ impl Entries {
         }
     }
 
-    /// A number above every one handed out before, so entries order by when they were last used.
+    /// A write's number, above every one before it. A read takes the last write's number, so
+    /// readers don't all update one counter, and entries read since the same write tie.
     fn next_use(&self) -> u64 {
-        self.uses.fetch_add(1, Ordering::Relaxed)
+        self.uses.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// The map that holds `key`. One map needs no hash.
@@ -245,10 +246,18 @@ impl InMemoryCacheStore {
 
             if uses.len() > target {
                 let excess = uses.len() - target;
-                // Uses are unique, so `excess` entries are at or below the cutoff.
-                let (_, &mut cutoff, _) = uses.select_nth_unstable(excess - 1);
-                let evicted =
-                    self.extract(|_, stored| stored.last_used.load(Ordering::Relaxed) <= cutoff);
+                let (below, &mut cutoff, _) = uses.select_nth_unstable(excess - 1);
+                // Entries read since the same write tie, so several can sit at the cutoff: take
+                // only as many of those as the trim needs.
+                let mut ties = excess - below.iter().filter(|&&used| used < cutoff).count();
+                let evicted = self.extract(|_, stored| {
+                    let used = stored.last_used.load(Ordering::Relaxed);
+                    let tied = used == cutoff && ties > 0;
+
+                    ties -= usize::from(tied);
+
+                    used < cutoff || tied
+                });
 
                 METRICS.evicted(&self.name, evicted.len());
                 tracing::debug!(
@@ -273,7 +282,10 @@ impl InMemoryCacheStore {
     }
 
     /// Takes out every entry `pick` chooses, one map at a time. The caller frees them.
-    fn extract(&self, pick: impl Fn(&str, &StoredEntry) -> bool) -> Vec<(String, StoredEntry)> {
+    fn extract(
+        &self,
+        mut pick: impl FnMut(&str, &StoredEntry) -> bool,
+    ) -> Vec<(String, StoredEntry)> {
         let mut taken = Vec::new();
 
         for shard in &self.entries.shards {
@@ -329,9 +341,13 @@ impl CacheStore for InMemoryCacheStore {
             .get(key)
             .filter(|stored| !stored.is_expired(now))
             .map(|stored| {
-                stored
-                    .last_used
-                    .store(self.entries.next_use(), Ordering::Relaxed);
+                let used = self.entries.uses.load(Ordering::Relaxed);
+
+                // Stored only when it moved, so readers of one entry don't keep taking its cache
+                // line from each other.
+                if stored.last_used.load(Ordering::Relaxed) != used {
+                    stored.last_used.store(used, Ordering::Relaxed);
+                }
 
                 stored.entry.clone()
             });
@@ -933,6 +949,24 @@ mod tests {
         trimmed(&store).await;
 
         assert_eq!(held(&store, 0..11).await, [0, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[tokio::test]
+    async fn a_trim_drops_only_as_many_entries_read_together_as_it_needs() {
+        let store = store(&ManualClock::new(), with_limit(10));
+
+        for id in 0..10_u32 {
+            store.set(&key(id), id, None).await.unwrap();
+        }
+        // Read since the same write, all ten tie as the least recently used.
+        held(&store, 0..10).await;
+        store.set(&key(10), 10_u32, None).await.unwrap();
+        trimmed(&store).await;
+
+        let held = held(&store, 0..11).await;
+
+        assert_eq!(held.len(), 9, "{held:?}");
+        assert!(held.contains(&10), "{held:?}");
     }
 
     #[tokio::test]
