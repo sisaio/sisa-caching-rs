@@ -16,6 +16,7 @@ pub enum HybridCacheError {
 
     /// `HybridCacheStore::new` was given a local and a distributed store with different names.
     #[error("local store `{local}` and distributed store `{distributed}` must have the same name")]
+    #[non_exhaustive]
     StoreNameMismatch {
         local: KeyPrefix,
         distributed: KeyPrefix,

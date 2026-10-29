@@ -363,7 +363,7 @@ async fn store_names_must_match_and_a_mismatch_leaves_the_local_store_alone() {
 
     assert!(matches!(
         result,
-        Err(HybridCacheError::StoreNameMismatch { local, distributed })
+        Err(HybridCacheError::StoreNameMismatch { local, distributed, .. })
             if local == name("teams") && distributed == name("users")
     ));
     assert_eq!(
