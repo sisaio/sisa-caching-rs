@@ -23,9 +23,9 @@ crate with the store's feature; none is on by default.
   (`refresh_threshold`), and how long `get_or_set` waits for another caller's load
   (`lock_timeout_ms`). The memory store adds an entry limit and a residency cap
   (`max_entries`, `max_ttl_secs`).
-- **Worker**: a background task the application runs on a `WorkerHost`. The memory store's
-  `PurgeWorker` drops expired entries; the hybrid store's `BackplaneWorker` applies other nodes'
-  invalidations.
+- **Worker**: a background task a store runs for itself, from its first call until its last
+  clone drops. The memory store's purge worker drops expired entries; the hybrid store's
+  backplane worker applies other nodes' invalidations.
 - **Backplane** and **invalidation**: after a hybrid write, the writing node publishes an
   invalidation over Redis pub/sub, the backplane, and every other node drops its local copy.
 

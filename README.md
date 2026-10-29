@@ -38,13 +38,10 @@ sisa-caching = { version = "0.1", features = ["memory"] }   # or "redis", or "hy
 In memory:
 
 ```rust,ignore
-use sisa_caching::{CacheStore, InMemoryCacheStore, PurgeWorker, WorkerHost};
+use sisa_caching::{CacheStore, InMemoryCacheStore};
 
+// From its first write on, it drops expired entries nobody reads again every 60 seconds.
 let cache = InMemoryCacheStore::new("app")?;
-
-// Drops expired entries nobody reads again, every 60 seconds. Keep the host as long as the cache.
-let workers = WorkerHost::new();
-workers.register(PurgeWorker::new(cache.clone()));
 
 let user: User = cache.get_or_set(&format!("user:v1:{id}"), || load_user(id), None).await?;
 cache.remove_prefix("user").await?;
@@ -58,17 +55,14 @@ use sisa_caching::RedisCacheStore;
 let cache = RedisCacheStore::connect("app", "redis://127.0.0.1:6379").await?;
 ```
 
-Hybrid, with the workers that apply other nodes' invalidations and drop expired local copies:
+Hybrid. The store starts the worker that applies other nodes' invalidations itself, and stops it
+when its last clone drops:
 
 ```rust,ignore
-use sisa_caching::{BackplaneWorker, HybridCacheSettings, HybridCacheStore, PurgeWorker, WorkerHost};
+use sisa_caching::{HybridCacheSettings, HybridCacheStore};
 
 let settings: HybridCacheSettings = load_config_section("cache")?;
 let cache = HybridCacheStore::connect("app", redis_url, &settings).await?;
-
-let workers = WorkerHost::new();
-workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker.clone()));
-workers.register(PurgeWorker::new(cache.local_store().clone()));
 ```
 
 A node serves a stale local copy for at most the local `max_ttl_secs`, 60 seconds by default, if
