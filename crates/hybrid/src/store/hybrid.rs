@@ -14,7 +14,7 @@ use sisa_caching_redis::store::RedisCacheStore;
 use tracing::Instrument;
 
 use crate::{
-    backplane::{Backplane, BackplaneMessage, Invalidation, NodeId, RedisBackplane},
+    backplane::{BackplaneMessage, Invalidation, NodeId, RedisBackplane},
     error::{HybridCacheError, Result},
     settings::{BackplaneWorkerSettings, HybridCacheSettings, check_local_common},
     worker::BackplaneWorker,
@@ -26,7 +26,8 @@ use super::{RedisHybridCacheStore, state::State};
 /// tries. A late or repeated invalidation only costs a cache miss, so retrying is always safe.
 const PUBLISH_ATTEMPTS: u32 = 3;
 
-/// An in-memory layer in front of a distributed store, with invalidations carried by a backplane.
+/// An in-memory layer in front of a distributed store, with invalidations carried by a
+/// [`RedisBackplane`].
 /// One store holds values of every type: `get::<User>` and `set(&key, user, None)` name the type
 /// per call.
 ///
@@ -40,19 +41,21 @@ const PUBLISH_ATTEMPTS: u32 = 3;
 /// inside a tokio runtime, or in `connect`, and stops when its last clone drops. Until that worker
 /// has subscribed, and while the subscription is lost, the store reads through to the distributed
 /// store.
-pub struct HybridCacheStore<D: CacheStore + 'static, B: Backplane> {
+pub struct HybridCacheStore<D: CacheStore + 'static> {
     distributed_store: Arc<D>,
-    state: Arc<State<B>>,
+    state: Arc<State>,
+    backplane: Arc<RedisBackplane>,
     worker_settings: BackplaneWorkerSettings,
     /// The backplane worker. It holds `state` but not this, so it doesn't keep itself running.
     worker: Worker,
 }
 
-impl<D: CacheStore + 'static, B: Backplane> Clone for HybridCacheStore<D, B> {
+impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
     fn clone(&self) -> Self {
         Self {
             distributed_store: Arc::clone(&self.distributed_store),
             state: Arc::clone(&self.state),
+            backplane: Arc::clone(&self.backplane),
             worker_settings: self.worker_settings.clone(),
             worker: self.worker.clone(),
         }
@@ -60,7 +63,7 @@ impl<D: CacheStore + 'static, B: Backplane> Clone for HybridCacheStore<D, B> {
 }
 
 /// The name, the node id and whether local reads are on; never a value.
-impl<D: CacheStore + 'static, B: Backplane> std::fmt::Debug for HybridCacheStore<D, B> {
+impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("HybridCacheStore")
@@ -71,7 +74,7 @@ impl<D: CacheStore + 'static, B: Backplane> std::fmt::Debug for HybridCacheStore
     }
 }
 
-impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
+impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// Composes the configured layers without changing their settings. Names must match, and the
     /// local store's `common` settings must stay unset, since hybrid calls use the distributed
     /// store's.
@@ -95,7 +98,7 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
     pub fn new(
         local_store: InMemoryCacheStore,
         distributed_store: D,
-        backplane: B,
+        backplane: RedisBackplane,
     ) -> Result<Self> {
         check_local_common(local_store.settings())?;
 
@@ -108,7 +111,8 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
 
         Ok(Self {
             distributed_store: Arc::new(distributed_store),
-            state: Arc::new(State::new(local_store, backplane)),
+            state: Arc::new(State::new(local_store)),
+            backplane: Arc::new(backplane),
             worker_settings: BackplaneWorkerSettings::default(),
             worker: Worker::new(),
         })
@@ -128,8 +132,9 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
     pub fn start_worker(&self) {
         self.worker.start("hybrid-cache-backplane-worker", || {
             let state = Arc::clone(&self.state);
+            let backplane = Arc::clone(&self.backplane);
 
-            BackplaneWorker::new(state, self.worker_settings.clone()).run()
+            BackplaneWorker::new(state, backplane, self.worker_settings.clone()).run()
         });
     }
 
@@ -178,6 +183,7 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
         let message =
             BackplaneMessage::new(self.node_id().clone(), self.name().clone(), invalidation);
         let state = Arc::clone(&self.state);
+        let backplane = Arc::clone(&self.backplane);
 
         state.invalidate(&message.invalidation).await;
 
@@ -190,7 +196,7 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.invalidate(&message.invalidation).await;
-                tokio::spawn(publish(state, message).in_current_span());
+                tokio::spawn(publish(backplane, message).in_current_span());
 
                 result
             }
@@ -203,11 +209,11 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
 
 /// Publishes one invalidation, retrying with a growing wait. When every try fails, the other nodes
 /// keep their copies until the local `max_ttl_secs` drops them.
-async fn publish<B: Backplane>(state: Arc<State<B>>, message: BackplaneMessage) {
+async fn publish(backplane: Arc<RedisBackplane>, message: BackplaneMessage) {
     let mut delay = Duration::from_millis(50);
 
     for attempt in 1..=PUBLISH_ATTEMPTS {
-        match state.backplane.publish(&message).await {
+        match backplane.publish(&message).await {
             Ok(()) => return,
             Err(error) if attempt == PUBLISH_ATTEMPTS => {
                 METRICS.publish_failed(&message.store);
@@ -262,7 +268,7 @@ impl RedisHybridCacheStore {
     }
 }
 
-impl<D: CacheStore + 'static, B: Backplane> CacheStore for HybridCacheStore<D, B> {
+impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
     type Error = HybridCacheError;
 
     fn name(&self) -> &KeyPrefix {

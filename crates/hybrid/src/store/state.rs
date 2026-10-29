@@ -12,20 +12,19 @@ use sisa_caching_core::{
 use sisa_caching_memory::store::InMemoryCacheStore;
 use tokio::sync::RwLock;
 
-use crate::backplane::{Backplane, Invalidation, NodeId};
+use crate::backplane::{Invalidation, NodeId};
 
 const GENERATION_SLOTS: usize = 64;
 
-/// The local layer, the backplane, the `get_or_set` lock, and a generation number per slot of keys.
+/// The local layer, the `get_or_set` lock, and a generation number per slot of keys.
 /// Every invalidation bumps the generations it covers before it evicts, so a reader that saw an
 /// older generation knows its distributed value may be stale and doesn't copy it into the local
 /// layer. Promotions and generation bumps take turns, so a bump never lands between a promotion's
 /// check and its copy.
 ///
 /// The memory store's writes and removals never fail, so their results are dropped here.
-pub(crate) struct State<B: Backplane> {
+pub(crate) struct State {
     pub(crate) local_store: InMemoryCacheStore,
-    pub(crate) backplane: B,
     pub(crate) node_id: NodeId,
     /// Lets one `get_or_set` per key load at a time, across the store's clones.
     pub(crate) locker: Locker,
@@ -36,13 +35,12 @@ pub(crate) struct State<B: Backplane> {
     local_reads_enabled: AtomicBool,
 }
 
-impl<B: Backplane> State<B> {
-    pub(crate) fn new(local_store: InMemoryCacheStore, backplane: B) -> Self {
+impl State {
+    pub(crate) fn new(local_store: InMemoryCacheStore) -> Self {
         Self {
             // Off until a backplane worker runs for this store.
             local_reads_enabled: AtomicBool::new(false),
             local_store,
-            backplane,
             node_id: NodeId::generate(),
             locker: Locker::new(),
             generations: std::array::from_fn(|_| AtomicU64::default()),
@@ -135,40 +133,13 @@ impl<B: Backplane> State<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backplane::{BackplaneMessage, BackplaneSubscription};
     use futures_util::FutureExt;
     use sisa_caching_core::clock::{Clock, SystemClock};
     use std::sync::{Arc, Mutex};
     use tokio::sync::oneshot;
 
-    /// A backplane whose subscriptions never deliver; these tests call the state directly.
-    struct Bus;
-
-    struct Silent;
-
-    impl BackplaneSubscription for Silent {
-        type Error = std::io::Error;
-
-        async fn next(&mut self) -> std::io::Result<BackplaneMessage> {
-            std::future::pending().await
-        }
-    }
-
-    impl Backplane for Bus {
-        type Error = std::io::Error;
-        type Subscription = Silent;
-
-        async fn publish(&self, _: &BackplaneMessage) -> std::io::Result<()> {
-            Ok(())
-        }
-
-        async fn subscribe(&self) -> std::io::Result<Silent> {
-            Ok(Silent)
-        }
-    }
-
-    async fn state() -> State<Bus> {
-        let state = State::new(InMemoryCacheStore::new("state").unwrap(), Bus);
+    async fn state() -> State {
+        let state = State::new(InMemoryCacheStore::new("state").unwrap());
         state.resync(true).await;
         state
     }
@@ -177,7 +148,7 @@ mod tests {
         "user:1".to_owned()
     }
 
-    fn entry(state: &State<Bus>, value: &str) -> CacheEntry<String> {
+    fn entry(state: &State, value: &str) -> CacheEntry<String> {
         CacheEntry::new(value.to_owned(), state.local_store.clock().now(), None)
     }
 
@@ -254,7 +225,6 @@ mod tests {
             InMemoryCacheStore::new("state")
                 .unwrap()
                 .with_clock(clock.clone()),
-            Bus,
         ));
         state.resync(true).await;
 

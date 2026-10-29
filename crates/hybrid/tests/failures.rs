@@ -11,20 +11,16 @@ use std::{
     time::Duration,
 };
 
-use common::{InMemoryBackplane, WRITES, Write, key, local_value, memory, node, start};
+use common::{WRITES, Write, backplane, key, local_value, memory, node, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,
     settings::CacheSettings,
 };
-use sisa_caching_hybrid::{
-    backplane::{Backplane, BackplaneMessage, BackplaneSubscription},
-    error::HybridCacheError,
-    store::HybridCacheStore,
-};
+use sisa_caching_hybrid::{error::HybridCacheError, store::HybridCacheStore};
 use sisa_caching_memory::store::InMemoryCacheStore;
-use sisa_caching_testing::eventually;
-use tokio::sync::{Semaphore, broadcast};
+use sisa_caching_testing::{Redis, eventually};
+use tokio::sync::Semaphore;
 
 /// Applies every write, then reports a failure, as a call that timed out after Redis applied it
 /// would.
@@ -92,19 +88,20 @@ impl CacheStore for LostReplies {
 
 #[tokio::test]
 async fn a_failed_write_still_evicts_on_every_node() {
+    let redis = Redis::start().await;
+
     for write in WRITES {
         let shared = memory("users");
-        let backplane = InMemoryBackplane::new();
         let writer = start(
             HybridCacheStore::new(
                 memory("users"),
                 LostReplies(shared.clone()),
-                backplane.clone(),
+                backplane(&redis).await,
             )
             .unwrap(),
         )
         .await;
-        let reader = node(&shared, &backplane).await;
+        let reader = node(&shared, &redis).await;
 
         shared.set(&key(1), "old".to_owned(), None).await.unwrap();
         writer.get::<String>(&key(1)).await.unwrap();
@@ -225,66 +222,12 @@ impl CacheStore for GatedStore {
     }
 }
 
-/// A backplane that can hold publishes until the test lets them go, and counts them.
-#[derive(Clone)]
-struct GatedBackplane {
-    messages: broadcast::Sender<BackplaneMessage>,
-    hold: Arc<AtomicBool>,
-    publishing: Arc<Semaphore>,
-    published: Arc<Semaphore>,
-    release: Arc<Semaphore>,
-}
-
-impl GatedBackplane {
-    fn new() -> Self {
-        Self {
-            messages: broadcast::channel(16).0,
-            hold: Arc::default(),
-            publishing: Arc::new(Semaphore::new(0)),
-            published: Arc::new(Semaphore::new(0)),
-            release: Arc::new(Semaphore::new(0)),
-        }
-    }
-}
-
-struct GatedSubscription(broadcast::Receiver<BackplaneMessage>);
-
-impl BackplaneSubscription for GatedSubscription {
-    type Error = std::io::Error;
-
-    async fn next(&mut self) -> std::io::Result<BackplaneMessage> {
-        self.0.recv().await.map_err(std::io::Error::other)
-    }
-}
-
-impl Backplane for GatedBackplane {
-    type Error = std::io::Error;
-    type Subscription = GatedSubscription;
-
-    async fn publish(&self, message: &BackplaneMessage) -> std::io::Result<()> {
-        self.publishing.add_permits(1);
-
-        if self.hold.load(Ordering::SeqCst) {
-            self.release.acquire().await.unwrap().forget();
-        }
-
-        _ = self.messages.send(message.clone());
-        self.published.add_permits(1);
-
-        Ok(())
-    }
-
-    async fn subscribe(&self) -> std::io::Result<GatedSubscription> {
-        Ok(GatedSubscription(self.messages.subscribe()))
-    }
-}
-
-type GatedNode = HybridCacheStore<GatedStore, GatedBackplane>;
-type Reader = HybridCacheStore<InMemoryCacheStore, GatedBackplane>;
+type GatedNode = HybridCacheStore<GatedStore>;
+type Reader = HybridCacheStore<InMemoryCacheStore>;
 
 /// A writer whose writes pass through `gate`, and a reader on the same stores. Both hold a copy
 /// of `user:1` = `old`.
-async fn writer_and_reader(gate: &Arc<Gate>, backplane: &GatedBackplane) -> (GatedNode, Reader) {
+async fn writer_and_reader(gate: &Arc<Gate>, redis: &Redis) -> (GatedNode, Reader) {
     let shared = memory("users");
 
     shared.set(&key(1), "old".to_owned(), None).await.unwrap();
@@ -294,10 +237,11 @@ async fn writer_and_reader(gate: &Arc<Gate>, backplane: &GatedBackplane) -> (Gat
         gate: gate.clone(),
     };
     let writer =
-        start(HybridCacheStore::new(memory("users"), distributed, backplane.clone()).unwrap())
+        start(HybridCacheStore::new(memory("users"), distributed, backplane(redis).await).unwrap())
             .await;
     let reader =
-        start(HybridCacheStore::new(memory("users"), shared, backplane.clone()).unwrap()).await;
+        start(HybridCacheStore::new(memory("users"), shared, backplane(redis).await).unwrap())
+            .await;
 
     writer.get::<String>(&key(1)).await.unwrap();
     reader.get::<String>(&key(1)).await.unwrap();
@@ -327,10 +271,11 @@ async fn reader_sees(reader: &Reader, expected: Option<&str>) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_write_whose_caller_gives_up_after_it_was_applied_still_reaches_other_nodes() {
+    let redis = Redis::start().await;
+
     for write in WRITES {
         let gate = Arc::new(Gate::default());
-        let backplane = GatedBackplane::new();
-        let (writer, reader) = writer_and_reader(&gate, &backplane).await;
+        let (writer, reader) = writer_and_reader(&gate, &redis).await;
 
         gate.after.store(true, Ordering::SeqCst);
 
@@ -349,7 +294,6 @@ async fn a_write_whose_caller_gives_up_after_it_was_applied_still_reaches_other_
         );
 
         gate.release.add_permits(1);
-        reached(&backplane.published).await;
         reader_sees(&reader, write.result()).await;
 
         // The writer copies distributed hits into its local layer again afterwards.
@@ -371,9 +315,9 @@ async fn a_write_whose_caller_gives_up_after_it_was_applied_still_reaches_other_
 
 #[tokio::test]
 async fn a_write_whose_caller_gives_up_before_it_was_applied_still_runs() {
+    let redis = Redis::start().await;
     let gate = Arc::new(Gate::default());
-    let backplane = GatedBackplane::new();
-    let (writer, _) = writer_and_reader(&gate, &backplane).await;
+    let (writer, _) = writer_and_reader(&gate, &redis).await;
 
     gate.before.store(true, Ordering::SeqCst);
 
@@ -391,7 +335,7 @@ async fn a_write_whose_caller_gives_up_before_it_was_applied_still_runs() {
     );
 
     gate.release.add_permits(1);
-    reached(&backplane.published).await;
+    reached(&gate.written).await;
     assert_eq!(
         writer.get::<String>(&key(1)).await.unwrap().as_deref(),
         Some("new")
@@ -400,9 +344,9 @@ async fn a_write_whose_caller_gives_up_before_it_was_applied_still_runs() {
 
 #[tokio::test]
 async fn a_write_runs_to_the_end_after_its_last_handle_is_dropped() {
+    let redis = Redis::start().await;
     let gate = Arc::new(Gate::default());
-    let backplane = GatedBackplane::new();
-    let (writer, reader) = writer_and_reader(&gate, &backplane).await;
+    let (writer, reader) = writer_and_reader(&gate, &redis).await;
 
     gate.after.store(true, Ordering::SeqCst);
 
@@ -414,35 +358,33 @@ async fn a_write_runs_to_the_end_after_its_last_handle_is_dropped() {
     assert!(call.await.unwrap_err().is_cancelled());
 
     gate.release.add_permits(1);
-    reached(&backplane.published).await;
     reader_sees(&reader, Some("new")).await;
 }
 
 #[tokio::test]
 async fn a_write_returns_without_waiting_for_its_publish_which_still_goes_out() {
+    let redis = Redis::start().await;
     let gate = Arc::new(Gate::default());
-    let backplane = GatedBackplane::new();
-    let (writer, reader) = writer_and_reader(&gate, &backplane).await;
+    let (writer, reader) = writer_and_reader(&gate, &redis).await;
 
-    backplane.hold.store(true, Ordering::SeqCst);
-
-    tokio::time::timeout(Duration::from_secs(2), Write::Set.run(&writer))
+    // Frozen, the server holds the publish. A write that waited for it would take at least the
+    // 500 ms reply timeout.
+    redis.pause().await;
+    tokio::time::timeout(Duration::from_millis(400), Write::Set.run(&writer))
         .await
         .expect("the write returns while its publish is held")
         .unwrap();
-    reached(&backplane.publishing).await;
-    assert_eq!(backplane.published.available_permits(), 0);
+    assert_eq!(local_value(&reader, &key(1)).await.as_deref(), Some("old"));
 
-    backplane.release.add_permits(1);
-    reached(&backplane.published).await;
+    redis.unpause().await;
     reader_sees(&reader, Some("new")).await;
 }
 
 #[tokio::test]
 async fn a_write_that_panics_returns_an_error_and_still_reaches_other_nodes() {
+    let redis = Redis::start().await;
     let gate = Arc::new(Gate::default());
-    let backplane = GatedBackplane::new();
-    let (writer, reader) = writer_and_reader(&gate, &backplane).await;
+    let (writer, reader) = writer_and_reader(&gate, &redis).await;
 
     gate.panic.store(true, Ordering::SeqCst);
 

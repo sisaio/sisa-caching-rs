@@ -8,11 +8,11 @@ use super::node_id::NodeId;
 
 const MESSAGE_VERSION: u8 = 1;
 
-/// The one message published and received by every backplane. It names the writer, the store,
-/// and the local copies to remove, and carries the writer's trace context so the nodes that apply
-/// it continue the same trace. The same type is serialized directly for transport.
+/// The message a write publishes and every other node's worker receives. It names the writer, the
+/// store, and the local copies to remove, and carries the writer's trace context so the nodes that
+/// apply it continue the same trace. The same type is serialized directly for transport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BackplaneMessage {
+pub(crate) struct BackplaneMessage {
     #[serde(rename = "v", deserialize_with = "deserialize_version")]
     version: u8,
     /// The writer's node id. That node skips the message.
@@ -54,8 +54,7 @@ impl BackplaneMessage {
 /// `remove_prefix`, and `clear` operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "target", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum Invalidation {
+pub(crate) enum Invalidation {
     /// One key.
     Key(String),
     /// Every key under a prefix.

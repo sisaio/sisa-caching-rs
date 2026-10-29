@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use sisa_caching_core::{cache::CacheStore, metrics::METRICS};
 use tracing::Instrument;
 
 use crate::{
-    backplane::{Backplane, BackplaneMessage, BackplaneSubscription},
+    backplane::{BackplaneMessage, RedisBackplane},
     settings::BackplaneWorkerSettings,
     store::state::State,
 };
@@ -13,14 +13,23 @@ use crate::{
 /// layer. The store starts it once. It holds the store's state but not its `Worker`, so it stops
 /// when the store's last clone drops. The store reads through to the distributed store until this
 /// worker has subscribed, and again whenever the subscription is lost, until it subscribes again.
-pub(crate) struct BackplaneWorker<B: Backplane> {
-    state: Arc<State<B>>,
+pub(crate) struct BackplaneWorker {
+    state: Arc<State>,
+    backplane: Arc<RedisBackplane>,
     settings: BackplaneWorkerSettings,
 }
 
-impl<B: Backplane> BackplaneWorker<B> {
-    pub(crate) fn new(state: Arc<State<B>>, settings: BackplaneWorkerSettings) -> Self {
-        Self { state, settings }
+impl BackplaneWorker {
+    pub(crate) fn new(
+        state: Arc<State>,
+        backplane: Arc<RedisBackplane>,
+        settings: BackplaneWorkerSettings,
+    ) -> Self {
+        Self {
+            state,
+            backplane,
+            settings,
+        }
     }
 
     /// Whether the message should run against this store's local layer: not its own, and for
@@ -50,13 +59,13 @@ impl<B: Backplane> BackplaneWorker<B> {
     pub(crate) async fn run(self) {
         let state = &self.state;
         let store = state.local_store.name();
-        let mut delay = self.settings.reconnect_delay();
+        let mut backoff = Backoff::new(&self.settings);
 
         // 0 until the first subscribe, so a backplane that never connects still reports.
         METRICS.backplane_connected(store, false);
 
         loop {
-            match state.backplane.subscribe().await {
+            match self.backplane.subscribe().await {
                 Ok(mut subscription) => {
                     let subscribed_at = tokio::time::Instant::now();
 
@@ -77,22 +86,46 @@ impl<B: Backplane> BackplaneWorker<B> {
 
                     state.resync(false).await;
                     METRICS.backplane_connected(store, false);
-
-                    // Only a subscription that stayed up starts the backoff over. One that breaks
-                    // right away keeps doubling the wait, so it can't resubscribe and clear the
-                    // local layer in a tight loop.
-                    if subscribed_at.elapsed() >= self.settings.max_reconnect_delay() {
-                        delay = self.settings.reconnect_delay();
-                    }
+                    backoff.lost(subscribed_at.elapsed());
                 }
                 Err(error) => {
                     tracing::warn!(%store, %error, "could not subscribe to the backplane; retrying");
                 }
             }
 
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(self.settings.max_reconnect_delay());
+            tokio::time::sleep(backoff.wait()).await;
         }
+    }
+}
+
+/// The wait before each subscribe: `reconnect_delay_ms`, doubling after each try up to
+/// `max_reconnect_delay_ms`. Only a subscription that stayed up that long starts it over, so one
+/// that breaks right away can't resubscribe and clear the local layer in a tight loop.
+struct Backoff<'a> {
+    settings: &'a BackplaneWorkerSettings,
+    next: Duration,
+}
+
+impl<'a> Backoff<'a> {
+    fn new(settings: &'a BackplaneWorkerSettings) -> Self {
+        Self {
+            settings,
+            next: settings.reconnect_delay(),
+        }
+    }
+
+    /// Starts over after a subscription that stayed up for `up`.
+    fn lost(&mut self, up: Duration) {
+        if up >= self.settings.max_reconnect_delay() {
+            self.next = self.settings.reconnect_delay();
+        }
+    }
+
+    fn wait(&mut self) -> Duration {
+        let wait = self.next;
+
+        self.next = (wait * 2).min(self.settings.max_reconnect_delay());
+        wait
     }
 }
 
@@ -100,7 +133,7 @@ impl<B: Backplane> BackplaneWorker<B> {
 /// `run` owns the worker, so this runs however it ends: the store's last clone dropping, its
 /// runtime shutting down, or a panic. A store runs one worker, so no other worker's reads are
 /// turned off.
-impl<B: Backplane> Drop for BackplaneWorker<B> {
+impl Drop for BackplaneWorker {
     fn drop(&mut self) {
         self.state.disable_local_reads();
         METRICS.backplane_connected(self.state.local_store.name(), false);
@@ -109,50 +142,42 @@ impl<B: Backplane> Drop for BackplaneWorker<B> {
 
 #[cfg(test)]
 mod tests {
-    use sisa_caching_memory::store::InMemoryCacheStore;
-    use sisa_caching_testing::eventually;
-
     use super::*;
 
-    /// A backplane whose subscriptions stay up and never deliver.
-    struct Quiet;
-
-    struct Silent;
-
-    impl BackplaneSubscription for Silent {
-        type Error = std::io::Error;
-
-        async fn next(&mut self) -> std::io::Result<BackplaneMessage> {
-            std::future::pending().await
+    /// A 1 ms first wait and a 50 ms cap.
+    fn settings() -> BackplaneWorkerSettings {
+        BackplaneWorkerSettings {
+            reconnect_delay_ms: 1,
+            max_reconnect_delay_ms: 50,
         }
     }
 
-    impl Backplane for Quiet {
-        type Error = std::io::Error;
-        type Subscription = Silent;
+    #[test]
+    fn a_subscription_that_keeps_breaking_waits_longer_each_time() {
+        let settings = settings();
+        let mut backoff = Backoff::new(&settings);
+        let waits: Vec<u128> = (0..8)
+            .map(|_| {
+                backoff.lost(Duration::ZERO);
+                backoff.wait().as_millis()
+            })
+            .collect();
 
-        async fn publish(&self, _: &BackplaneMessage) -> std::io::Result<()> {
-            Ok(())
-        }
-
-        async fn subscribe(&self) -> std::io::Result<Silent> {
-            Ok(Silent)
-        }
+        assert_eq!(waits, [1, 2, 4, 8, 16, 32, 50, 50]);
     }
 
-    #[tokio::test]
-    async fn local_reads_go_off_when_the_worker_stops() {
-        let state = Arc::new(State::new(InMemoryCacheStore::new("users").unwrap(), Quiet));
-        let worker = BackplaneWorker::new(Arc::clone(&state), BackplaneWorkerSettings::default());
-        let running = tokio::spawn(worker.run());
+    #[test]
+    fn a_subscription_that_stayed_up_starts_the_wait_over() {
+        let settings = settings();
+        let mut backoff = Backoff::new(&settings);
 
-        eventually("the worker subscribes", || async {
-            state.local_reads_enabled()
-        })
-        .await;
-        running.abort();
-        _ = running.await;
+        for _ in 0..6 {
+            backoff.wait();
+        }
+        backoff.lost(Duration::from_millis(49));
+        assert_eq!(backoff.wait().as_millis(), 50, "49 ms is not long enough");
 
-        assert!(!state.local_reads_enabled());
+        backoff.lost(Duration::from_millis(50));
+        assert_eq!(backoff.wait().as_millis(), 1);
     }
 }

@@ -45,8 +45,8 @@ serde_json = { workspace = true }
 sisa-caching-testing = { workspace = true }
 # `now_or_never` in the store state tests.
 futures-util = { workspace = true }
-# Paused time for the reconnect backoff tests.
-tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
+# Multi-threaded runtimes for the tests that race tasks.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 # The W3C propagator for the trace context test, and an in-memory exporter for the metrics test.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

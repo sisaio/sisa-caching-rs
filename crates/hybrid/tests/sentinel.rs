@@ -14,7 +14,7 @@ use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::{connection::SentinelConnection, store::RedisCacheStore};
 use sisa_caching_testing::{RedisSentinel, eventually};
 
-type Node = HybridCacheStore<RedisCacheStore<SentinelConnection>, RedisBackplane>;
+type Node = HybridCacheStore<RedisCacheStore<SentinelConnection>>;
 
 async fn connect(sentinel: &RedisSentinel) -> SentinelConnection {
     SentinelConnection::connect(sentinel.sentinel_client())

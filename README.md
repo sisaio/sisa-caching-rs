@@ -21,7 +21,7 @@ and a hybrid of the two that keeps every node's local copy coherent.
 Everything comes from one crate, `sisa-caching`. No store is on by default, so name the one you
 use; `tls-rustls` or `tls-native-tls` adds `rediss://` URLs. Each part is also its own crate ([core](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/core),
 [memory](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/memory), [redis](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/redis), [hybrid](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/hybrid)), for implementing a
-store or a backplane of your own.
+store of your own.
 
 Every store has the same calls: `get`, `set`, `get_or_set`, `remove`, `remove_prefix` and
 `clear`, plus `get_entry` and `set_entry` for a value with its creation time and TTL. One store

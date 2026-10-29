@@ -21,14 +21,16 @@ cargo deny check
 
 ## Tests
 
-Unit tests sit at the end of the file they test, in `#[cfg(test)] mod tests`. Tests that put
-several parts together, such as hybrid nodes with their workers or anything on Redis, go in the
-crate's `tests/` folder. Each Redis test starts its own server in Docker through
-`sisa-caching-testing`, so the suite needs Docker and nothing else. `REDIS_IMAGE` picks the
-server, `redis:8-alpine` by default; CI runs Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and
-Garnet 2. Each helper starts the cluster, Sentinel or TLS setup the way that
-server needs it; the Sentinel tests skip themselves on Garnet. The Cluster and Sentinel tests reach their servers on the container's own IP
-address, so they need Docker on a Linux host, as in CI; Docker Desktop can't route to it.
+Unit tests sit at the end of the file they test, in `#[cfg(test)] mod tests`. Tests that put several
+parts together, such as hybrid nodes with their workers or anything on Redis, go in the crate's
+`tests/` folder. The Redis backplane's own tests are the exception: its publishing and subscriptions
+are private to the hybrid crate, so they sit at the end of its file. Each Redis test starts its own
+server in Docker through `sisa-caching-testing`, so the suite needs Docker and nothing else.
+`REDIS_IMAGE` picks the server, `redis:8-alpine` by default; CI runs Redis 7.4, Redis 8, Valkey 8,
+Dragonfly 2 and Garnet 2. Each helper starts the cluster, Sentinel or TLS setup the way that server
+needs it; the Sentinel tests skip themselves on Garnet. The Cluster and Sentinel tests reach their
+servers on the container's own IP address, so they need Docker on a Linux host, as in CI; Docker
+Desktop can't route to it.
 
 ```sh
 REDIS_IMAGE=valkey/valkey:8-alpine cargo test --workspace --all-features
