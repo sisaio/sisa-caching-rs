@@ -103,31 +103,77 @@ impl Redis {
         self.container.unpause().await.unwrap();
     }
 
+    /// How many Pub/Sub connections are open.
+    pub async fn subscriptions(&self) -> usize {
+        self.subscribers(&mut self.connection().await).await.len()
+    }
+
     /// Closes every Pub/Sub connection, as a server restart or a proxy timeout would, and returns
     /// how many it closed. Lists the clients and kills each by ID, which Redis, Valkey and
     /// Dragonfly all accept, unlike `CLIENT KILL TYPE pubsub`.
     pub async fn drop_subscriptions(&self) -> usize {
         let mut connection = self.connection().await;
-        let clients: String = redis::cmd("CLIENT")
-            .arg("LIST")
-            .query_async(&mut connection)
-            .await
-            .unwrap();
         let mut closed = 0;
-        for client in clients.lines().filter(|client| is_subscriber(client)) {
-            let id = client
-                .split(' ')
-                .find_map(|field| field.strip_prefix("id="));
+        for id in self.subscribers(&mut connection).await {
             let killed: usize = redis::cmd("CLIENT")
                 .arg("KILL")
                 .arg("ID")
-                .arg(id.unwrap())
+                .arg(id)
                 .query_async(&mut connection)
                 .await
                 .unwrap();
             closed += killed;
         }
         closed
+    }
+
+    /// The IDs of the Pub/Sub connections in `CLIENT LIST`.
+    async fn subscribers(&self, connection: &mut ConnectionManager) -> Vec<String> {
+        let clients: String = redis::cmd("CLIENT")
+            .arg("LIST")
+            .query_async(connection)
+            .await
+            .unwrap();
+
+        clients
+            .lines()
+            .filter(|client| is_subscriber(client))
+            .filter_map(|client| {
+                client
+                    .split(' ')
+                    .find_map(|field| field.strip_prefix("id="))
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Adds the user `name`, allowed everything, and returns a URL that logs in as it. `None` on a
+    /// server that refuses those rules, after saying so, so the test can skip itself.
+    pub async fn add_user(&self, name: &str) -> Option<String> {
+        let added: redis::RedisResult<()> = redis::cmd("ACL")
+            .arg(&["SETUSER", name, "on", ">secret", "~*", "&*", "+@all"])
+            .query_async(&mut self.connection().await)
+            .await;
+
+        match added {
+            Ok(()) => Some(
+                self.url
+                    .replacen("redis://", &format!("redis://{name}:secret@"), 1),
+            ),
+            Err(error) => {
+                println!("skipped: the server can't add a user: {error}");
+                None
+            }
+        }
+    }
+
+    /// Changes a user's rights with an ACL rule, such as `-publish`.
+    pub async fn set_user(&self, name: &str, rule: &str) {
+        redis::cmd("ACL")
+            .arg(&["SETUSER", name, rule])
+            .query_async::<()>(&mut self.connection().await)
+            .await
+            .unwrap();
     }
 }
 

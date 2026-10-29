@@ -5,6 +5,5 @@ pub(crate) mod state;
 
 pub use hybrid::HybridCacheStore;
 
-/// A hybrid store on Redis, with a Redis backplane.
-pub type RedisHybridCacheStore =
-    HybridCacheStore<sisa_caching_redis::store::RedisCacheStore, crate::backplane::RedisBackplane>;
+/// A hybrid store on Redis.
+pub type RedisHybridCacheStore = HybridCacheStore<sisa_caching_redis::store::RedisCacheStore>;

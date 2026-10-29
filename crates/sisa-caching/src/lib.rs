@@ -51,7 +51,7 @@
 //!
 //! Each part is also its own crate (`sisa-caching-core`, `-memory`, `-redis`, `-hybrid`), whose
 //! docs cover the details: key and entry formats, Cluster and Sentinel, the backplane, and the
-//! metrics. Depend on one of those directly to implement a store or a backplane of your own.
+//! metrics. Depend on one of those directly to implement a store of your own.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

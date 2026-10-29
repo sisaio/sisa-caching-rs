@@ -65,7 +65,7 @@ use. `examples` use it; `benches` use every store crate directly.
 | `sisa-caching-core` | Yes | `CacheStore`, `KeyPrefix`, `CacheKey`, `CacheEntry`, `CacheOptions`, `CacheSettings`, `Worker` | The store trait, keys, entries, settings with their 365-day limit, the per-key `Locker` behind `get_or_set`, the `Clock`, the OpenTelemetry instruments in `metrics`, and the `Worker` that runs a store's background task |
 | `sisa-caching-memory` | Yes | `InMemoryCacheStore` | Sharded maps of `Arc<dyn Any>` values with LRU trimming, and the worker that purges them |
 | `sisa-caching-redis` | Yes | `RedisCacheStore` | One hash per key with JSON in `value`, over any `RedisConnection`: one server, a cluster or Sentinel |
-| `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane` | A local memory store in front of a distributed `CacheStore`, kept coherent over a `Backplane` (Redis pub/sub) by a worker each store runs |
+| `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane` | A local memory store in front of a distributed `CacheStore`, kept coherent over Redis pub/sub (`RedisBackplane`) by a worker each store runs |
 | `sisa-caching-testing` | No | `ManualClock`, `Redis`, `eventually` | A test clock, a Redis container per test (one server, a cluster, Sentinel or TLS), and a wait-until helper |
 | `examples` | No | | Three axum services over a shared users API, one per store |
 | `benches` | No | | Criterion benchmarks for every store and the `summary` table printer |
@@ -131,11 +131,11 @@ of 1,000. Give caches a database or an instance of their own, or raise `scan_bat
 ### Hybrid
 
 `HybridCacheStore` puts a memory store (the local layer) in front of any `CacheStore` (usually
-Redis), and uses a `Backplane` (Redis pub/sub) to tell other nodes about writes.
+Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writes.
 - **Read:** local layer first; on a miss, the distributed store, then copy the entry into the
   local layer.
 - **Write:** evict locally, write the distributed store, evict again, publish an
-  `Invalidation` (a key, a prefix, or clear). The steps after the first eviction run in their own
+  invalidation (a key, a prefix, or clear). The steps after the first eviction run in their own
   task, so a cancelled caller can't stop the publish. The call returns after the second eviction;
   the publish and its retries finish in the background.
 - **Generations:** each key hashes to one of 64 counters. An invalidation bumps the counter before
@@ -256,8 +256,8 @@ resubscribes.
 | Redis | `RedisCacheError` | `Cache`, `Redis` (connection or command), `Json` (encode or decode) |
 | Hybrid | `HybridCacheError` | `Cache`, `StoreNameMismatch` at construction, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked) |
 
-The error enums, `Invalidation` and `metrics::Layer` are `#[non_exhaustive]`, so a later release
-can add a variant without breaking a `match`.
+The error enums and `metrics::Layer` are `#[non_exhaustive]`, so a later release can add a
+variant without breaking a `match`.
 
 Some failures are logged as warnings and not returned, because the caller still gets a correct
 answer:
@@ -282,6 +282,7 @@ Settled; reopen only with new evidence.
 | A hybrid write returns `Ok` when every publish fails | The data is written; `max_ttl_secs` bounds how stale peers get, and the failure is logged and counted |
 | Reads stay on the Redis primary | Replica lag would let a node copy a value that was just replaced back into its local layer. Behind Sentinel, a connection keeps reading from the old primary after a failover until its next write; [Compatibility](03-compatibility.md#sentinel) says what that allows |
 | Each store starts its own worker, once | A store can't run without its listener or with two, and needs no setup; its worker stops when its last clone drops |
+| One backplane, `RedisBackplane`, with no trait for others | Applications can't supply a transport of their own, so the message type, the subscription and what the worker expects of them stay private and can change without a breaking release |
 
 ## Rules that hold the design together
 

@@ -1,5 +1,5 @@
 //! One hybrid node: what reads and writes do to its local and distributed layers. The distributed
-//! layer is a memory store, so these run without Redis.
+//! layer is a memory store; only the backplane is on Redis.
 
 mod common;
 
@@ -10,14 +10,14 @@ use std::{
     time::Duration,
 };
 
-use common::{InMemoryBackplane, key, local_value, memory, name, node, start};
+use common::{backplane, key, local_value, memory, name, node, start};
 use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
     settings::{CacheSettings, MAX_TTL_SECS},
 };
 use sisa_caching_hybrid::{error::HybridCacheError, store::HybridCacheStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
-use sisa_caching_testing::ManualClock;
+use sisa_caching_testing::{ManualClock, Redis};
 
 fn secs(secs: u64) -> Duration {
     Duration::from_secs(secs)
@@ -54,8 +54,9 @@ fn with_max_ttl(max_ttl_secs: u64) -> InMemoryCacheSettings {
 
 #[tokio::test]
 async fn a_read_copies_a_distributed_hit_into_the_local_layer_unchanged() {
+    let redis = Redis::start().await;
     let distributed = memory("users");
-    let node = node(&distributed, &InMemoryBackplane::new()).await;
+    let node = node(&distributed, &redis).await;
 
     distributed
         .set(&key(1), "ada".to_owned(), ttl(60))
@@ -79,8 +80,9 @@ async fn a_read_copies_a_distributed_hit_into_the_local_layer_unchanged() {
 
 #[tokio::test]
 async fn a_write_updates_the_distributed_layer_and_evicts_the_local_copy() {
+    let redis = Redis::start().await;
     let distributed = memory("users");
-    let node = node(&distributed, &InMemoryBackplane::new()).await;
+    let node = node(&distributed, &redis).await;
 
     node.set(&key(1), "old".to_owned(), None).await.unwrap();
     node.get::<String>(&key(1)).await.unwrap();
@@ -95,11 +97,12 @@ async fn a_write_updates_the_distributed_layer_and_evicts_the_local_copy() {
 
 #[tokio::test]
 async fn a_write_uses_its_own_ttl_or_the_distributed_default() {
+    let redis = Redis::start().await;
     let clock = ManualClock::new();
     let local = on_clock(&clock, InMemoryCacheSettings::default());
     let distributed = on_clock(&clock, with_ttl(3));
     let node =
-        start(HybridCacheStore::new(local, distributed, InMemoryBackplane::new()).unwrap()).await;
+        start(HybridCacheStore::new(local, distributed, backplane(&redis).await).unwrap()).await;
 
     node.set(&key(1), "default".to_owned(), None).await.unwrap();
     node.set(&key(2), "own".to_owned(), ttl(1)).await.unwrap();
@@ -114,7 +117,8 @@ async fn a_write_uses_its_own_ttl_or_the_distributed_default() {
 
 #[tokio::test]
 async fn a_ttl_over_365_days_fails_before_anything_is_evicted() {
-    let node = node(&memory("users"), &InMemoryBackplane::new()).await;
+    let redis = Redis::start().await;
+    let node = node(&memory("users"), &redis).await;
 
     node.set(&key(1), "ada".to_owned(), None).await.unwrap();
     node.get::<String>(&key(1)).await.unwrap();
@@ -132,13 +136,14 @@ async fn a_ttl_over_365_days_fails_before_anything_is_evicted() {
 
 #[tokio::test]
 async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
+    let redis = Redis::start().await;
     let clock = ManualClock::new();
     let distributed = on_clock(&clock, InMemoryCacheSettings::default());
     let node = start(
         HybridCacheStore::new(
             on_clock(&clock, with_max_ttl(10)),
             distributed.clone(),
-            InMemoryBackplane::new(),
+            backplane(&redis).await,
         )
         .unwrap(),
     )
@@ -171,6 +176,7 @@ async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
 
 #[tokio::test]
 async fn the_local_cap_does_not_make_get_or_set_refresh_early() {
+    let redis = Redis::start().await;
     let clock = ManualClock::new();
     let distributed = on_clock(
         &clock,
@@ -187,7 +193,7 @@ async fn the_local_cap_does_not_make_get_or_set_refresh_early() {
         HybridCacheStore::new(
             on_clock(&clock, with_max_ttl(10)),
             distributed,
-            InMemoryBackplane::new(),
+            backplane(&redis).await,
         )
         .unwrap(),
     )
@@ -219,7 +225,8 @@ async fn the_local_cap_does_not_make_get_or_set_refresh_early() {
 
 #[tokio::test]
 async fn one_store_serves_many_value_types() {
-    let node = node(&memory("users"), &InMemoryBackplane::new()).await;
+    let redis = Redis::start().await;
+    let node = node(&memory("users"), &redis).await;
     let count = CacheKey::new("count", "visits").unwrap();
 
     node.set(&count, 3_u64, None).await.unwrap();
@@ -243,8 +250,9 @@ async fn one_store_serves_many_value_types() {
 
 #[tokio::test]
 async fn get_or_set_stores_over_a_value_of_another_type() {
+    let redis = Redis::start().await;
     let distributed = memory("users");
-    let node = node(&distributed, &InMemoryBackplane::new()).await;
+    let node = node(&distributed, &redis).await;
 
     node.set(&key(1), 3_u64, None).await.unwrap();
 
@@ -265,6 +273,7 @@ async fn get_or_set_stores_over_a_value_of_another_type() {
 
 #[tokio::test]
 async fn get_or_set_uses_the_distributed_stores_settings() {
+    let redis = Redis::start().await;
     let distributed = InMemoryCacheStore::new("users")
         .unwrap()
         .with_settings(InMemoryCacheSettings {
@@ -275,7 +284,7 @@ async fn get_or_set_uses_the_distributed_stores_settings() {
             ..InMemoryCacheSettings::default()
         })
         .unwrap();
-    let node = node(&distributed, &InMemoryBackplane::new()).await;
+    let node = node(&distributed, &redis).await;
     let user = key(1);
     // The first load never finishes, so it holds the key's lock for good.
     let stuck = node.get_or_set(&user, pending::<Result<String, Infallible>>, None);
@@ -296,11 +305,11 @@ async fn get_or_set_uses_the_distributed_stores_settings() {
 
 #[tokio::test]
 async fn clones_share_the_supplied_stores() {
+    let redis = Redis::start().await;
     let local = memory("users");
     let distributed = memory("users");
     let node = start(
-        HybridCacheStore::new(local.clone(), distributed.clone(), InMemoryBackplane::new())
-            .unwrap(),
+        HybridCacheStore::new(local.clone(), distributed.clone(), backplane(&redis).await).unwrap(),
     )
     .await;
     let clone = node.clone();
@@ -322,6 +331,7 @@ async fn clones_share_the_supplied_stores() {
 
 #[tokio::test]
 async fn the_supplied_local_store_is_cleared_when_the_worker_subscribes() {
+    let redis = Redis::start().await;
     let local = memory("users");
     let distributed = memory("users");
 
@@ -332,7 +342,7 @@ async fn the_supplied_local_store_is_cleared_when_the_worker_subscribes() {
         .unwrap();
 
     let node =
-        start(HybridCacheStore::new(local.clone(), distributed, InMemoryBackplane::new()).unwrap())
+        start(HybridCacheStore::new(local.clone(), distributed, backplane(&redis).await).unwrap())
             .await;
 
     assert_eq!(local.get::<String>(&key(1)).await.unwrap(), None);
@@ -344,11 +354,12 @@ async fn the_supplied_local_store_is_cleared_when_the_worker_subscribes() {
 
 #[tokio::test]
 async fn store_names_must_match_and_a_mismatch_leaves_the_local_store_alone() {
+    let redis = Redis::start().await;
     let local = memory("teams");
 
     local.set(&key(1), "keep".to_owned(), None).await.unwrap();
 
-    let result = HybridCacheStore::new(local.clone(), memory("users"), InMemoryBackplane::new());
+    let result = HybridCacheStore::new(local.clone(), memory("users"), backplane(&redis).await);
 
     assert!(matches!(
         result,
@@ -363,6 +374,7 @@ async fn store_names_must_match_and_a_mismatch_leaves_the_local_store_alone() {
 
 #[tokio::test]
 async fn a_local_store_with_common_settings_is_rejected() {
+    let redis = Redis::start().await;
     let local = InMemoryCacheStore::new("users")
         .unwrap()
         .with_settings(InMemoryCacheSettings {
@@ -375,7 +387,7 @@ async fn a_local_store_with_common_settings_is_rejected() {
         .unwrap();
 
     assert!(matches!(
-        HybridCacheStore::new(local, memory("users"), InMemoryBackplane::new()),
+        HybridCacheStore::new(local, memory("users"), backplane(&redis).await),
         Err(HybridCacheError::Cache(CacheError::InvalidSettings {
             field: "local.common",
             ..
@@ -385,7 +397,8 @@ async fn a_local_store_with_common_settings_is_rejected() {
 
 #[tokio::test]
 async fn debug_shows_the_store_but_never_a_value() {
-    let node = node(&memory("users"), &InMemoryBackplane::new()).await;
+    let redis = Redis::start().await;
+    let node = node(&memory("users"), &redis).await;
 
     node.set(&key(1), "secret".to_owned(), None).await.unwrap();
     node.get::<String>(&key(1)).await.unwrap();

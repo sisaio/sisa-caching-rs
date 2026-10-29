@@ -21,7 +21,7 @@ use sisa_caching_redis::{
 
 use crate::settings::RedisBackplaneSettings;
 
-use super::{Backplane, BackplaneMessage, BackplaneSubscription};
+use super::BackplaneMessage;
 
 /// How many unread messages a subscription holds. The connection keeps reading, so Redis's limit
 /// on slow subscribers never applies. A worker that falls further behind loses its subscription
@@ -134,11 +134,9 @@ impl RedisBackplane {
     }
 }
 
-impl Backplane for RedisBackplane {
-    type Error = RedisCacheError;
-    type Subscription = RedisSubscription;
-
-    async fn publish(&self, message: &BackplaneMessage) -> Result<()> {
+impl RedisBackplane {
+    /// Sends the message to all subscribers, including this node's own.
+    pub(crate) async fn publish(&self, message: &BackplaneMessage) -> Result<()> {
         let command = match self.server {
             Server::Cluster { .. } => "SPUBLISH",
             _ => "PUBLISH",
@@ -161,8 +159,9 @@ impl Backplane for RedisBackplane {
         Ok(())
     }
 
-    /// Connects and subscribes within the ping timeout.
-    async fn subscribe(&self) -> Result<RedisSubscription> {
+    /// Opens a subscription that receives the messages published from now on. It connects and
+    /// subscribes within the ping timeout.
+    pub(crate) async fn subscribe(&self) -> Result<RedisSubscription> {
         // Messages arrive as RESP3 pushes. A broadcast channel takes them without making the
         // connection wait, keeps the last `QUEUE_LIMIT`, and tells the reader it fell behind.
         let (sender, pushes) = broadcast::channel(QUEUE_LIMIT);
@@ -241,7 +240,7 @@ impl Backplane for RedisBackplane {
 
 /// One subscribed connection. It is pinged while waiting, so a connection that stops delivering
 /// without closing ends the subscription too.
-pub struct RedisSubscription {
+pub(crate) struct RedisSubscription {
     connection: Connection,
     /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
     pushes: Receiver<PushInfo>,
@@ -367,19 +366,10 @@ async fn slot_owner(connection: &mut ClusterConnection, slot: u16) -> RedisResul
     }))
 }
 
-impl std::fmt::Debug for RedisSubscription {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RedisSubscription")
-            .field("channel", &self.settings.channel)
-            .finish_non_exhaustive()
-    }
-}
-
-impl BackplaneSubscription for RedisSubscription {
-    type Error = RedisCacheError;
-
-    async fn next(&mut self) -> Result<BackplaneMessage> {
+impl RedisSubscription {
+    /// The next message, in order, with none missing. An error means messages may have been lost
+    /// and this subscription is done; open a new one.
+    pub(crate) async fn next(&mut self) -> Result<BackplaneMessage> {
         loop {
             tokio::select! {
                 message = message(&mut self.pushes) => {
@@ -397,4 +387,234 @@ impl BackplaneSubscription for RedisSubscription {
 
 fn io_error(kind: ErrorKind, reason: &'static str) -> RedisCacheError {
     RedisError::from(std::io::Error::new(kind, reason)).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use sisa_caching_core::cache::KeyPrefix;
+    use sisa_caching_testing::{Redis, RedisCluster};
+
+    use super::*;
+    use crate::{
+        backplane::{Invalidation, NodeId},
+        settings::DEFAULT_REDIS_CHANNEL,
+    };
+
+    async fn connect(redis: &Redis, settings: RedisBackplaneSettings) -> RedisBackplane {
+        RedisBackplane::connect(redis.url(), settings)
+            .await
+            .unwrap()
+    }
+
+    /// Pings every 50 ms and gives up after 100 ms, so a stall shows quickly.
+    fn quick_pings() -> RedisBackplaneSettings {
+        RedisBackplaneSettings {
+            ping_interval_ms: 50,
+            ping_timeout_ms: 100,
+            ..RedisBackplaneSettings::default()
+        }
+    }
+
+    fn message(invalidation: Invalidation) -> BackplaneMessage {
+        BackplaneMessage::new(
+            NodeId::new("node-a"),
+            KeyPrefix::new("users").unwrap(),
+            invalidation,
+        )
+    }
+
+    async fn next(
+        subscription: &mut RedisSubscription,
+    ) -> std::result::Result<BackplaneMessage, String> {
+        tokio::time::timeout(Duration::from_secs(5), subscription.next())
+            .await
+            .expect("a message arrives")
+            .map_err(|error| error.to_string())
+    }
+
+    #[tokio::test]
+    async fn every_subscription_receives_the_messages_of_its_channel() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
+        let elsewhere = connect(
+            &redis,
+            RedisBackplaneSettings {
+                channel: "elsewhere".to_owned(),
+                ..RedisBackplaneSettings::default()
+            },
+        )
+        .await;
+        let mut first = backplane.subscribe().await.unwrap();
+        let mut second = backplane.subscribe().await.unwrap();
+        let sent = [
+            message(Invalidation::Key("user:1".to_owned())),
+            message(Invalidation::Prefix(KeyPrefix::new("user").unwrap())),
+            message(Invalidation::Clear),
+        ];
+
+        elsewhere
+            .publish(&message(Invalidation::Clear))
+            .await
+            .unwrap();
+        for message in &sent {
+            backplane.publish(message).await.unwrap();
+        }
+
+        for subscription in [&mut first, &mut second] {
+            for message in &sent {
+                assert_eq!(next(subscription).await.as_ref(), Ok(message));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_message_is_an_error_and_delivery_goes_on() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
+        let mut subscription = backplane.subscribe().await.unwrap();
+        let mut conn = redis.connection().await;
+
+        for payload in [
+            "not json",
+            r#"{"v":2,"source":"node-a","store":"users","kind":"clear"}"#,
+            r#"{"v":1,"source":"node-a","store":"users","kind":"prefix","target":"user::eu"}"#,
+        ] {
+            redis::cmd("PUBLISH")
+                .arg(DEFAULT_REDIS_CHANNEL)
+                .arg(payload)
+                .query_async::<usize>(&mut conn)
+                .await
+                .unwrap();
+
+            assert!(next(&mut subscription).await.is_err(), "{payload}");
+        }
+
+        let sent = message(Invalidation::Clear);
+
+        backplane.publish(&sent).await.unwrap();
+        assert_eq!(next(&mut subscription).await, Ok(sent));
+    }
+
+    #[tokio::test]
+    async fn a_subscription_that_falls_too_far_behind_ends() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
+        let mut subscription = backplane.subscribe().await.unwrap();
+        let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
+        let mut connection = redis.connection().await;
+        let mut publish = redis::pipe();
+
+        for _ in 0..1_000 {
+            publish
+                .cmd("PUBLISH")
+                .arg(DEFAULT_REDIS_CHANNEL)
+                .arg(&payload)
+                .ignore();
+        }
+        // More than the 8,192 messages a subscription holds, all read off the connection before
+        // anything reads the subscription. Each batch answers well within the connection's 500 ms
+        // response timeout, even on a slow server.
+        for _ in 0..20 {
+            publish.query_async::<()>(&mut connection).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let error = next(&mut subscription).await.unwrap_err();
+
+        assert!(error.contains("fell too far behind"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn subscribing_to_a_server_that_does_not_answer_times_out() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, quick_pings()).await;
+
+        redis.pause().await;
+
+        let attempt = tokio::time::timeout(Duration::from_secs(2), backplane.subscribe()).await;
+
+        redis.unpause().await;
+        assert!(attempt.expect("the ping timeout ends the attempt").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_sharded_subscription_ends_only_when_its_channel_slot_moves() {
+        let cluster = RedisCluster::start().await;
+        let backplane = RedisBackplane::cluster(
+            cluster.client(),
+            RedisBackplaneSettings {
+                ping_interval_ms: 100,
+                ..RedisBackplaneSettings::default()
+            },
+        )
+        .await
+        .unwrap();
+        let message = BackplaneMessage::new(
+            NodeId::new("node-a"),
+            KeyPrefix::new("users").unwrap(),
+            Invalidation::Clear,
+        );
+        let mut subscription = backplane.subscribe().await.unwrap();
+
+        // Waiting through a few pings while the slot stays put, the subscription still delivers.
+        let (_, next) = tokio::join!(
+            async {
+                tokio::time::sleep(Duration::from_millis(350)).await;
+                backplane.publish(&message).await.unwrap();
+            },
+            tokio::time::timeout(Duration::from_secs(5), subscription.next()),
+        );
+
+        next.expect("the message arrives").unwrap();
+
+        cluster.move_slot(DEFAULT_REDIS_CHANNEL).await;
+        backplane.publish(&message).await.unwrap();
+
+        // Delivering the message is fine too; waiting on a node that no longer gets it is not.
+        let next = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+            .await
+            .expect("the subscription delivers the message or ends");
+        if next.is_err() {
+            let mut subscription = backplane.subscribe().await.unwrap();
+
+            backplane.publish(&message).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(5), subscription.next())
+                .await
+                .expect("a new subscription gets the message")
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sharded_subscription_that_falls_too_far_behind_ends() {
+        let cluster = RedisCluster::start().await;
+        let backplane =
+            RedisBackplane::cluster(cluster.client(), RedisBackplaneSettings::default())
+                .await
+                .unwrap();
+        let mut subscription = backplane.subscribe().await.unwrap();
+        let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
+        let mut publish = redis::pipe();
+
+        // More than the 8,192 messages a subscription holds, all read off the connection before
+        // anything reads the subscription.
+        for _ in 0..20_000 {
+            publish
+                .cmd("SPUBLISH")
+                .arg(DEFAULT_REDIS_CHANNEL)
+                .arg(&payload)
+                .ignore();
+        }
+        publish
+            .query_async::<()>(&mut cluster.connection().await)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let error = next(&mut subscription).await.unwrap_err();
+
+        assert!(error.contains("fell too far behind"), "{error}");
+    }
 }

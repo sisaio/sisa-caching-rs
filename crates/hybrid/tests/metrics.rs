@@ -4,14 +4,14 @@
 
 mod common;
 
-use common::{InMemoryBackplane, key, memory, node};
+use common::{key, memory, node};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::metrics::{
     InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
     data::{AggregatedMetrics, MetricData, ResourceMetrics},
 };
 use sisa_caching_core::cache::CacheStore;
-use sisa_caching_testing::eventually;
+use sisa_caching_testing::{Redis, eventually};
 
 /// The latest value of the counter or gauge `name`, or the count of the histogram `name`, with
 /// attributes `store=app` plus `attributes`; 0 when it was never recorded.
@@ -65,10 +65,10 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         value(&exporter.get_finished_metrics().unwrap(), name, attributes)
     };
     let hybrid = [KeyValue::new("layer", "hybrid")];
+    let redis = Redis::start().await;
     let distributed = memory("app");
-    let backplane = InMemoryBackplane::new();
-    let writer = node(&distributed, &backplane).await;
-    let reader = node(&distributed, &backplane).await;
+    let writer = node(&distributed, &redis).await;
+    let reader = node(&distributed, &redis).await;
 
     // Local reads come on just before the gauge is set, so wait for it.
     eventually("the workers report the backplane up", || async {
@@ -100,17 +100,14 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         1
     );
 
-    // Every try fails, which counts as one failed publish.
-    backplane.fail_publishes(3);
+    // With the server gone, every try fails, which counts as one failed publish.
+    redis.stop().await;
     writer.remove(&key(1)).await.unwrap();
 
     eventually("the publish gives up", || async {
         metric("sisa.caching.publish.failures", &[]) == 1
     })
     .await;
-
-    backplane.disconnect();
-
     eventually("the workers report the backplane down", || async {
         metric("sisa.caching.backplane.connected", &[]) == 0
     })
