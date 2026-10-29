@@ -27,8 +27,9 @@ object.
 
 Each `memory 1M entries` call walks every entry without yielding, and calls on the map it is
 walking wait for it. Inside a tokio runtime, the store runs its trims and its purge worker's purges
-on the blocking pool, so those hold up no async thread. `remove_prefix` and `purge` called by the
-application run on the caller's thread.
+on the blocking pool, and a hybrid node walks another node's prefix invalidation there too, so
+those hold up no async thread. `remove_prefix` and `purge` called by the application run on the
+caller's thread.
 
 ## Reading the numbers
 
