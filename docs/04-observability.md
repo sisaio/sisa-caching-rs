@@ -38,8 +38,8 @@ returns its error instead. With the store down, each `get_or_set` counts two `ge
 read, and a `set` error for storing what its loader returned.
 
 `invalidations.delivered` counts every subscriber of the store's channel, the publishing node's
-own included, so with every node listening it grows by the number of nodes for each invalidation,
-plus any 0.2 nodes during an upgrade. On a cluster, `SPUBLISH` counts only the subscribers on the node
+own included, so with every node listening it grows by the number of nodes for each
+invalidation. On a cluster, `SPUBLISH` counts only the subscribers on the node
 that took it.
 
 Worth an alert:

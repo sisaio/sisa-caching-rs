@@ -36,6 +36,14 @@
 //! `ClusterConnection` and the backplane the cluster client ([`RedisBackplane::cluster`]), which
 //! uses sharded pub/sub.
 //!
+//! Each store publishes and listens on its own pub/sub channel, `<store>:backplane`. One store
+//! holds values of every type, so one per application is usually enough; a second store, with
+//! its own name and settings, has its own local layer, worker and channel, and doesn't affect the
+//! first. Store names must differ, also between deployments that share a Redis server, as pub/sub
+//! ignores the database. [Several hybrid stores] in the architecture doc has the details.
+//!
+//! [Several hybrid stores]: https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#several-hybrid-stores
+//!
 //! Behind Sentinel, share one `SentinelConnection` between the store
 //! ([`RedisCacheStore`](sisa_caching_redis::RedisCacheStore)) and the backplane
 //! ([`RedisBackplane::sentinel`]), so a write that finds the old primary demoted moves the store

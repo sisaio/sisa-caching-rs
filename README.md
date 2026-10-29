@@ -72,6 +72,11 @@ When an invalidation never reaches a node, the node clears its local layer at th
 heartbeat (1 second by default), or once the writer's heartbeats have stopped for 5 seconds. The
 local `max_ttl_secs`, 60 seconds by default, still caps every local copy.
 
+Each hybrid store has its own pub/sub channel, `<store>:backplane`. One store usually covers an
+application; a second one, such as `user_cache` next to `catalog_cache`, gets its own settings
+and doesn't affect the first. See
+[Several hybrid stores](docs/01-architecture.md#several-hybrid-stores).
+
 ## Compatibility
 
 Tested in CI against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, each as one primary, a
