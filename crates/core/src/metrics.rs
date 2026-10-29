@@ -6,7 +6,7 @@
 //! | Metric | Type | What it counts |
 //! | --- | --- | --- |
 //! | `sisa.caching.hits` | counter | Reads that found a live entry |
-//! | `sisa.caching.misses` | counter | Reads that found nothing, or only an expired entry |
+//! | `sisa.caching.misses` | counter | Reads that returned no value: nothing there, an expired entry, or a value that doesn't read as the requested type |
 //! | `sisa.caching.load.duration` | histogram, seconds | How long each `get_or_set` loader ran, with `outcome` `ok` or `error` |
 //! | `sisa.caching.errors` | counter | Store calls inside `get_or_set` that failed, with `operation` `get` for a read or `set` for storing what it loaded |
 //! | `sisa.caching.evictions` | counter | Entries a full memory store dropped to make room |
@@ -56,7 +56,7 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
             .build(),
         misses: meter
             .u64_counter("sisa.caching.misses")
-            .with_description("Reads that found nothing, or only an expired entry")
+            .with_description("Reads that returned no value")
             .build(),
         load_duration: meter
             .f64_histogram("sisa.caching.load.duration")
@@ -130,7 +130,8 @@ pub struct CacheMetrics {
 }
 
 impl CacheMetrics {
-    /// Counts one read as a hit when it `found` a live entry, else as a miss.
+    /// Counts one read as a hit when it `found` a live entry, else as a miss, as is a value that
+    /// doesn't read as the requested type, since the caller gets none.
     ///
     /// Hits and misses count reads: `get_entry`, and `get` and `get_or_set` through it. A
     /// `get_or_set` that has to load reads before and after taking its lock, so it counts two

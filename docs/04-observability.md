@@ -15,7 +15,7 @@ All under the meter `sisa-caching`. Every metric has a `store` attribute with th
 | Metric | Type | Extra attributes | What it counts |
 | --- | --- | --- | --- |
 | `sisa.caching.hits` | counter | `layer` | Reads that found a live entry |
-| `sisa.caching.misses` | counter | `layer` | Reads that found nothing, or only an expired entry |
+| `sisa.caching.misses` | counter | `layer` | Reads that returned no value: nothing there, an expired entry, or a value that doesn't read as the requested type |
 | `sisa.caching.load.duration` | histogram, seconds | `outcome`: `ok` or `error` | How long each `get_or_set` loader ran |
 | `sisa.caching.errors` | counter | `operation`: `get` or `set` | Store calls inside `get_or_set` that failed: its reads, and the stores of what it loaded |
 | `sisa.caching.evictions` | counter | | Entries a full memory store dropped to make room |
