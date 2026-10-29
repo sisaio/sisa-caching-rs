@@ -1,6 +1,6 @@
 ---
 name: triage
-description: Triages GitHub issues in sisa-caching-rs. Checks for security reports and duplicates, reproduces bugs, weighs feature requests against the roadmap, and sets labels and board status. Use when asked to look at, triage, label or answer an issue, or to go through new issues.
+description: Triages GitHub issues in sisa-caching-rs. Checks for security reports and duplicates, reproduces bugs, weighs feature requests against the roadmap, and sets labels and proposes the board status. Use when asked to look at, triage, label or answer an issue, or to go through new issues.
 compatibility: Needs GitHub access through the gh CLI or a GitHub tool.
 ---
 
@@ -36,10 +36,8 @@ milestone need the maintainer's word; propose them instead.
 
 ## Gotchas
 
-- `gh project` commands need the `project` scope: `gh auth refresh -s project`.
-- Moving a card takes IDs, not names. Get them from `gh project item-list` and
-  `gh project field-list`, then run `gh project item-edit --id <item> --project-id <project>
-  --field-id <status field> --single-select-option-id <option>`.
+- Agents have no project access: propose the status, milestone and Priority in a comment, and
+  leave the card for the maintainer and the board's workflows.
 - `gh issue` can't set a type; use the API:
   `gh api -X PATCH repos/sisaio/sisa-caching-rs/issues/<n> -f type=Bug`.
 - An issue form only applies a label that exists in the repo; a missing one is skipped without
