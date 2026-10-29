@@ -75,9 +75,10 @@ impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
 }
 
 impl<D: CacheStore + 'static> HybridCacheStore<D> {
-    /// Composes the configured layers without changing their settings. Names must match, and the
+    /// Composes the configured layers without changing their settings. Names must match, the
     /// local store's `common` settings must stay unset, since hybrid calls use the distributed
-    /// store's.
+    /// store's, and the backplane's settings must pass
+    /// [`RedisBackplaneSettings::validate`](crate::settings::RedisBackplaneSettings::validate).
     ///
     /// The local store's `max_ttl_secs` is the longest a node serves a copy whose invalidation
     /// never arrived. `InMemoryCacheStore::new` leaves it off, so build the local store with the
@@ -101,6 +102,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         backplane: RedisBackplane,
     ) -> Result<Self> {
         check_local_common(local_store.settings())?;
+        backplane.settings.validate()?;
 
         if local_store.name() != distributed_store.name() {
             return Err(HybridCacheError::StoreNameMismatch {
@@ -118,12 +120,15 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         })
     }
 
-    /// How the backplane worker waits before subscribing again; `connect` takes it from
-    /// `settings.worker`. Set it before the store's first call: the worker reads it once, when it
-    /// starts.
-    pub fn with_worker_settings(mut self, settings: BackplaneWorkerSettings) -> Self {
+    /// How the backplane worker waits before subscribing again and tells that invalidations were
+    /// lost; `connect` takes it from `settings.worker`. Fails when a setting is out of range, as
+    /// [`BackplaneWorkerSettings::validate`] says. Set it before the store's first call: the
+    /// worker reads it once, when it starts.
+    pub fn with_worker_settings(mut self, settings: BackplaneWorkerSettings) -> Result<Self> {
+        settings.validate()?;
         self.worker_settings = settings;
-        self
+
+        Ok(self)
     }
 
     /// Starts the backplane worker now instead of on the store's first call, as `connect` does,
@@ -264,8 +269,8 @@ impl RedisHybridCacheStore {
         let backplane = RedisBackplane::connect(info, settings.backplane.clone())
             .await
             .map_err(HybridCacheError::distributed)?;
-        let store =
-            Self::new(local, distributed, backplane)?.with_worker_settings(settings.worker.clone());
+        let store = Self::new(local, distributed, backplane)?
+            .with_worker_settings(settings.worker.clone())?;
 
         store.start_worker();
         Ok(store)

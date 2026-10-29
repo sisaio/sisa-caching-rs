@@ -15,7 +15,12 @@ use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
     settings::{CacheSettings, MAX_TTL_SECS},
 };
-use sisa_caching_hybrid::{error::HybridCacheError, store::HybridCacheStore};
+use sisa_caching_hybrid::{
+    backplane::RedisBackplane,
+    error::HybridCacheError,
+    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
+    store::HybridCacheStore,
+};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::{ManualClock, Redis};
 
@@ -390,6 +395,42 @@ async fn a_local_store_with_common_settings_is_rejected() {
         HybridCacheStore::new(local, memory("users"), backplane(&redis).await),
         Err(HybridCacheError::Cache(CacheError::InvalidSettings {
             field: "local.common",
+            ..
+        }))
+    ));
+}
+
+#[tokio::test]
+async fn backplane_and_worker_settings_out_of_range_are_rejected() {
+    let redis = Redis::start().await;
+    let unpinged = RedisBackplane::connect(
+        redis.url(),
+        RedisBackplaneSettings {
+            ping_interval_ms: 0,
+            ..RedisBackplaneSettings::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        HybridCacheStore::new(memory("users"), memory("users"), unpinged),
+        Err(HybridCacheError::Cache(CacheError::InvalidSettings {
+            field: "ping_interval_ms",
+            ..
+        }))
+    ));
+
+    let store =
+        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
+
+    assert!(matches!(
+        store.with_worker_settings(BackplaneWorkerSettings {
+            heartbeat_interval_ms: 0,
+            ..BackplaneWorkerSettings::default()
+        }),
+        Err(HybridCacheError::Cache(CacheError::InvalidSettings {
+            field: "heartbeat_interval_ms",
             ..
         }))
     ));
