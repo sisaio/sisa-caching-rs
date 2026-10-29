@@ -19,14 +19,16 @@ object.
 | memory 1M entries | remove_prefix, nothing matches | `remove_prefix` on a store of a million entries in one map, when no key matches |
 | memory 1M entries | purge, nothing expired | A purge of that store when nothing has expired |
 | memory 1M entries | purge, every entry expired | A purge that drops a million expired entries |
-| memory 1M entries | set that trims | A write that takes a store past `max_entries` of a million, so it drops entries down to nine tenths of that |
+| memory 1M entries | set that trims | A write that takes a store past `max_entries` of a million, so it drops entries down to nine tenths of that. It runs outside a tokio runtime, where the write runs the trim itself |
 | redis | get hit, get miss, set | One call, including the round trip and JSON encoding |
 | hybrid | get local hit | A read served from the local layer |
 | hybrid | get local miss, Redis hit | A read that goes to Redis and copies the value into the local layer |
 | hybrid | set | A write: Redis and both local evictions; the publish runs in the background, so it isn't timed |
 
-Each `memory 1M entries` call walks every entry without yielding, so it holds up the async thread
-it runs on for the whole time, and calls on the map it is walking wait for it.
+Each `memory 1M entries` call walks every entry without yielding, and calls on the map it is
+walking wait for it. Inside a tokio runtime, the store runs its trims and its purge worker's purges
+on the blocking pool, so those hold up no async thread. `remove_prefix` and `purge` called by the
+application run on the caller's thread.
 
 ## Reading the numbers
 

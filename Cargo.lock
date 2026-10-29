@@ -2526,6 +2526,7 @@ name = "sisa-caching-benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "futures-util",
  "serde",
  "serde_json",
  "sisa-caching-core",

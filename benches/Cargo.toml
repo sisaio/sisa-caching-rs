@@ -44,4 +44,6 @@ sisa-caching-redis = { workspace = true }
 sisa-caching-hybrid = { workspace = true }
 sisa-caching-testing = { workspace = true }
 criterion = { workspace = true }
+# `now_or_never`, for a memory store write outside a runtime.
+futures-util = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }

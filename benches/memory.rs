@@ -8,6 +8,7 @@ use std::{
 };
 
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
+use futures_util::FutureExt;
 use sisa_caching_benches::{User, key, user};
 use sisa_caching_core::cache::{CacheOptions, CacheStore, PurgeableStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
@@ -115,7 +116,7 @@ fn parallel(c: &mut Criterion) {
 }
 
 /// The calls that walk every entry of one map, at a million entries. Each holds that map's lock,
-/// and the async thread it runs on, until it is done.
+/// and the thread it runs on, until it is done.
 fn large(c: &mut Criterion) {
     const ENTRIES: u64 = 1_000_000;
 
@@ -159,7 +160,9 @@ fn large(c: &mut Criterion) {
         });
     });
 
-    // A trim leaves nine tenths of the cap, so each timed write first tops the store up to it.
+    // A trim leaves nine tenths of the cap, so each timed write first tops the store up to it. The
+    // write runs outside the runtime, where it runs its trim itself; inside one, the trim runs on
+    // the blocking pool and the write doesn't wait for it.
     let full = InMemoryCacheStore::new("app")
         .unwrap()
         .with_settings(InMemoryCacheSettings {
@@ -181,7 +184,10 @@ fn large(c: &mut Criterion) {
                 let (over, value) = (key(next), user(next));
                 let start = Instant::now();
 
-                runtime.block_on(full.set(&over, value, None)).unwrap();
+                full.set(&over, value, None)
+                    .now_or_never()
+                    .unwrap()
+                    .unwrap();
                 total += start.elapsed();
                 next += 1;
             }
