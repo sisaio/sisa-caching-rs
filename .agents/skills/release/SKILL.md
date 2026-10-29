@@ -45,6 +45,9 @@ pushes a tag.
 
 - Edit the release PR right before it is merged. If anything lands on `main` first, release-plz
   closes the edited PR and opens a fresh one without the edits.
+- If merging the release PR starts no workflow run, GitHub dropped the push. The next push to
+  `main` publishes the versions crates.io doesn't have yet. Running the workflow by hand doesn't
+  help: a manual run only opens release PRs.
 - The first release PR lists every commit since the start. Replace it with the summary in
   [CHANGELOG.md](../../../CHANGELOG.md).
 - Never list a `publish = false` crate in `release-plz.toml`. Any `[[package]]` entry turns

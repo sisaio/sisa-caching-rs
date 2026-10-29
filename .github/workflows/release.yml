@@ -2,9 +2,10 @@
 # - opens the release PR when the maintainer runs this workflow by hand, and updates it on every
 #   push to main while it is open. The PR bumps the versions, checks the public API for breaking
 #   changes with cargo-semver-checks, and adds the changelog section;
-# - when the push is that PR being merged, publishes to crates.io, tags `v<version>`, creates the
-#   GitHub release from the changelog as a draft, runs the benchmarks for it, and then publishes
-#   it. Releases are immutable once published, so the benchmark files go on while it's a draft.
+# - on a push that brings crate versions crates.io doesn't have yet, as merging that PR does,
+#   publishes to crates.io, tags `v<version>`, creates the GitHub release from the changelog as a
+#   draft, runs the benchmarks for it, and then publishes it. Releases are immutable once
+#   published, so the benchmark files go on while it's a draft.
 #
 # Publishing uses crates.io trusted publishing (no secret) once each crate exists there. The very
 # first publish of a crate needs a `CARGO_REGISTRY_TOKEN` secret, removed afterwards.
