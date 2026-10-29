@@ -20,9 +20,8 @@ use crate::{
 };
 
 /// Subscribes to one hybrid store's backplane and applies other nodes' invalidations to its local
-/// layer. The store starts it once. It holds the store's state but not its `Worker`, so it stops
-/// when the store's last clone drops. The store reads through to the distributed store until this
-/// worker has subscribed, and again whenever the subscription is lost, until it subscribes again.
+/// layer. It holds the store's state but not its `Worker`, so the store's last clone dropping
+/// stops it.
 ///
 /// The worker also publishes a heartbeat every `heartbeat_interval_ms`. It clears the local layer
 /// when a message can't be read, when another node's heartbeat shows a sequence number this node

@@ -16,6 +16,7 @@
 //! | `sisa.caching.publish.failures` | counter | Invalidations a hybrid store couldn't publish after 3 tries |
 //! | `sisa.caching.backplane.connected` | gauge | 1 while a hybrid store's backplane is subscribed, else 0 |
 //! | `sisa.caching.backplane.unreadable` | counter | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
+//! | `sisa.caching.local.clears` | counter | Times a hybrid store cleared its local layer because it may have missed an invalidation, with `reason`: `gap` for a number missing below a heartbeat, `untracked` for numbers it can't track, `peer_lost` for a node whose heartbeats stopped, `resubscribed` for a new subscription after a lost one, or `unreadable` for a message it couldn't read. A clear another node asked for isn't counted |
 //!
 //! Every metric has a `store` attribute with the store's name. Hits and misses also have a
 //! `layer` attribute: `memory`, `redis`, or `hybrid` for the hybrid store as a whole. A hybrid
@@ -24,6 +25,14 @@
 //!
 //! A `get_or_set` that has to load reads before and after taking its lock, so it counts two
 //! misses. Count loads with the load histogram's count instead.
+//!
+//! `errors` counts only the calls `get_or_set` makes, whose failures it handles itself: a failed
+//! read loads, and a failed store returns the loaded value without caching it. With the store
+//! down, each `get_or_set` counts two `get` errors, one per read, and a `set` error. A call the
+//! application makes returns its error instead.
+//!
+//! `invalidations.delivered` grows by the number of listening nodes for each invalidation. On a
+//! cluster, `SPUBLISH` counts only the subscribers on the node that took it.
 //!
 //! A setup at startup, with the OpenTelemetry SDK and an OTLP exporter:
 //!

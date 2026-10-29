@@ -22,15 +22,9 @@
 //! # Ok::<(), sisa_caching_core::CacheError>(())
 //! ```
 //!
-//! Stores trace through [`tracing`](https://docs.rs/tracing). Every store call gets a debug span
-//! (`memory get`, `redis set`, `cache get_or_set`, ...) carrying the full key. The hybrid store
-//! adds info spans that carry only the operation, never a key: `hybrid write`, `hybrid
-//! apply_invalidation` on the nodes that receive it, and `hybrid resync`. A failed call marks its
-//! span as an error. Stores warn only about the errors they swallow, naming the store but never a
-//! key, such as an invalidation that can't be sent; `get_or_set` warns at the first of a run of
-//! failed store calls, and logs the success that ends it at info. A store's background task logs
-//! its start and stop at info, and a panic at error. Stores count hits, misses, loads, failed store
-//! calls and evictions through the OpenTelemetry metrics API; the [`metrics`] module lists them.
+//! Stores trace through [`tracing`](https://docs.rs/tracing), with keys only in debug spans, and
+//! warn only about the errors they handle themselves. They count hits, misses, loads, failed store
+//! calls and evictions through the OpenTelemetry metrics API, as the [`metrics`] module lists.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

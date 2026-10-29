@@ -15,7 +15,8 @@
 //! reads as a miss, and a field that isn't an integer fails the read.
 //!
 //! On one server, connect from a URL. `rediss://` URLs need the `tls-rustls` or
-//! `tls-native-tls` feature.
+//! `tls-native-tls` feature and trust the system's root certificates; for a private CA or a
+//! client certificate, use [`RedisCacheStore::from_client`].
 //!
 //! ```no_run
 //! use sisa_caching_core::{CacheSettings, CacheStore};
@@ -39,32 +40,6 @@
 //! # }
 //! ```
 //!
-//! `rediss://` trusts the system's root certificates. For a private CA or a client certificate,
-//! build the client with them:
-//!
-//! ```no_run
-//! # #[cfg(feature = "tls-rustls")]
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use sisa_caching_redis::{
-//!     RedisCacheStore,
-//!     redis::{Client, ClientTlsConfig, TlsCertificates},
-//! };
-//!
-//! let client = Client::build_with_tls(
-//!     "rediss://cache.internal:6380",
-//!     TlsCertificates {
-//!         client_tls: Some(ClientTlsConfig {
-//!             client_cert: std::fs::read("client.crt")?,
-//!             client_key: std::fs::read("client.key")?,
-//!         }),
-//!         root_cert: Some(std::fs::read("ca.crt")?),
-//!     },
-//! )?;
-//! let cache = RedisCacheStore::from_client("app", client).await?;
-//! # Ok(())
-//! # }
-//! ```
-//!
 //! For other servers, build a [`RedisConnection`] with the re-exported [`redis`] crate and pass it
 //! to `RedisCacheStore::new`:
 //!
@@ -75,31 +50,9 @@
 //! | Sentinel | [`SentinelConnection`] |
 //!
 //! Every read and write goes to a primary, so a read never returns a value older than the last
-//! write. The exception is Sentinel: after a failover, a connection that hasn't written since keeps
-//! reading from the old primary, now a replica, until its next write moves it. Replication is
-//! still asynchronous: a write the primary acknowledged just before a failover can be lost, and the
-//! previous value is served until it expires.
-//!
-//! Behind Sentinel:
-//!
-//! ```no_run
-//! use sisa_caching_redis::{
-//!     RedisCacheStore, SentinelConnection,
-//!     redis::sentinel::{SentinelClient, SentinelServerType},
-//! };
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let sentinel = SentinelClient::build(
-//!     vec!["redis://10.0.0.1:26379", "redis://10.0.0.2:26379"],
-//!     String::from("mymaster"),
-//!     None,
-//!     SentinelServerType::Master,
-//! )?;
-//! let conn = SentinelConnection::connect(sentinel).await?;
-//! let cache = RedisCacheStore::new("app", conn)?;
-//! # Ok(())
-//! # }
-//! ```
+//! write, except behind Sentinel just after a failover, as [`SentinelConnection`] says.
+//! Replication is still asynchronous: a write the primary acknowledged just before a failover can
+//! be lost, and the previous value is served until it expires.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

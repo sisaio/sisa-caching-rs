@@ -35,7 +35,7 @@ another store doesn't touch its call sites. The crate docs cover settings and be
 
 ```toml
 [dependencies]
-sisa-caching = { version = "0.2", features = ["memory"] }   # or "redis", or "hybrid"
+sisa-caching = { version = "0.3", features = ["memory"] }   # or "redis", or "hybrid"
 ```
 
 In memory:
@@ -43,7 +43,7 @@ In memory:
 ```rust,ignore
 use sisa_caching::{CacheStore, InMemoryCacheStore};
 
-// From its first write on, it drops expired entries nobody reads again every 60 seconds.
+// It drops expired entries every 60 seconds by itself.
 let cache = InMemoryCacheStore::new("app")?;
 
 let user: User = cache.get_or_set(&format!("user:v1:{id}"), || load_user(id), None).await?;
@@ -58,8 +58,7 @@ use sisa_caching::RedisCacheStore;
 let cache = RedisCacheStore::connect("app", "redis://127.0.0.1:6379").await?;
 ```
 
-Hybrid. The store starts the worker that applies other nodes' invalidations itself, and stops it
-when its last clone drops:
+Hybrid, which applies the other nodes' invalidations by itself:
 
 ```rust,ignore
 use sisa_caching::{HybridCacheSettings, HybridCacheStore};
@@ -78,7 +77,7 @@ local `max_ttl_secs`, 60 seconds by default, still caps every local copy.
 Each hybrid store has its own pub/sub channel, `<store>:backplane`. One store usually covers an
 application; a second one, such as `user_cache` next to `catalog_cache`, gets its own settings
 and doesn't affect the first. See
-[Several hybrid stores](docs/01-architecture.md#several-hybrid-stores).
+[Several hybrid stores](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#several-hybrid-stores).
 
 ## Compatibility
 
@@ -94,7 +93,9 @@ Stores trace through `tracing` and count hits, misses, loads, failed store calls
 through the OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations
 it causes on other nodes share one trace.
 [docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md)
-lists every metric and span; the examples show the setup.
+lists every span and log line and what to alert on, and the
+[metrics docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) every metric;
+the examples show the setup.
 
 ## Examples
 

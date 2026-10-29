@@ -31,8 +31,7 @@
 //!
 //! An expired entry reads as a miss and stays until it is overwritten, a full store trims, or a
 //! purge drops it. The store purges every `purge_interval_secs` of its settings, 60 seconds by
-//! default, on a task it starts on its first write inside a tokio runtime and stops when its last
-//! clone drops. To purge on a schedule of your own, turn that off and call `purge`:
+//! default. To purge on a schedule of your own, turn that off and call `purge`:
 //!
 //! ```
 //! use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};

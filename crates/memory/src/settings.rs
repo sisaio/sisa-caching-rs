@@ -30,9 +30,8 @@ pub struct InMemoryCacheSettings {
     /// The settings every store has: the default TTL, refresh-ahead and the `get_or_set` lock wait.
     pub common: CacheSettings,
 
-    /// How often the store drops its expired entries: 60 seconds by default, from its first
-    /// write. `None` turns that off, for an application that calls `purge` itself; `validate`
-    /// rejects `0`.
+    /// How often the store drops its expired entries: 60 seconds by default. `None` turns that
+    /// off, for an application that calls `purge` itself; `validate` rejects `0`.
     pub purge_interval_secs: Option<u64>,
 
     /// The most entries the store holds. Past it, an insert starts a trim that drops expired

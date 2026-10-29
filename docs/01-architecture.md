@@ -16,9 +16,8 @@ explains how the parts fit, what they promise, and which rules hold them togethe
   node never serves a value it was told is invalid. When a message is lost, the writer's next
   heartbeat shows it and the node clears its local layer; the memory store's `max_ttl_secs` caps
   every copy all the same.
-- **Small and explicit.** Building a store is all the setup: it runs its own worker and stops
-  it when it is dropped. No hidden dependencies, and each store has one read path and one write
-  path.
+- **Small and explicit.** Building a store is all the setup: it runs its own worker. No hidden
+  dependencies, and each store has one read path and one write path.
 
 ## Crates
 
@@ -114,10 +113,9 @@ stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a wri
 that drops expired entries, then the least recently used ones down to 90% of the limit, so the
 next writes don't trim again. Values are freed after the lock is released. Expired entries read as
 misses and go when they are overwritten, trimmed, or purged. The store purges every
-`purge_interval_secs` on a worker it starts on its first write. Inside a tokio runtime the trims,
-the purges and the freeing of what `clear` took run on the blocking pool, so a store of a million
-entries holds up no async thread; `remove_prefix` and `purge` called by the application run on
-the caller's thread.
+`purge_interval_secs` on its worker. Inside a tokio runtime the trims, the purges and the freeing
+of what `clear` took run on the blocking pool, so a store of a million entries holds up no async
+thread; `remove_prefix` and `purge` called by the application run on the caller's thread.
 
 ### Redis
 
@@ -147,9 +145,8 @@ Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writ
   it evicts, and a read only copies into the local layer if the counter didn't move. An
   invalidation waits for a copy in progress, so a slow read can't put back a value that was just
   invalidated, not even for a moment.
-- **Backplane worker:** applies other nodes' invalidations. The store starts it on its first read
-  or write, or in `connect`, and it stops when the store's last clone drops. Local reads are on
-  only while it is subscribed; every subscribe and every loss clears the local layer.
+- **Backplane worker:** applies other nodes' invalidations. Local reads are on only while it is
+  subscribed; every subscribe and every loss clears the local layer.
 - Invalidations touch only local layers and generations, never Redis. Each message carries the
   writer's trace context.
 - **Channel:** each store publishes and subscribes on its own pub/sub channel,
@@ -333,14 +330,15 @@ Settled; reopen only with new evidence.
 | Redis expiry is relative (`PEXPIRE`), not absolute (`PEXPIREAT`) | An absolute deadline needs the writer's clock to agree with the server's; a relative one is off only by how long the write takes to arrive |
 | A hybrid write returns `Ok` when every publish fails | The data is written; peers clear their local layers at the writer's next heartbeat, and the failure is logged and counted |
 | Reads stay on the Redis primary | Replica lag would let a node copy a value that was just replaced back into its local layer. Behind Sentinel, a connection keeps reading from the old primary after a failover until its next write; [Compatibility](03-compatibility.md#sentinel) says what that allows |
-| Each store starts its own worker, once | A store can't run without its listener or with two, and needs no setup; its worker stops when its last clone drops |
+| Each store starts its own worker, once | A store can't run without its listener or with two, and needs no setup |
 | One backplane, `RedisBackplane`, with no trait for others | Applications can't supply a transport of their own, so the message type, the subscription and what the worker expects of them stay private and can change without a breaking release |
 
 ## Rules that hold the design together
 
-- A store starts its purge or backplane worker through its `Worker`, once, on its first call
-  inside a tokio runtime. That worker holds the store's entries or state but never its
-  `Worker`, so the store's last clone dropping stops it.
+- A store starts its worker through its `Worker`, once, inside a tokio runtime: the memory store
+  its purge worker on its first write, the hybrid store its backplane worker on its first call
+  or in `connect`. That worker holds the store's entries or state but never its `Worker`, so the
+  store's last clone dropping stops it.
 - One `CacheEntry<CV>` type for every store; the value type parameter is `CV` everywhere.
 - Keep a trait even with one implementation when it marks a seam: `CacheCodec` and `JsonCodec`.
 - The Redis hash and the backplane message are formats other languages write, so they change only

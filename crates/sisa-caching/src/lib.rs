@@ -19,7 +19,7 @@
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use sisa_caching::{CacheStore, InMemoryCacheStore};
 //!
-//! // From its first write on, it drops expired entries nobody reads again every 60 seconds.
+//! // It drops expired entries every 60 seconds by itself.
 //! let cache = InMemoryCacheStore::new("app")?;
 //!
 //! let name = cache
@@ -33,8 +33,7 @@
 //! # fn main() {}
 //! ```
 //!
-//! A hybrid on one Redis server. It starts the worker that applies other nodes' invalidations,
-//! and stops it when its last clone drops:
+//! A hybrid on one Redis server, which applies the other nodes' invalidations by itself:
 //!
 //! ```no_run
 //! # #[cfg(feature = "hybrid")]
