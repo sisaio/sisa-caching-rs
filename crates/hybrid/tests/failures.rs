@@ -357,6 +357,13 @@ async fn a_write_runs_to_the_end_after_its_last_handle_is_dropped() {
     call.abort();
     assert!(call.await.unwrap_err().is_cancelled());
 
+    // The writer's worker stops with its last handle. Garnet can lose a message published while
+    // another subscriber disconnects, so the write goes on once the worker's connection is gone.
+    eventually("the writer's worker stops", || async {
+        redis.subscriptions().await == 1
+    })
+    .await;
+
     gate.release.add_permits(1);
     reader_sees(&reader, Some("new")).await;
 }
