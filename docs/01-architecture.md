@@ -15,8 +15,9 @@ explains how the parts fit, what they promise, and which rules hold them togethe
 - **A local layer with a known staleness bound.** The hybrid store serves reads from memory, and a
   node never serves a value it was told is invalid. When a message is lost, the memory store's
   `max_ttl_secs` caps how long it can serve the old one.
-- **Small and explicit.** No worker starts on its own, no hidden dependencies, and each
-  store has one read path and one write path.
+- **Small and explicit.** Building a store is all the setup: it runs its own worker and stops
+  it when it is dropped. No hidden dependencies, and each store has one read path and one write
+  path.
 
 ## Crates
 
@@ -61,10 +62,10 @@ use. `examples` use it; `benches` use every store crate directly.
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
 | `sisa-caching` | Yes | Everything below that an application uses | Re-exports only; features `memory`, `redis`, `hybrid` pick the stores, `tls-rustls` or `tls-native-tls` adds TLS (none by default) |
-| `sisa-caching-core` | Yes | `CacheStore`, `KeyPrefix`, `CacheKey`, `CacheEntry`, `CacheOptions`, `CacheSettings`, `WorkerHost` | The store trait, keys, entries, settings with their 365-day limit, the per-key `Locker` behind `get_or_set`, the `Clock`, and the OpenTelemetry instruments in `metrics` |
-| `sisa-caching-memory` | Yes | `InMemoryCacheStore`, `PurgeWorker` | Sharded maps of `Arc<dyn Any>` values with LRU trimming |
+| `sisa-caching-core` | Yes | `CacheStore`, `KeyPrefix`, `CacheKey`, `CacheEntry`, `CacheOptions`, `CacheSettings`, `WorkerHost`, `Worker` | The store trait, keys, entries, settings with their 365-day limit, the per-key `Locker` behind `get_or_set`, the `Clock`, the OpenTelemetry instruments in `metrics`, and the `Worker` that runs a store's background task |
+| `sisa-caching-memory` | Yes | `InMemoryCacheStore` | Sharded maps of `Arc<dyn Any>` values with LRU trimming, and the worker that purges them |
 | `sisa-caching-redis` | Yes | `RedisCacheStore` | One hash per key with JSON in `value`, over any `RedisConnection`: one server, a cluster or Sentinel |
-| `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane`, `BackplaneWorker` | A local memory store in front of a distributed `CacheStore`, kept coherent over a `Backplane` (Redis pub/sub) |
+| `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane` | A local memory store in front of a distributed `CacheStore`, kept coherent over a `Backplane` (Redis pub/sub) by a worker each store runs |
 | `sisa-caching-testing` | No | `ManualClock`, `Redis`, `eventually` | A test clock, a Redis container per test (one server, a cluster, Sentinel or TLS), and a wait-until helper |
 | `examples` | No | | Three axum services over a shared users API, one per store |
 | `benches` | No | | Criterion benchmarks for every store and the `summary` table printer |
@@ -111,7 +112,8 @@ Rules every store follows:
 stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a write first drops
 expired entries, then the least recently used ones down to 90% of the limit, so the next writes
 don't trim again. Values are freed after the lock is released. Expired entries read as misses and go
-when they are overwritten, trimmed, or purged by the `PurgeWorker`.
+when they are overwritten, trimmed, or purged. The store purges every `purge_interval_secs` on a
+worker it starts on its first write.
 
 ### Redis
 
@@ -140,8 +142,9 @@ Redis), and uses a `Backplane` (Redis pub/sub) to tell other nodes about writes.
   it evicts, and a read only copies into the local layer if the counter didn't move. An
   invalidation waits for a copy in progress, so a slow read can't put back a value that was just
   invalidated, not even for a moment.
-- **Backplane worker:** applies other nodes' invalidations. Local reads are on only while it is
-  subscribed; every subscribe and every loss clears the local layer.
+- **Backplane worker:** applies other nodes' invalidations. The store starts it on its first read
+  or write, or in `connect`, and it stops when the store's last clone drops. Local reads are on
+  only while it is subscribed; every subscribe and every loss clears the local layer.
 - Invalidations touch only local layers and generations, never Redis. Each message carries the
   writer's trace context.
 
@@ -278,12 +281,13 @@ Settled; reopen only with new evidence.
 | Redis expiry is relative (`PEXPIRE`), not absolute (`PEXPIREAT`) | An absolute deadline needs the writer's clock to agree with the server's; a relative one is off only by how long the write takes to arrive |
 | A hybrid write returns `Ok` when every publish fails | The data is written; `max_ttl_secs` bounds how stale peers get, and the failure is logged and counted |
 | Reads stay on the Redis primary | Replica lag would let a node copy a value that was just replaced back into its local layer. Behind Sentinel, a connection keeps reading from the old primary after a failover until its next write; [Compatibility](03-compatibility.md#sentinel) says what that allows |
-| Stores never start their own workers | The application owns task lifetimes, and tests stay deterministic |
+| Each store starts its own worker, once | A store can't run without its listener or with two, and needs no setup; its worker stops when its last clone drops |
 
 ## Rules that hold the design together
 
-- Stores never depend on, own or spawn workers. Workers depend on stores and run on a
-  `WorkerHost` the application keeps.
+- A store starts its purge or backplane worker through its `Worker`, once, on its first call
+  inside a tokio runtime. That worker holds the store's entries or state but never its
+  `Worker`, so the store's last clone dropping stops it.
 - One `CacheEntry<CV>` type for every store; the value type parameter is `CV` everywhere.
 - Keep a trait even with one implementation when it marks a seam: `CacheCodec` and `JsonCodec`,
   `PurgeableStore` and the generic `PurgeWorker<C>`.

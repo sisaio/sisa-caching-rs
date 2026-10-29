@@ -147,7 +147,7 @@ sequenceDiagram
     participant LA as Local memory A
     participant Redis
     participant Bus as Backplane (pub/sub)
-    participant W as BackplaneWorker on node B
+    participant W as Backplane worker on node B
     participant LB as Local memory B
 
     App->>A: set(key, value)
@@ -171,7 +171,7 @@ logged. Node B then serves its old copy until it expires, at most the local `max
 
 ```mermaid
 sequenceDiagram
-    participant W as BackplaneWorker
+    participant W as Backplane worker
     participant Bus as Backplane
     participant Local as Local layer
 
@@ -198,7 +198,7 @@ and tries again.
 
 ```mermaid
 sequenceDiagram
-    participant W as PurgeWorker
+    participant W as Purge worker
     participant Store as InMemoryCacheStore
 
     loop every purge_interval_secs
@@ -207,29 +207,28 @@ sequenceDiagram
     end
 ```
 
-Without a purge interval the worker stops at once. An expired entry then stays in memory until
-its key is written again or `max_entries` trims it; with neither, the entries of keys that are
-never written again stay for good.
+Without a purge interval the store starts no purge worker. An expired entry then stays in memory
+until its key is written again, `max_entries` trims it, or the application calls `purge`; with
+none of those, the entries of keys that are never written again stay for good.
 
-## Workers on a host
+## How a store runs its worker
 
 ```mermaid
 sequenceDiagram
     participant App
-    participant Host as WorkerHost
-    participant W as Worker
+    participant Store as Store and its clones
+    participant W as Its worker
 
-    App->>Host: register(worker)
-    Host->>W: run on the tokio runtime
-    Note over W: runs until it returns or the host stops it
-    alt App calls shutdown().await
-        Host->>W: cancel
-        Host-->>App: returns once every worker has stopped
-    else App drops the host
-        Host->>W: cancel, without waiting
-    end
+    App->>Store: first call inside a tokio runtime
+    Store->>W: start once, on that runtime
+    Note over W: runs until the store's last clone drops
+    App->>Store: drop the last clone
+    Store->>W: cancel, without waiting
 ```
 
-Stores never start workers; the application registers them and keeps the host alive as long as
-the stores. When a `BackplaneWorker` stops for any reason, its hybrid store turns local reads off
-and reads Redis until a new worker subscribes.
+The memory store starts its purge worker on its first write, since entries only come in there.
+The hybrid store starts its backplane worker on its first read or write, or in `connect`, so a
+node that only writes runs one too. A worker holds the store's entries or state but not the
+store's `Worker`, so it never keeps itself running. A call outside a tokio runtime starts
+nothing, and the next one inside a runtime does. When the backplane worker stops for any reason,
+such as a panic, its hybrid store turns local reads off and reads Redis from then on.

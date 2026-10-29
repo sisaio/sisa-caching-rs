@@ -64,8 +64,8 @@ The stores log only errors they handle themselves, as warnings: a loaded value t
 stored, a key that couldn't be read so the loaded value is stored over it, a refresh whose load
 failed while the cached value was still live, which serves that value, a lock wait that
 timed out, an invalidation that couldn't be published, and a backplane subscription lost or
-failing. The backplane worker also logs at info when it subscribes, and a `WorkerHost` logs each
-worker starting and stopping at info, and a panic at error.
+failing. The backplane worker also logs at info when it subscribes, and each store's worker logs
+starting and stopping at info, and a panic at error.
 
 Warnings name the store, not the key. A `get_or_set` warning fires inside the `cache get_or_set`
 debug span, so with debug on it shows next to the key. An error's text can still quote part of a
