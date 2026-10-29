@@ -16,7 +16,7 @@ pub trait PurgeableStore {
     /// Drops expired entries and returns how many.
     fn purge(&self) -> usize;
 
-    /// How often the store's own purge task calls `purge`. `None` or zero means never.
+    /// How often the store's own purge task calls `purge`. `None` means never.
     fn purge_interval(&self) -> Option<Duration>;
 }
 
