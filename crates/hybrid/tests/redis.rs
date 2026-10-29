@@ -52,7 +52,6 @@ fn quick_pings() -> RedisBackplaneSettings {
     RedisBackplaneSettings {
         ping_interval_ms: 50,
         ping_timeout_ms: 100,
-        ..RedisBackplaneSettings::default()
     }
 }
 

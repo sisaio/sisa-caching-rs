@@ -37,9 +37,9 @@ loads, and a failed store returns the loaded value without caching it. A call th
 returns its error instead. With the store down, each `get_or_set` counts two `get` errors, one per
 read, and a `set` error for storing what its loader returned.
 
-`invalidations.delivered` counts every subscriber of the channel, the publishing node's own
-included, so with every node listening it grows by the number of nodes for each invalidation, more
-if other stores share the channel. On a cluster, `SPUBLISH` counts only the subscribers on the node
+`invalidations.delivered` counts every subscriber of the store's channel, the publishing node's
+own included, so with every node listening it grows by the number of nodes for each invalidation,
+plus any 0.2 nodes during an upgrade. On a cluster, `SPUBLISH` counts only the subscribers on the node
 that took it.
 
 Worth an alert:

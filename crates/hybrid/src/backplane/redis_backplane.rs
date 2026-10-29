@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, sync::Arc};
 
 use ::redis::{
     AsyncConnectionConfig, Client, ConnectionAddr, IntoConnectionInfo, ProtocolVersion, PushInfo,
@@ -14,6 +14,7 @@ use tokio::{
     time::{Instant, Interval, MissedTickBehavior},
 };
 
+use sisa_caching_core::cache::KeyPrefix;
 use sisa_caching_redis::{
     connection::{SentinelConnection, connection_config},
     error::{RedisCacheError, Result},
@@ -29,10 +30,20 @@ use super::BackplaneMessage;
 /// without a bound or getting lost without a sign.
 const QUEUE_LIMIT: usize = 8192;
 
-/// A backplane over Redis pub/sub on one channel. Publishing shares one connection. Each
-/// subscription opens its own connection, on RESP3, and holds up to 8,192 messages its worker
-/// hasn't read: a worker that falls further behind loses its subscription, so the node clears its
-/// local layer and subscribes again.
+/// The channel every store shared before 0.3. Each node also publishes there for one release, so
+/// that 0.2 nodes still get its invalidations and heartbeats during a rolling upgrade.
+// TODO(0.4): stop publishing on it.
+const SHARED_CHANNEL: &str = "sisa-caching:backplane";
+
+/// A backplane over Redis pub/sub. Each hybrid store has its own channel, `<store>:backplane`, such
+/// as `catalog:backplane`, so a node gets only its own stores' messages. Publishing shares one
+/// connection. Each subscription opens its own connection, on RESP3, and holds up to 8,192
+/// messages its worker hasn't read: a worker that falls further behind loses its subscription, so
+/// the node clears its local layer and subscribes again.
+///
+/// Redis delivers a message to subscribers on every database, so two deployments that share a
+/// server need different store names, such as `prod:catalog` and `staging:catalog`, even on
+/// separate databases.
 ///
 /// On a cluster, use [`cluster`](Self::cluster), or [`connect`](Self::connect) to any one node:
 /// classic pub/sub reaches every node. While that node is down, subscribing fails and the hybrid
@@ -41,6 +52,8 @@ const QUEUE_LIMIT: usize = 8192;
 pub struct RedisBackplane {
     server: Server,
     pub(crate) settings: RedisBackplaneSettings,
+    /// The store's channel. [`for_store`](Self::for_store) sets it when the store is built.
+    channel: Arc<str>,
 }
 
 /// The server the backplane publishes and subscribes on.
@@ -75,6 +88,7 @@ impl std::fmt::Debug for RedisBackplane {
         formatter
             .debug_struct("RedisBackplane")
             .field("server", &server)
+            .field("channel", &self.channel)
             .field("settings", &self.settings)
             .finish_non_exhaustive()
     }
@@ -99,6 +113,7 @@ impl RedisBackplane {
         Ok(Self {
             server: Server::Standalone { client, conn },
             settings,
+            channel: Arc::from(""),
         })
     }
 
@@ -112,6 +127,7 @@ impl RedisBackplane {
         Self {
             server: Server::Sentinel(sentinel),
             settings,
+            channel: Arc::from(""),
         }
     }
 
@@ -130,22 +146,37 @@ impl RedisBackplane {
         Ok(Self {
             server: Server::Cluster { client, conn },
             settings,
+            channel: Arc::from(""),
         })
     }
 }
 
 impl RedisBackplane {
+    /// Moves the backplane to `store`'s channel.
+    pub(crate) fn for_store(mut self, store: &KeyPrefix) -> Self {
+        self.channel = Arc::from(format!("{store}:backplane"));
+        self
+    }
+
     /// Sends the message to all subscribers, including this node's own, and returns how many the
-    /// server delivered it to.
+    /// server delivered it to. It also goes to 0.2 nodes on the shared channel, at the same time;
+    /// a failure there is left to their gap detection.
     pub(crate) async fn publish(&self, message: &BackplaneMessage) -> Result<usize> {
+        let payload = serde_json::to_vec(message)?;
+        let (subscribers, shared) = tokio::join!(
+            self.publish_on(&self.channel, &payload),
+            self.publish_on(SHARED_CHANNEL, &payload),
+        );
+
+        Ok(subscribers? + shared.unwrap_or(0))
+    }
+
+    async fn publish_on(&self, channel: &str, payload: &[u8]) -> Result<usize> {
         let command = match self.server {
             Server::Cluster { .. } => "SPUBLISH",
             _ => "PUBLISH",
         };
-        let publish = ::redis::cmd(command)
-            .arg(&self.settings.channel)
-            .arg(serde_json::to_vec(message)?)
-            .to_owned();
+        let publish = ::redis::cmd(command).arg(channel).arg(payload).to_owned();
 
         let subscribers = match &self.server {
             Server::Standalone { conn, .. } => {
@@ -182,7 +213,7 @@ impl RedisBackplane {
                         )
                         .await?;
 
-                    let channel = &self.settings.channel;
+                    let channel = &*self.channel;
                     let slot = ::redis::cmd("CLUSTER")
                         .arg("KEYSLOT")
                         .arg(channel)
@@ -213,7 +244,7 @@ impl RedisBackplane {
                 .get_multiplexed_async_connection_with_config(&config)
                 .await?;
 
-            connection.subscribe(&self.settings.channel).await?;
+            connection.subscribe(&*self.channel).await?;
 
             Ok::<_, RedisError>(Connection::Server {
                 connection,
@@ -235,6 +266,7 @@ impl RedisBackplane {
             pushes,
             pings,
             settings: self.settings.clone(),
+            channel: Arc::clone(&self.channel),
         })
     }
 }
@@ -247,6 +279,7 @@ pub(crate) struct RedisSubscription {
     pushes: Receiver<PushInfo>,
     pings: Interval,
     settings: RedisBackplaneSettings,
+    channel: Arc<str>,
 }
 
 #[allow(
@@ -376,7 +409,7 @@ impl RedisSubscription {
             tokio::select! {
                 message = message(&mut self.pushes) => return message,
                 _ = self.pings.tick() => {
-                    tokio::time::timeout(self.settings.ping_timeout(), self.connection.ping(&self.settings.channel))
+                    tokio::time::timeout(self.settings.ping_timeout(), self.connection.ping(&self.channel))
                         .await
                         .map_err(|_| io_error(ErrorKind::TimedOut, "ping timed out"))??;
                 }
@@ -397,15 +430,20 @@ mod tests {
     use sisa_caching_testing::{Redis, RedisCluster};
 
     use super::*;
-    use crate::{
-        backplane::{Invalidation, NodeId},
-        settings::DEFAULT_REDIS_CHANNEL,
-    };
+    use crate::backplane::{Invalidation, NodeId};
+
+    /// The channel of the `users` store, which the test messages belong to.
+    const USERS_CHANNEL: &str = "users:backplane";
+
+    fn users() -> KeyPrefix {
+        KeyPrefix::new("users").unwrap()
+    }
 
     async fn connect(redis: &Redis, settings: RedisBackplaneSettings) -> RedisBackplane {
         RedisBackplane::connect(redis.url(), settings)
             .await
             .unwrap()
+            .for_store(&users())
     }
 
     /// Pings every 50 ms and gives up after 100 ms, so a stall shows quickly.
@@ -413,16 +451,11 @@ mod tests {
         RedisBackplaneSettings {
             ping_interval_ms: 50,
             ping_timeout_ms: 100,
-            ..RedisBackplaneSettings::default()
         }
     }
 
     fn message(invalidation: Invalidation) -> BackplaneMessage {
-        BackplaneMessage::new(
-            NodeId::new("node-a"),
-            KeyPrefix::new("users").unwrap(),
-            invalidation,
-        )
+        BackplaneMessage::new(NodeId::new("node-a"), users(), invalidation)
     }
 
     async fn next(subscription: &mut RedisSubscription) -> BackplaneMessage {
@@ -435,17 +468,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_subscription_receives_the_messages_of_its_channel() {
+    async fn every_subscription_receives_the_messages_of_its_store() {
         let redis = Redis::start().await;
         let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
-        let elsewhere = connect(
-            &redis,
-            RedisBackplaneSettings {
-                channel: "elsewhere".to_owned(),
-                ..RedisBackplaneSettings::default()
-            },
-        )
-        .await;
+        let elsewhere = connect(&redis, RedisBackplaneSettings::default())
+            .await
+            .for_store(&KeyPrefix::new("orders").unwrap());
         let mut first = backplane.subscribe().await.unwrap();
         let mut second = backplane.subscribe().await.unwrap();
         let sent = [
@@ -470,6 +498,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_message_also_reaches_nodes_on_the_shared_channel() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
+        let mut subscription = backplane.subscribe().await.unwrap();
+        // A 0.2 node, subscribed to the channel every store used to share.
+        let (sender, mut pushes) = tokio::sync::mpsc::unbounded_channel();
+        let info = Client::open(redis.url())
+            .unwrap()
+            .get_connection_info()
+            .clone();
+        let resp3 = info
+            .redis_settings()
+            .clone()
+            .set_protocol(ProtocolVersion::RESP3);
+        let config = AsyncConnectionConfig::new().set_push_sender(sender);
+        let mut legacy = Client::open(info.set_redis_settings(resp3))
+            .unwrap()
+            .get_multiplexed_async_connection_with_config(&config)
+            .await
+            .unwrap();
+        let sent = message(Invalidation::Clear);
+
+        legacy.subscribe(SHARED_CHANNEL).await.unwrap();
+        let subscribers = backplane.publish(&sent).await.unwrap();
+
+        assert_eq!(subscribers, 2);
+        assert_eq!(next(&mut subscription).await, sent);
+        let push = loop {
+            let push = tokio::time::timeout(Duration::from_secs(5), pushes.recv())
+                .await
+                .expect("the shared channel gets the message")
+                .unwrap();
+            if push.kind == PushKind::Message {
+                break push;
+            }
+        };
+        let payload: Vec<u8> = from_redis_value(push.data[1].clone()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<BackplaneMessage>(&payload).unwrap(),
+            sent
+        );
+    }
+
+    #[tokio::test]
     async fn a_subscription_that_falls_too_far_behind_ends() {
         let redis = Redis::start().await;
         let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
@@ -481,7 +553,7 @@ mod tests {
         for _ in 0..1_000 {
             publish
                 .cmd("PUBLISH")
-                .arg(DEFAULT_REDIS_CHANNEL)
+                .arg(USERS_CHANNEL)
                 .arg(&payload)
                 .ignore();
         }
@@ -525,12 +597,9 @@ mod tests {
             },
         )
         .await
-        .unwrap();
-        let message = BackplaneMessage::new(
-            NodeId::new("node-a"),
-            KeyPrefix::new("users").unwrap(),
-            Invalidation::Clear,
-        );
+        .unwrap()
+        .for_store(&users());
+        let message = message(Invalidation::Clear);
         let mut subscription = backplane.subscribe().await.unwrap();
 
         // Waiting through a few pings while the slot stays put, the subscription still delivers.
@@ -544,7 +613,7 @@ mod tests {
 
         next.expect("the message arrives").unwrap();
 
-        cluster.move_slot(DEFAULT_REDIS_CHANNEL).await;
+        cluster.move_slot(USERS_CHANNEL).await;
         backplane.publish(&message).await.unwrap();
 
         // Delivering the message is fine too; waiting on a node that no longer gets it is not.
@@ -568,7 +637,8 @@ mod tests {
         let backplane =
             RedisBackplane::cluster(cluster.client(), RedisBackplaneSettings::default())
                 .await
-                .unwrap();
+                .unwrap()
+                .for_store(&users());
         let mut subscription = backplane.subscribe().await.unwrap();
         let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
         let mut publish = redis::pipe();
@@ -578,7 +648,7 @@ mod tests {
         for _ in 0..20_000 {
             publish
                 .cmd("SPUBLISH")
-                .arg(DEFAULT_REDIS_CHANNEL)
+                .arg(USERS_CHANNEL)
                 .arg(&payload)
                 .ignore();
         }

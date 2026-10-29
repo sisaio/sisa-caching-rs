@@ -11,7 +11,7 @@ use sisa_caching_core::{
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
     error::HybridCacheError,
-    settings::{BackplaneWorkerSettings, DEFAULT_REDIS_CHANNEL, RedisBackplaneSettings},
+    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
     store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -95,23 +95,27 @@ pub async fn local_value<D: CacheStore + 'static>(
     node.local_store().get(key).await.unwrap()
 }
 
-/// Publishes `payload` on the backplane's channel, as another process would.
-pub async fn publish(redis: &Redis, payload: &str) {
+/// Publishes `payload` on `store`'s backplane channel, as another process would.
+pub async fn publish(redis: &Redis, store: &str, payload: &str) {
     redis::cmd("PUBLISH")
-        .arg(DEFAULT_REDIS_CHANNEL)
+        .arg(format!("{store}:backplane"))
         .arg(payload)
         .query_async::<usize>(&mut redis.connection().await)
         .await
         .unwrap();
 }
 
-/// Publishes the removal of `key` from `store` as `source`, without a `seq`.
-pub async fn publish_removal(redis: &Redis, source: &str, store: &str, key: &str) {
-    let message = serde_json::json!({
+/// The removal of `key` from `store` by `source`, without a `seq`.
+pub fn removal(source: &str, store: &str, key: &str) -> String {
+    serde_json::json!({
         "v": 1, "source": source, "store": store, "kind": "key", "target": key,
-    });
+    })
+    .to_string()
+}
 
-    publish(redis, &message.to_string()).await;
+/// Publishes the removal of `key` from `store` as `source` on the store's channel.
+pub async fn publish_removal(redis: &Redis, source: &str, store: &str, key: &str) {
+    publish(redis, store, &removal(source, store, key)).await;
 }
 
 /// Writes `user:1` = `old` to the distributed store, has `reader` copy it, then overwrites it

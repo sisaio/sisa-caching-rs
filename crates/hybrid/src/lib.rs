@@ -84,7 +84,8 @@
 //!
 //! # Invalidations from other languages
 //!
-//! The Redis backplane publishes JSON on its channel (`sisa-caching:backplane` by default):
+//! The Redis backplane publishes JSON on the store's channel, `<store>:backplane`, such as
+//! `app:backplane` for a store named `app`:
 //!
 //! ```json
 //! {"v":1,"source":"node-7","store":"app","kind":"key","target":"user:42"}
