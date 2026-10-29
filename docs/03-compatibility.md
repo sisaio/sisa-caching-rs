@@ -33,7 +33,8 @@ copies; `InMemoryCacheStore::new` alone has none.
 Give the store a `ClusterConnection`. Single-key calls go to the primary that owns the key.
 `remove_prefix` and `clear` run their `SCAN` on each primary in turn, since one `SCAN` reaches one
 node. A slot that moves during the walk can hide its keys from it, as keys added during a `SCAN`
-can on one server.
+can on one server. Nodes that report no endpoint of their own, as behind a load balancer with
+`cluster-preferred-endpoint-type unknown-endpoint`, are reached at the address the client asked.
 
 Give the backplane the cluster client with `RedisBackplane::cluster`. Build the client with
 `ProtocolVersion::RESP3`: a subscription gets its messages as RESP3 pushes. It uses sharded

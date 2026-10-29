@@ -1,12 +1,15 @@
 //! The connections a Redis store runs on: one server, a cluster, or a primary behind Sentinel.
 
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use redis::{
     Client, Cmd, Pipeline, RedisError, RedisFuture, RedisResult, ServerErrorKind, Value,
     aio::{ConnectionLike, ConnectionManager, ConnectionManagerConfig, MultiplexedConnection},
     cluster_async::ClusterConnection,
-    cluster_routing::{RoutingInfo, SingleNodeRoutingInfo},
+    cluster_routing::{MultipleNodeRoutingInfo, RoutingInfo, SingleNodeRoutingInfo},
     from_redis_value,
     sentinel::SentinelClient,
 };
@@ -63,8 +66,22 @@ impl RedisConnection for MultiplexedConnection {}
 
 impl RedisConnection for ClusterConnection {
     async fn primaries(&mut self) -> RedisResult<Vec<Option<NodeAddress>>> {
+        // Asked of every primary, so each reply comes keyed by the address this connection reaches
+        // its node at. One reply is enough: a node it lists with a NULL or empty host, as with
+        // `cluster-preferred-endpoint-type unknown-endpoint`, is on the host the command went to.
+        let every_primary = RoutingInfo::MultiNode((MultipleNodeRoutingInfo::AllMasters, None));
+        let replies: HashMap<String, Value> = from_redis_value(
+            self.route_command(redis::cmd("CLUSTER").arg("SLOTS").to_owned(), every_primary)
+                .await?,
+        )?;
+        let Some((asked, ranges)) = replies.into_iter().next() else {
+            return Ok(Vec::new());
+        };
+        let asked = asked
+            .rsplit_once(':')
+            .map_or(asked.as_str(), |(host, _)| host);
         // One row per slot range: [start, end, primary, replicas...], each node [host, port, ...].
-        let ranges: Vec<Vec<Value>> = redis::cmd("CLUSTER").arg("SLOTS").query_async(self).await?;
+        let ranges: Vec<Vec<Value>> = from_redis_value(ranges.extract_error()?)?;
         let mut primaries = Vec::new();
 
         for range in ranges {
@@ -73,8 +90,10 @@ impl RedisConnection for ClusterConnection {
             };
             let node: Vec<Value> = from_redis_value(node)?;
             let mut node = node.into_iter();
+            let host: Option<String> = from_redis_value(node.next().unwrap_or(Value::Nil))?;
             let address = (
-                from_redis_value(node.next().unwrap_or(Value::Nil))?,
+                host.filter(|host| !host.is_empty())
+                    .unwrap_or_else(|| asked.to_owned()),
                 from_redis_value(node.next().unwrap_or(Value::Nil))?,
             );
 

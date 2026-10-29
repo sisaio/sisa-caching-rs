@@ -18,7 +18,19 @@ async fn key_count(node: &Client) -> usize {
 
 #[tokio::test]
 async fn remove_prefix_and_clear_reach_every_primary() {
-    let cluster = RedisCluster::start().await;
+    remove_prefix_and_clear_reach_every_node_of(&RedisCluster::start().await).await;
+}
+
+#[tokio::test]
+async fn remove_prefix_and_clear_reach_nodes_that_report_no_endpoint() {
+    let Some(cluster) = RedisCluster::start_without_endpoints().await else {
+        return;
+    };
+
+    remove_prefix_and_clear_reach_every_node_of(&cluster).await;
+}
+
+async fn remove_prefix_and_clear_reach_every_node_of(cluster: &RedisCluster) {
     let store = RedisCacheStore::new("app", cluster.connection().await).unwrap();
 
     for id in 0..30 {

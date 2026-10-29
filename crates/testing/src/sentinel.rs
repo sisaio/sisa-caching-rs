@@ -9,13 +9,11 @@ use redis::{
     Client,
     sentinel::{SentinelClient, SentinelServerType},
 };
-use testcontainers::{
-    ContainerAsync, ContainerRequest, GenericImage, ImageExt, runners::AsyncRunner,
-};
+use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
 
 use crate::{
     eventually,
-    server::{Server, image, query, start_server, wait_for, wait_for_ping},
+    server::{Server, beside, image, query, start_server, wait_for, wait_for_ping},
 };
 
 /// A primary on port 6379 and its replica on 6380, watched by one Sentinel as `primary`. The three
@@ -40,16 +38,7 @@ impl RedisSentinel {
         };
 
         let (primary, ip) = start_server(image().with_cmd(server.serve(6379)), 6379).await;
-        let beside = |request: ContainerRequest<GenericImage>| {
-            let id = primary.id().to_owned();
-            request.with_host_config_modifier(move |config| {
-                config.network_mode = Some(format!("container:{id}"));
-                // Docker refuses published ports in another container's network.
-                config.publish_all_ports = Some(false);
-                config.port_bindings = None;
-            })
-        };
-        let replica = beside(image().with_cmd(server.serve(6380)))
+        let replica = beside(&primary, image().with_cmd(server.serve(6380)))
             .start()
             .await
             .unwrap();
@@ -70,13 +59,13 @@ impl RedisSentinel {
             "port 26379\nprotected-mode no\nsentinel monitor primary {ip} 6379 1\n\
              sentinel down-after-milliseconds primary 1000\nsentinel failover-timeout primary 5000\n"
         );
-        let sentinel = beside(sentinel_image.with_cmd([
-            "sh".to_owned(),
-            "-c".to_owned(),
-            format!(
-                "printf '{config}' > /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
-            ),
-        ]))
+        let command = format!(
+            "printf '{config}' > /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"
+        );
+        let sentinel = beside(
+            &primary,
+            sentinel_image.with_cmd(["sh".to_owned(), "-c".to_owned(), command]),
+        )
         .start()
         .await
         .unwrap();
