@@ -11,6 +11,7 @@
 //! | `sisa.caching.errors` | counter | Store calls inside `get_or_set` that failed, with `operation` `get` for a read or `set` for storing what it loaded |
 //! | `sisa.caching.evictions` | counter | Entries a full memory store dropped to make room |
 //! | `sisa.caching.invalidations.received` | counter | Other nodes' invalidations a hybrid store applied |
+//! | `sisa.caching.invalidations.delivered` | counter | Subscribers the server delivered a hybrid store's invalidations to, as `PUBLISH` reports, the publishing node's own included |
 //! | `sisa.caching.publish.failures` | counter | Invalidations a hybrid store couldn't publish after 3 tries |
 //! | `sisa.caching.backplane.connected` | gauge | 1 while a hybrid store's backplane is subscribed, else 0 |
 //! | `sisa.caching.backplane.unreadable` | counter | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
@@ -78,6 +79,10 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
             .u64_counter("sisa.caching.invalidations.received")
             .with_description("Invalidations from other nodes that a hybrid store applied")
             .build(),
+        invalidations_delivered: meter
+            .u64_counter("sisa.caching.invalidations.delivered")
+            .with_description("Subscribers the server delivered a hybrid store's invalidations to")
+            .build(),
         publish_failures: meter
             .u64_counter("sisa.caching.publish.failures")
             .with_description("Invalidations a hybrid store could not publish after every retry")
@@ -124,6 +129,7 @@ pub struct CacheMetrics {
     errors: Counter<u64>,
     evictions: Counter<u64>,
     invalidations_received: Counter<u64>,
+    invalidations_delivered: Counter<u64>,
     publish_failures: Counter<u64>,
     backplane_connected: Gauge<u64>,
     backplane_unreadable: Counter<u64>,
@@ -181,6 +187,14 @@ impl CacheMetrics {
     pub fn invalidation_received(&self, store: &KeyPrefix) {
         self.invalidations_received
             .add(1, &[store_attribute(store)]);
+    }
+
+    /// Counts the subscribers the server delivered one of a hybrid store's invalidations to, as
+    /// `PUBLISH` reports: every subscriber of the channel, this node's own included. It drops when
+    /// a node stops listening.
+    pub fn invalidation_delivered(&self, store: &KeyPrefix, subscribers: usize) {
+        self.invalidations_delivered
+            .add(subscribers as u64, &[store_attribute(store)]);
     }
 
     /// Counts one invalidation a hybrid store could not publish after every retry. Other nodes
