@@ -7,7 +7,9 @@ use std::{
 };
 
 use redis::Client;
-use testcontainers::{ContainerAsync, ContainerRequest, GenericImage, runners::AsyncRunner};
+use testcontainers::{
+    ContainerAsync, ContainerRequest, GenericImage, ImageExt, runners::AsyncRunner,
+};
 
 /// The server family `REDIS_IMAGE` runs. Each takes its own flags, and Cluster, Sentinel and TLS
 /// are set up differently on each.
@@ -71,6 +73,21 @@ pub(crate) async fn start_server(
 
     wait_for_ping(&Client::open(format!("redis://{ip}:{port}")).unwrap()).await;
     (container, ip)
+}
+
+/// `request` to run in `container`'s network namespace, so its server shares that address.
+pub(crate) fn beside(
+    container: &ContainerAsync<GenericImage>,
+    request: ContainerRequest<GenericImage>,
+) -> ContainerRequest<GenericImage> {
+    let id = container.id().to_owned();
+
+    request.with_host_config_modifier(move |config| {
+        config.network_mode = Some(format!("container:{id}"));
+        // Docker refuses published ports in another container's network.
+        config.publish_all_ports = Some(false);
+        config.port_bindings = None;
+    })
 }
 
 // Servers log readiness differently, so wait until one answers PING.
