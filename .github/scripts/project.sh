@@ -47,8 +47,8 @@ done
 # target. title|due date (YYYY-MM-DD, or empty for none yet)|description
 milestones=(
   "0.1.0||First release on crates.io."
-  "0.2.0||Breaking: stores run their own workers, and hybrid nodes detect lost invalidations."
-  "0.3.0||Picked from the roadmap's Later list, as users ask for it."
+  "0.2.0|2026-10-29|Breaking: stores run their own workers, and hybrid nodes detect lost invalidations."
+  "0.3.0|2026-11-01|Picked from the roadmap's Later list, as users ask for it."
 )
 # Existing milestones keep their number, issues and state; the description and due date are
 # updated. Closing a milestone after its release is left to the maintainer.
