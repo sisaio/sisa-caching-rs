@@ -95,9 +95,8 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// # Ok::<(), sisa_caching_core::CacheError>(())
     /// ```
     ///
-    /// The store starts its backplane worker on its first call, with the default
-    /// [`BackplaneWorkerSettings`] unless [`with_worker_settings`](Self::with_worker_settings)
-    /// gives others, and the local store drops its expired copies on its own. The
+    /// Its backplane worker runs with the default [`BackplaneWorkerSettings`] unless
+    /// [`with_worker_settings`](Self::with_worker_settings) gives others. The
     /// [crate docs](crate) show the whole setup.
     pub fn new(
         local_store: InMemoryCacheStore,

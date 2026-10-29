@@ -10,38 +10,9 @@ that call, from the provider installed then, so a provider installed later never
 
 ## Metrics
 
-All under the meter `sisa-caching`. Every metric has a `store` attribute with the store's name.
-
-| Metric | Type | Extra attributes | What it counts |
-| --- | --- | --- | --- |
-| `sisa.caching.hits` | counter | `layer` | Reads that found a live entry |
-| `sisa.caching.misses` | counter | `layer` | Reads that returned no value: nothing there, an expired entry, or a value that doesn't read as the requested type |
-| `sisa.caching.load.duration` | histogram, seconds | `outcome`: `ok` or `error` | How long each `get_or_set` loader ran |
-| `sisa.caching.errors` | counter | `operation`: `get` or `set` | Store calls inside `get_or_set` that failed: its reads, and the stores of what it loaded |
-| `sisa.caching.evictions` | counter | | Entries a full memory store dropped to make room |
-| `sisa.caching.invalidations.received` | counter | | Other nodes' invalidations a hybrid store applied |
-| `sisa.caching.invalidations.delivered` | counter | | Subscribers the server delivered a hybrid store's invalidations to, as `PUBLISH` reports |
-| `sisa.caching.publish.failures` | counter | | Invalidations a hybrid store couldn't publish after 3 tries |
-| `sisa.caching.backplane.connected` | gauge | | 1 while a hybrid store's backplane is subscribed, else 0 |
-| `sisa.caching.backplane.unreadable` | counter | | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
-| `sisa.caching.local.clears` | counter | `reason`: `gap`, `untracked`, `peer_lost`, `resubscribed` or `unreadable` | Times a hybrid store cleared its local layer because it may have missed an invalidation: a number missing below a heartbeat, numbers it can't track, a node whose heartbeats stopped, a new subscription after a lost one, or a message it couldn't read. A clear another node asked for isn't counted |
-
-`layer` is `memory`, `redis`, or `hybrid` for a hybrid store as a whole. A hybrid store records
-all three, so its local hit rate is the `memory` series and its overall hit rate the `hybrid`
-series.
-
-A `get_or_set` that has to load reads before and after taking its lock, so it counts two misses.
-Count loads with the histogram's count instead.
-
-`errors` counts only the calls `get_or_set` makes, whose failures it handles itself: a failed read
-loads, and a failed store returns the loaded value without caching it. A call the application makes
-returns its error instead. With the store down, each `get_or_set` counts two `get` errors, one per
-read, and a `set` error for storing what its loader returned.
-
-`invalidations.delivered` counts every subscriber of the store's channel, the publishing node's
-own included, so with every node listening it grows by the number of nodes for each
-invalidation. On a cluster, `SPUBLISH` counts only the subscribers on the node
-that took it.
+All under the meter `sisa-caching`, each with a `store` attribute naming the store. The
+[`metrics` module docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) list
+every metric with its attributes and what it counts.
 
 Worth an alert:
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every

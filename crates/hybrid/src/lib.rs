@@ -2,9 +2,8 @@
 //!
 //! Reads try the local layer first, then the shared store. Writes update the shared store, drop the
 //! local copy, and publish an invalidation on a backplane (Redis pub/sub), so every other node
-//! drops its copy too. Each hybrid store listens for those invalidations on a worker it starts
-//! itself, on its first call or in `connect`, and stops when its last clone drops. Until the
-//! worker is listening, the store skips the local layer and reads the shared store.
+//! drops its copy too. Each store listens for those invalidations itself, and until it is
+//! listening, reads skip the local layer.
 //!
 //! On one server, [`HybridCacheStore::connect`] builds every part from a URL and one
 //! [`HybridCacheSettings`], which can come straight from a config file. `rediss://` URLs need the
@@ -29,64 +28,40 @@
 //! ```
 //!
 //! For a Redis Cluster, Sentinel or another distributed store, build the three parts and compose
-//! them with [`HybridCacheStore::new`], then give it `settings.worker` with
-//! [`with_worker_settings`](HybridCacheStore::with_worker_settings). Build the local store with
-//! `HybridCacheSettings::default().local`, or its own `max_ttl_secs`, to keep the 60-second cap
-//! on stale copies; `InMemoryCacheStore::new` alone has none. On a cluster, give the store a
-//! `ClusterConnection` and the backplane the cluster client ([`RedisBackplane::cluster`]), which
-//! uses sharded pub/sub.
+//! them with [`HybridCacheStore::new`], which says how to keep the 60-second cap on local copies,
+//! then give it `settings.worker` with
+//! [`with_worker_settings`](HybridCacheStore::with_worker_settings). On a cluster, give the store
+//! a `ClusterConnection` and the backplane the cluster client ([`RedisBackplane::cluster`]),
+//! which uses sharded pub/sub.
 //!
 //! Each store publishes and listens on its own pub/sub channel, `<store>:backplane`. One store
-//! holds values of every type, so one per application is usually enough; a second store, with
-//! its own name and settings, has its own local layer, worker and channel, and doesn't affect the
-//! first. Store names must differ, also between deployments that share a Redis server, as pub/sub
-//! ignores the database. [Several hybrid stores] in the architecture doc has the details.
-//!
-//! [Several hybrid stores]: https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#several-hybrid-stores
+//! holds values of every type, so one per application is usually enough. Run a second one when
+//! some data needs other settings, such as another TTL or `max_entries`: with its own name, it
+//! has its own local layer, worker and channel, and doesn't affect the first. Store names must
+//! differ, also between deployments that share a Redis server, as pub/sub ignores the database.
+//! Create each store once at startup and share it through clones, as each one opens a
+//! subscription of its own.
 //!
 //! Behind Sentinel, share one `SentinelConnection` between the store
 //! ([`RedisCacheStore`](sisa_caching_redis::RedisCacheStore)) and the backplane
 //! ([`RedisBackplane::sentinel`]), so a write that finds the old primary demoted moves the store
 //! and the backplane's publishing to the new one.
 //!
-//! A write returns once the shared store has answered; its invalidation is published in the
-//! background. If that fails after three tries, a warning is logged, and the other nodes clear
-//! their local layers when this node's next heartbeat shows the invalidation missing.
-//!
-//! Each invalidation carries the writer's trace context, so a write and the `hybrid
-//! apply_invalidation` spans it causes on other nodes land in one trace. This needs a text map
-//! propagator installed at startup, such as OpenTelemetry's `TraceContextPropagator`; without one
-//! the message carries no context and each node starts its own trace.
+//! Install a text map propagator at startup, such as OpenTelemetry's `TraceContextPropagator`, so
+//! a write and the `hybrid apply_invalidation` spans it causes on other nodes share one trace.
 //!
 //! # How stale a local copy can get
 //!
-//! Reads copy a shared hit into the local layer with its original creation time and TTL. Writes
-//! and removals evict the local copy, update the shared store, evict again, and publish. Delivery
-//! is at most once, so when the subscription fails (a dropped connection, a failed ping) the
-//! worker clears the local layer and reads go to the shared store until it has subscribed again.
-//! [`local_reads_enabled`](store::HybridCacheStore::local_reads_enabled) reports which mode the
-//! store is in.
+//! A write returns once the shared store has answered and this node can't read its old copy; the
+//! other nodes drop theirs when its invalidation arrives, a moment later. When one is lost, as
+//! when all three tries to publish it fail, they clear their local layers at the writer's next
+//! heartbeat (`heartbeat_interval_ms`, 1 second by default), or once its heartbeats have stopped
+//! for `heartbeat_timeout_ms` (5 seconds). While its subscription is down, a store reads only the
+//! shared store; [`local_reads_enabled`](HybridCacheStore::local_reads_enabled) says which way it
+//! reads.
 //!
-//! Each invalidation bumps a generation for its key's slot before it evicts. A read copies into
-//! the local layer only if the generation hasn't moved since it started, and an invalidation
-//! waits for a copy in progress, so a slow read can't bring back a value that was just
-//! invalidated.
-//!
-//! Each worker also publishes a heartbeat every `heartbeat_interval_ms` (1 second by default)
-//! with the last sequence number its store has finished publishing; every invalidation carries
-//! its own. A node clears its local layer when another node's heartbeat shows a number it never
-//! received (every publish attempt failed, or a message was lost on the way), when that node's
-//! heartbeats stop for `heartbeat_timeout_ms` (5 seconds by default), as it may have stopped
-//! between a write and its publish, or when a message can't be read. A node that stops hearing
-//! its own heartbeats, such as a Garnet subscription left on a node that lost the channel's slot,
-//! treats its subscription as lost. A node that stops for good costs every other node one clear,
-//! unless it calls [`shutdown`](HybridCacheStore::shutdown) first, and a node that subscribes
-//! clears once more at the first heartbeat of each node that published before, as one of those
-//! invalidations may have been lost after the subscribe.
-//!
-//! Call `shutdown` once as the application stops, after its last write. It publishes a
-//! `stopping` message, the node's last heartbeat, so the other nodes forget it instead of clearing
-//! when its heartbeats stop:
+//! Call [`shutdown`](HybridCacheStore::shutdown) once as the application stops, after its last
+//! write, so the other nodes forget this one instead of clearing when its heartbeats stop:
 //!
 //! ```no_run
 //! # use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore};
@@ -100,12 +75,11 @@
 //! # }
 //! ```
 //!
-//! The local `max_ttl_secs` is the bound when an invalidation never arrives and nothing shows it: a
-//! Redis write timed out on the client but was applied later, or the writer, such as a service in
-//! another language, sends no sequence numbers. `HybridCacheSettings` sets it to 60 seconds unless
-//! told otherwise; a local store built without those settings has none. `None` removes the bound.
-//! It doesn't change freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
-//! `refresh_threshold` of `0.8`.
+//! The local `max_ttl_secs` bounds what nothing shows, such as a Redis write that timed out on the
+//! client but was applied later, or a writer in another language that sends no sequence numbers.
+//! `HybridCacheSettings` sets it to 60 seconds; a local store built without those settings has
+//! none, and `None` removes it. It doesn't change freshness: an entry with a 100-second TTL still
+//! refreshes at 80 seconds with a `refresh_threshold` of `0.8`.
 //!
 //! # Invalidations from other languages
 //!

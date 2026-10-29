@@ -136,6 +136,25 @@ impl RedisConnection for ClusterConnection {
 /// once instead of waiting for the old primary to come back.
 ///
 /// Clones share the connection, so one failover moves all of them.
+///
+/// ```no_run
+/// use sisa_caching_redis::{
+///     RedisCacheStore, SentinelConnection,
+///     redis::sentinel::{SentinelClient, SentinelServerType},
+/// };
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let sentinel = SentinelClient::build(
+///     vec!["redis://10.0.0.1:26379", "redis://10.0.0.2:26379"],
+///     String::from("mymaster"),
+///     None,
+///     SentinelServerType::Master,
+/// )?;
+/// let conn = SentinelConnection::connect(sentinel).await?;
+/// let cache = RedisCacheStore::new("app", conn)?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct SentinelConnection {
     sentinel: Arc<Mutex<SentinelClient>>,

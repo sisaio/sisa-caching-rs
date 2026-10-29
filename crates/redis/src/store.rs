@@ -150,8 +150,31 @@ impl RedisCacheStore {
         Self::from_client(name, Client::open(info)?).await
     }
 
-    /// Like [`connect`](Self::connect), on a client built by hand, such as one from
-    /// `redis::Client::build_with_tls` that trusts a private CA or shows a client certificate.
+    /// Like [`connect`](Self::connect), on a client built by hand, such as one that trusts a
+    /// private CA or shows a client certificate:
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tls-rustls")]
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sisa_caching_redis::{
+    ///     RedisCacheStore,
+    ///     redis::{Client, ClientTlsConfig, TlsCertificates},
+    /// };
+    ///
+    /// let client = Client::build_with_tls(
+    ///     "rediss://cache.internal:6380",
+    ///     TlsCertificates {
+    ///         client_tls: Some(ClientTlsConfig {
+    ///             client_cert: std::fs::read("client.crt")?,
+    ///             client_key: std::fs::read("client.key")?,
+    ///         }),
+    ///         root_cert: Some(std::fs::read("ca.crt")?),
+    ///     },
+    /// )?;
+    /// let cache = RedisCacheStore::from_client("app", client).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn from_client(name: &str, client: Client) -> crate::error::Result<Self> {
         KeyPrefix::validate(name)?;
 
