@@ -78,8 +78,8 @@ each.
 
 ## Observability
 
-Stores trace through `tracing` and count hits, misses, loads and evictions through the
-OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations it causes
+Stores trace through `tracing` and count hits, misses, loads, failed store calls and evictions
+through the OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations it causes
 on other nodes share one trace. [docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md) lists every
 metric and span; the examples show the setup.
 

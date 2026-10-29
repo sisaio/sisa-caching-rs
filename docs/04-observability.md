@@ -17,6 +17,7 @@ All under the meter `sisa-caching`. Every metric has a `store` attribute with th
 | `sisa.caching.hits` | counter | `layer` | Reads that found a live entry |
 | `sisa.caching.misses` | counter | `layer` | Reads that found nothing, or only an expired entry |
 | `sisa.caching.load.duration` | histogram, seconds | `outcome`: `ok` or `error` | How long each `get_or_set` loader ran |
+| `sisa.caching.errors` | counter | `operation`: `get` or `set` | Store calls inside `get_or_set` that failed: its reads, and the stores of what it loaded |
 | `sisa.caching.evictions` | counter | | Entries a full memory store dropped to make room |
 | `sisa.caching.invalidations.received` | counter | | Other nodes' invalidations a hybrid store applied |
 | `sisa.caching.publish.failures` | counter | | Invalidations a hybrid store couldn't publish after 3 tries |
@@ -30,7 +31,14 @@ series.
 A `get_or_set` that has to load reads before and after taking its lock, so it counts two misses.
 Count loads with the histogram's count instead.
 
+`errors` counts only the calls `get_or_set` makes, whose failures it handles itself: a failed read
+loads, and a failed store returns the loaded value without caching it. A call the application makes
+returns its error instead. With the store down, each `get_or_set` counts two `get` errors, one per
+read, and a `set` error for storing what its loader returned.
+
 Worth an alert:
+- `errors` above 0: the store can't be reached, or holds data the code can't read, and every
+  `get_or_set` meanwhile runs its loader.
 - `publish.failures` above 0: other nodes clear their local layers at the writer's next heartbeat,
   so hit rates dip.
 - `backplane.connected` at 0: that node reads everything from Redis.
@@ -64,13 +72,21 @@ sends OpenTelemetry's current context, and that holds the span only while activa
 
 ## Logs
 
-The stores log only errors they handle themselves, as warnings: a loaded value that couldn't be
-stored, a key that couldn't be read so the loaded value is stored over it, a refresh whose load
-failed while the cached value was still live, which serves that value, a lock wait that timed out,
-an invalidation that couldn't be published, a backplane subscription lost or failing, a backplane
-message that couldn't be read, and a local layer cleared because an invalidation went missing or a
-node's heartbeats stopped. The backplane worker also logs at info when it subscribes, and each
-store's worker logs starting and stopping at info, and a panic at error.
+The stores log only errors they handle themselves, as warnings.
+
+`get_or_set` handles its failed store calls: a key it couldn't read, so it loads and stores the
+loaded value over it, and a loaded value it couldn't store. The first failure of a run logs a
+warning with the store, the `operation` (`get` or `set`) and the error, and the next success of
+that operation logs `store calls work again` at info. So an outage logs two lines per store and
+operation, however many calls fail, while `sisa.caching.errors` counts each failure. A failure
+that comes and goes, such as one key holding data that no longer decodes, logs a pair each time.
+
+The other warnings fire every time: a refresh whose load failed while the cached value was still
+live, which serves that value, a lock wait that timed out, an invalidation that couldn't be
+published, a backplane subscription lost or failing, a backplane message that couldn't be read,
+and a local layer cleared because an invalidation went missing or a node's heartbeats stopped. The
+backplane worker also logs at info when it subscribes. Each store's worker logs starting and
+stopping at info, and a panic at error.
 
 Warnings name the store, not the key. A `get_or_set` warning fires inside the `cache get_or_set`
 debug span, so with debug on it shows next to the key. An error's text can still quote part of a

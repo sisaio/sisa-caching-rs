@@ -8,6 +8,7 @@
 //! | `sisa.caching.hits` | counter | Reads that found a live entry |
 //! | `sisa.caching.misses` | counter | Reads that found nothing, or only an expired entry |
 //! | `sisa.caching.load.duration` | histogram, seconds | How long each `get_or_set` loader ran, with `outcome` `ok` or `error` |
+//! | `sisa.caching.errors` | counter | Store calls inside `get_or_set` that failed, with `operation` `get` for a read or `set` for storing what it loaded |
 //! | `sisa.caching.evictions` | counter | Entries a full memory store dropped to make room |
 //! | `sisa.caching.invalidations.received` | counter | Other nodes' invalidations a hybrid store applied |
 //! | `sisa.caching.publish.failures` | counter | Invalidations a hybrid store couldn't publish after 3 tries |
@@ -65,6 +66,10 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
                 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
             ])
             .build(),
+        errors: meter
+            .u64_counter("sisa.caching.errors")
+            .with_description("Store calls inside get_or_set that failed")
+            .build(),
         evictions: meter
             .u64_counter("sisa.caching.evictions")
             .with_description("Entries a full memory store dropped to make room")
@@ -116,6 +121,7 @@ pub struct CacheMetrics {
     hits: Counter<u64>,
     misses: Counter<u64>,
     load_duration: Histogram<f64>,
+    errors: Counter<u64>,
     evictions: Counter<u64>,
     invalidations_received: Counter<u64>,
     publish_failures: Counter<u64>,
@@ -148,6 +154,18 @@ impl CacheMetrics {
             &[
                 store_attribute(store),
                 KeyValue::new("outcome", if ok { "ok" } else { "error" }),
+            ],
+        );
+    }
+
+    /// Counts one store call inside `get_or_set` that failed: `get` for a read, `set` for storing
+    /// what it loaded.
+    pub(crate) fn failed(&self, store: &KeyPrefix, operation: &'static str) {
+        self.errors.add(
+            1,
+            &[
+                store_attribute(store),
+                KeyValue::new("operation", operation),
             ],
         );
     }

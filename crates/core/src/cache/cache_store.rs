@@ -1,5 +1,6 @@
 use std::{
     future::Future,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -41,8 +42,8 @@ pub trait CacheStore: Send + Sync {
     /// store's settings, so configuring that store also configures calls through the composition.
     fn cache_settings(&self) -> &CacheSettings;
 
-    /// The per-key locks `get_or_set` loads under. A store holds one [`Locker::default()`] and
-    /// returns it here.
+    /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are
+    /// failing. A store holds one [`Locker::default()`] and returns it here.
     fn locker(&self) -> &Locker;
 
     /// Where `set` and `get_or_set` read the time.
@@ -108,8 +109,11 @@ pub trait CacheStore: Send + Sync {
     /// [`CacheKey`](crate::CacheKey)); otherwise the old and new versions of a rolling deploy
     /// replace each other's entries, or misread them.
     ///
-    /// Options over the 365-day limit don't fail the call, since it returns the loader's error
-    /// type: the loaded value is returned but not stored, and a warning is logged.
+    /// A store call that fails inside it doesn't fail the call, since it returns the loader's
+    /// error type: a failed read loads, and a failed store returns the loaded value without
+    /// caching it. Each failure counts in `sisa.caching.errors`; the first of a run logs a
+    /// warning, and the success that ends it an info line. Options over the 365-day limit fail
+    /// the store the same way.
     fn get_or_set<CV, F, Fut, E>(
         &self,
         key: &str,
@@ -147,8 +151,9 @@ pub trait CacheStore: Send + Sync {
 
 /// The body of `get_or_set`, under the store's own locks and clock.
 ///
-/// Runs in a `cache get_or_set` debug span with the full key, and records each load's duration in
-/// [`METRICS`]. Its warnings name the store, not the key: the span shows the key once debug is on.
+/// Runs in a `cache get_or_set` debug span with the full key, and records each load's duration and
+/// each failed store call in [`METRICS`]. Its warnings name the store, not the key: the span shows
+/// the key once debug is on.
 #[tracing::instrument(level = "debug", name = "cache get_or_set", skip_all, fields(key = %store.name().format_key(key)))]
 async fn get_or_set_with_lock<S, CV, F, Fut, E>(
     store: &S,
@@ -172,16 +177,20 @@ where
 
         METRICS.load(store.name(), started.elapsed(), loaded.is_ok());
 
-        if let Ok(value) = &loaded
-            && let Err(error) = store.set(key, value.clone(), options).await
-        {
-            tracing::warn!(store = %store.name(), %error, "could not store the loaded value");
+        if let Ok(value) = &loaded {
+            let stored = store.set(key, value.clone(), options).await;
+
+            record(store, "set", &locker.writes_failing, &stored);
         }
 
         loaded
     };
 
-    if let Ok(Some(entry)) = store.get_entry::<CV>(key).await {
+    let read = store.get_entry::<CV>(key).await;
+
+    record(store, "get", &locker.reads_failing, &read);
+
+    if let Ok(Some(entry)) = read {
         let due = settings
             .refresh_threshold()
             .is_some_and(|share| entry.is_refresh_due(clock.now(), share));
@@ -216,15 +225,42 @@ where
     };
 
     // Another caller may have stored the value while this one waited.
-    match store.get_entry::<CV>(key).await {
-        Ok(Some(entry)) => return Ok(entry.value),
-        Ok(None) => {}
-        // A value of another type, data that doesn't decode, or a store that can't be reached:
-        // the loaded value is stored over whatever is there.
+    let read = store.get_entry::<CV>(key).await;
+
+    record(store, "get", &locker.reads_failing, &read);
+
+    // On a value of another type, data that doesn't decode, or a store that can't be reached, the
+    // loaded value is stored over whatever is there.
+    match read {
+        Ok(Some(entry)) => Ok(entry.value),
+        _ => load().await,
+    }
+}
+
+/// Counts a failed store call in [`METRICS`], and logs the first failure of a run and the success
+/// that ends it, so an outage logs two lines however many calls fail. `failing` holds whether the
+/// last such call failed.
+fn record<S, T>(
+    store: &S,
+    operation: &'static str,
+    failing: &AtomicBool,
+    result: &Result<T, S::Error>,
+) where
+    S: CacheStore + ?Sized,
+{
+    match result {
         Err(error) => {
-            tracing::warn!(store = %store.name(), %error, "could not read the key; storing the loaded value over it");
+            METRICS.failed(store.name(), operation);
+
+            if !failing.swap(true, Ordering::Relaxed) {
+                tracing::warn!(store = %store.name(), operation, %error, "store calls are failing; get_or_set counts each failure and logs again once one works");
+            }
+        }
+        Ok(_) => {
+            // A load first, so a success writes nothing while the store works.
+            if failing.load(Ordering::Relaxed) && failing.swap(false, Ordering::Relaxed) {
+                tracing::info!(store = %store.name(), operation, "store calls work again");
+            }
         }
     }
-
-    load().await
 }

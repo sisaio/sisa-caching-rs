@@ -6,11 +6,13 @@
 //!   primary and replica behind Sentinel.
 //! - [`RedisTls`]: a server that only speaks TLS, with or without asking for a client certificate.
 //! - [`eventually`]: waits for something another task does.
+//! - [`Logs`]: the info and higher events logged on the test's thread.
 //!
 //! `REDIS_IMAGE` picks the server for all of them: Redis, Valkey, Dragonfly or Garnet.
 
 mod clock;
 mod cluster;
+mod logs;
 mod sentinel;
 mod server;
 mod standalone;
@@ -19,7 +21,7 @@ mod tls;
 use std::time::Duration;
 
 pub use crate::{
-    clock::ManualClock, cluster::RedisCluster, sentinel::RedisSentinel, server::Server,
+    clock::ManualClock, cluster::RedisCluster, logs::Logs, sentinel::RedisSentinel, server::Server,
     standalone::Redis, tls::RedisTls,
 };
 

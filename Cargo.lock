@@ -2586,6 +2586,8 @@ dependencies = [
 name = "sisa-caching-redis"
 version = "0.1.1"
 dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
  "redis",
  "rustls",
  "serde",
@@ -2606,6 +2608,7 @@ dependencies = [
  "sisa-caching-core",
  "testcontainers",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
