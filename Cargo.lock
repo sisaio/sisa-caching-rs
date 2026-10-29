@@ -2512,7 +2512,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "sisa-caching-core",
  "sisa-caching-hybrid",
@@ -2539,7 +2539,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "opentelemetry",
  "serde",
@@ -2550,7 +2550,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-hybrid"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "opentelemetry",
@@ -2569,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-memory"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "opentelemetry",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-redis"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
@@ -2601,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-testing"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "rcgen",
  "redis",
