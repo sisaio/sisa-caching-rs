@@ -10,7 +10,7 @@ use std::{
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use futures_util::FutureExt;
 use sisa_caching_benches::{User, key, user};
-use sisa_caching_core::cache::{CacheOptions, CacheStore, PurgeableStore};
+use sisa_caching_core::cache::{CacheOptions, CacheStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::ManualClock;
 use tokio::runtime::Runtime;

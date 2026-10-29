@@ -35,7 +35,6 @@
 //! clone drops. To purge on a schedule of your own, turn that off and call `purge`:
 //!
 //! ```
-//! use sisa_caching_core::cache::PurgeableStore;
 //! use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
 //!
 //! let cache = InMemoryCacheStore::new("app")?.with_settings(InMemoryCacheSettings {
@@ -54,7 +53,6 @@
 
 pub mod settings;
 pub mod store;
-mod worker;
 
 pub use settings::InMemoryCacheSettings;
 pub use store::InMemoryCacheStore;
