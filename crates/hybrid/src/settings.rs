@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use sisa_caching_core::{cache::CacheError, settings::CacheSettings};
+use sisa_caching_core::{
+    cache::CacheError,
+    settings::{CacheSettings, check_duration},
+};
 use sisa_caching_memory::settings::InMemoryCacheSettings;
 use sisa_caching_redis::settings::RedisCacheSettings;
 
@@ -123,18 +126,13 @@ impl Default for RedisBackplaneSettings {
 }
 
 impl RedisBackplaneSettings {
-    /// Fails when `ping_interval_ms` or `ping_timeout_ms` is 0.
+    /// Fails when `ping_interval_ms` or `ping_timeout_ms` is 0 or over 365 days.
     pub fn validate(&self) -> Result<(), CacheError> {
-        for (field, ms) in [
-            ("ping_interval_ms", self.ping_interval_ms),
-            ("ping_timeout_ms", self.ping_timeout_ms),
+        for (field, duration) in [
+            ("ping_interval_ms", self.ping_interval()),
+            ("ping_timeout_ms", self.ping_timeout()),
         ] {
-            if ms == 0 {
-                return Err(CacheError::invalid_settings(
-                    field,
-                    "is 0; it must be at least 1 ms",
-                ));
-            }
+            check_duration(field, duration, "it must be at least 1 ms")?;
         }
 
         Ok(())
@@ -189,20 +187,17 @@ impl Default for BackplaneWorkerSettings {
 }
 
 impl BackplaneWorkerSettings {
-    /// Fails when `reconnect_delay_ms` or `heartbeat_interval_ms` is 0, `max_reconnect_delay_ms`
-    /// is shorter than `reconnect_delay_ms`, or `heartbeat_timeout_ms` isn't longer than
-    /// `heartbeat_interval_ms`, since every node would then miss heartbeats that are on time.
+    /// Fails when a setting is 0 or over 365 days, `max_reconnect_delay_ms` is shorter than
+    /// `reconnect_delay_ms`, or `heartbeat_timeout_ms` isn't longer than `heartbeat_interval_ms`,
+    /// since every node would then miss heartbeats that are on time.
     pub fn validate(&self) -> Result<(), CacheError> {
-        for (field, ms) in [
-            ("reconnect_delay_ms", self.reconnect_delay_ms),
-            ("heartbeat_interval_ms", self.heartbeat_interval_ms),
+        for (field, duration) in [
+            ("reconnect_delay_ms", self.reconnect_delay()),
+            ("max_reconnect_delay_ms", self.max_reconnect_delay()),
+            ("heartbeat_interval_ms", self.heartbeat_interval()),
+            ("heartbeat_timeout_ms", self.heartbeat_timeout()),
         ] {
-            if ms == 0 {
-                return Err(CacheError::invalid_settings(
-                    field,
-                    "is 0; it must be at least 1 ms",
-                ));
-            }
+            check_duration(field, duration, "it must be at least 1 ms")?;
         }
         if self.max_reconnect_delay_ms < self.reconnect_delay_ms {
             return Err(CacheError::invalid_settings(
@@ -319,6 +314,36 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn a_backplane_or_worker_wait_over_365_days_is_rejected() {
+        let year_ms = sisa_caching_core::settings::MAX_TTL_SECS * 1_000;
+        let worker = |ms| BackplaneWorkerSettings {
+            max_reconnect_delay_ms: ms,
+            heartbeat_timeout_ms: ms,
+            ..BackplaneWorkerSettings::default()
+        };
+
+        assert!(worker(year_ms).validate().is_ok());
+        assert!(matches!(
+            worker(year_ms + 1).validate(),
+            Err(CacheError::InvalidSettings {
+                field: "max_reconnect_delay_ms",
+                ..
+            })
+        ));
+        assert!(matches!(
+            RedisBackplaneSettings {
+                ping_interval_ms: year_ms + 1,
+                ..RedisBackplaneSettings::default()
+            }
+            .validate(),
+            Err(CacheError::InvalidSettings {
+                field: "ping_interval_ms",
+                ..
+            })
+        ));
     }
 
     #[test]

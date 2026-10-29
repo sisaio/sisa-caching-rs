@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sisa_caching_core::{
     cache::CacheError,
-    settings::{CacheSettings, MAX_TTL_SECS},
+    settings::{CacheSettings, check_duration},
 };
 
 /// The most maps a store's entries can be split over.
@@ -66,36 +66,27 @@ impl Default for InMemoryCacheSettings {
 }
 
 impl InMemoryCacheSettings {
-    /// Fails when a setting is 0, `purge_interval_secs` or `max_ttl_secs` is over
-    /// [`MAX_TTL_SECS`], `shards` is over 1,024, or a shared setting is out of range, as
+    /// Fails when a setting is 0, `purge_interval_secs` or `max_ttl_secs` is over 365 days,
+    /// `shards` is over 1,024, or a shared setting is out of range, as
     /// [`CacheSettings::validate`] says.
     pub fn validate(&self) -> Result<(), CacheError> {
         self.common.validate()?;
+        check_duration(
+            "purge_interval_secs",
+            self.purge_interval(),
+            "use None to turn purging off",
+        )?;
+        check_duration("max_ttl_secs", self.max_ttl(), "use None for no cap")?;
 
-        for (field, zero, none) in [
-            (
-                "purge_interval_secs",
-                self.purge_interval_secs == Some(0),
-                "to turn purging off",
-            ),
-            ("max_entries", self.max_entries == Some(0), "for no limit"),
-            ("max_ttl_secs", self.max_ttl_secs == Some(0), "for no cap"),
-            ("shards", self.shards == Some(0), "for one map"),
+        for (field, count, none) in [
+            ("max_entries", self.max_entries, "for no limit"),
+            ("shards", self.shards, "for one map"),
         ] {
-            if zero {
+            if count == Some(0) {
                 return Err(CacheError::invalid_settings(
                     field,
                     format!("is 0; use None {none}"),
                 ));
-            }
-        }
-
-        for (field, secs) in [
-            ("purge_interval_secs", self.purge_interval_secs),
-            ("max_ttl_secs", self.max_ttl_secs),
-        ] {
-            if let Some(secs) = secs.filter(|secs| *secs > MAX_TTL_SECS) {
-                return Err(CacheError::too_long(field, secs));
             }
         }
 
@@ -128,6 +119,8 @@ impl InMemoryCacheSettings {
 
 #[cfg(test)]
 mod tests {
+    use sisa_caching_core::settings::MAX_TTL_SECS;
+
     use super::*;
 
     #[test]
