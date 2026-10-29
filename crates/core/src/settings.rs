@@ -42,7 +42,7 @@ impl CacheSettings {
     /// Fails when `ttl_secs` is 0 or over [`MAX_TTL_SECS`], `lock_timeout_ms` is 0, or
     /// `refresh_threshold` is not between 0 and 1.
     pub fn validate(&self) -> Result<(), CacheError> {
-        for (field, value, unset) in [
+        for (field, value, none) in [
             ("ttl_secs", self.ttl_secs, "for no TTL"),
             (
                 "lock_timeout_ms",
@@ -53,7 +53,7 @@ impl CacheSettings {
             if value == Some(0) {
                 return Err(CacheError::InvalidSettings {
                     field,
-                    reason: format!("is 0; leave it unset {unset}"),
+                    reason: format!("is 0; use None {none}"),
                 });
             }
         }
