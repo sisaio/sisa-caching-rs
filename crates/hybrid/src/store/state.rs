@@ -139,6 +139,7 @@ mod tests {
     use futures_util::FutureExt;
     use sisa_caching_core::clock::{Clock, SystemClock};
     use std::sync::{Arc, Mutex};
+    use tokio::sync::oneshot;
 
     /// A backplane whose subscriptions never deliver; these tests call the state directly.
     struct Bus;
@@ -283,12 +284,12 @@ mod tests {
         assert!(state.read::<String>(&key()).await.1.is_none());
     }
 
-    /// A value whose drop waits until the test sends on `gate`, or drops its sender. Its clones
-    /// drop at once.
+    /// A value whose drop says on its oneshot that it started, then waits until the test sends on
+    /// its gate, or drops the gate's sender. Its clones drop at once.
     #[derive(serde::Serialize, serde::Deserialize)]
     struct SlowDrop {
         #[serde(skip)]
-        gate: Option<Mutex<std::sync::mpsc::Receiver<()>>>,
+        gate: Option<(oneshot::Sender<()>, Mutex<std::sync::mpsc::Receiver<()>>)>,
     }
 
     impl Clone for SlowDrop {
@@ -299,7 +300,8 @@ mod tests {
 
     impl Drop for SlowDrop {
         fn drop(&mut self) {
-            if let Some(gate) = self.gate.take() {
+            if let Some((dropping, gate)) = self.gate.take() {
+                _ = dropping.send(());
                 _ = gate.lock().unwrap().recv();
             }
         }
@@ -309,9 +311,10 @@ mod tests {
     async fn a_slow_drop_during_an_invalidation_holds_up_no_promotion() {
         let state = Arc::new(state().await);
         let (release, gate) = std::sync::mpsc::channel();
+        let (dropping, dropped) = oneshot::channel();
         let (seen, _) = state.read::<SlowDrop>(&key()).await;
         let slow = SlowDrop {
-            gate: Some(Mutex::new(gate)),
+            gate: Some((dropping, Mutex::new(gate))),
         };
 
         state
@@ -322,10 +325,9 @@ mod tests {
         let invalidation = tokio::spawn(async move {
             invalidating.invalidate(&Invalidation::Key(key())).await;
         });
-        // The invalidation is now dropping the slow value.
-        while state.read::<SlowDrop>(&key()).await.1.is_some() {
-            tokio::task::yield_now().await;
-        }
+        // Wait until the invalidation drops the slow value. Polling the key could leave this task
+        // the last reference, and the drop would then run here and wait on this task.
+        dropped.await.unwrap();
 
         let other = "user:2";
         let (seen, _) = state.read::<String>(other).await;
