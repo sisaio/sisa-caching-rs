@@ -12,6 +12,7 @@
 //! | `sisa.caching.invalidations.received` | counter | Other nodes' invalidations a hybrid store applied |
 //! | `sisa.caching.publish.failures` | counter | Invalidations a hybrid store couldn't publish after 3 tries |
 //! | `sisa.caching.backplane.connected` | gauge | 1 while a hybrid store's backplane is subscribed, else 0 |
+//! | `sisa.caching.backplane.unreadable` | counter | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
 //!
 //! Every metric has a `store` attribute with the store's name. Hits and misses also have a
 //! `layer` attribute: `memory`, `redis`, or `hybrid` for the hybrid store as a whole. A hybrid
@@ -80,6 +81,10 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
             .u64_gauge("sisa.caching.backplane.connected")
             .with_description("1 while a hybrid store's backplane is subscribed, else 0")
             .build(),
+        backplane_unreadable: meter
+            .u64_counter("sisa.caching.backplane.unreadable")
+            .with_description("Backplane messages a hybrid store could not read")
+            .build(),
     }
 });
 
@@ -115,6 +120,7 @@ pub struct CacheMetrics {
     invalidations_received: Counter<u64>,
     publish_failures: Counter<u64>,
     backplane_connected: Gauge<u64>,
+    backplane_unreadable: Counter<u64>,
 }
 
 impl CacheMetrics {
@@ -168,6 +174,11 @@ impl CacheMetrics {
     pub fn backplane_connected(&self, store: &KeyPrefix, connected: bool) {
         self.backplane_connected
             .record(connected.into(), &[store_attribute(store)]);
+    }
+
+    /// Counts one backplane message a hybrid store couldn't read. Each clears its local layer.
+    pub fn backplane_unreadable(&self, store: &KeyPrefix) {
+        self.backplane_unreadable.add(1, &[store_attribute(store)]);
     }
 }
 
