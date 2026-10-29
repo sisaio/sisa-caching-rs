@@ -111,6 +111,8 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
             });
         }
 
+        let backplane = backplane.for_store(local_store.name());
+
         Ok(Self {
             distributed_store: Arc::new(distributed_store),
             state: Arc::new(State::new(local_store)),

@@ -106,7 +106,7 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
     );
 
     // A message no node can read counts once on each.
-    publish(&redis, "not json").await;
+    publish(&redis, "app", "not json").await;
     eventually("both nodes count it", || async {
         metric("sisa.caching.backplane.unreadable", &[]) == 2
     })

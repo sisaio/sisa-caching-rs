@@ -214,8 +214,20 @@ error.
 
 ### Invalidation message
 
-After each write, a hybrid node publishes one JSON message on the backplane's pub/sub channel,
-`sisa-caching:backplane` by default:
+After each write, a hybrid node publishes one JSON message on its store's pub/sub channel,
+`<store>:backplane`, such as `app:backplane` for a store named `app`. Each store has its own
+channel, so a node gets only its own stores' messages. Redis delivers a message to subscribers on
+every database, so two deployments that share a server need different store names, such as
+`prod:app` and `staging:app`, even on separate databases.
+
+Until 0.4, a node also publishes each message on `sisa-caching:backplane`, the channel every store
+shared in 0.2, so 0.2 nodes keep their copies fresh during a rolling upgrade. It doesn't
+subscribe there: while 0.2 nodes still write, 0.3 nodes miss their invalidations and serve copies
+up to the local `max_ttl_secs` (60 seconds by default) old. If the 0.2 deployment set its own
+`channel`, its nodes miss the 0.3 nodes' messages too, for the same bound. A writer in another
+language publishes on the store's channel.
+
+The message:
 
 | Field | Required | Value |
 | --- | --- | --- |

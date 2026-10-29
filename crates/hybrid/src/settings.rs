@@ -7,9 +7,6 @@ use sisa_caching_core::{cache::CacheError, settings::CacheSettings};
 use sisa_caching_memory::settings::InMemoryCacheSettings;
 use sisa_caching_redis::settings::RedisCacheSettings;
 
-/// The pub/sub channel a Redis backplane uses unless its settings name another.
-pub const DEFAULT_REDIS_CHANNEL: &str = "sisa-caching:backplane";
-
 /// The default local `max_ttl_secs`: the longest a node serves a stale copy when a lost
 /// invalidation goes unnoticed.
 pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
@@ -23,7 +20,7 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 ///     r#"{
 ///         "local": { "max_entries": 100000, "max_ttl_secs": 60, "purge_interval_secs": 60 },
 ///         "distributed": { "common": { "ttl_secs": 300, "lock_timeout_ms": 5000 } },
-///         "backplane": { "channel": "app:backplane" }
+///         "backplane": { "ping_interval_ms": 2000 }
 ///     }"#,
 /// )?;
 ///
@@ -102,16 +99,11 @@ pub(crate) fn check_local_common(local: &InMemoryCacheSettings) -> Result<(), Ca
     ))
 }
 
-/// Settings for a [`RedisBackplane`](crate::backplane::RedisBackplane).
+/// Settings for a [`RedisBackplane`](crate::backplane::RedisBackplane). Its channel comes from
+/// the store's name, as [`RedisBackplane`](crate::backplane::RedisBackplane) says.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RedisBackplaneSettings {
-    /// The pub/sub channel, [`DEFAULT_REDIS_CHANNEL`] by default. Every node of one deployment
-    /// uses the same one, and each deployment on a shared server needs its own: Redis delivers a
-    /// message to subscribers on every database, so two deployments on one channel evict each
-    /// other's local copies of stores with the same name.
-    pub channel: String,
-
     /// How often a subscription is pinged to detect a silently lost connection: 5 seconds by
     /// default. `validate` rejects `0`.
     pub ping_interval_ms: u64,
@@ -124,7 +116,6 @@ pub struct RedisBackplaneSettings {
 impl Default for RedisBackplaneSettings {
     fn default() -> Self {
         Self {
-            channel: DEFAULT_REDIS_CHANNEL.to_owned(),
             ping_interval_ms: 5_000,
             ping_timeout_ms: 2_000,
         }

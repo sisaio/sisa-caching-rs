@@ -6,9 +6,7 @@ mod common;
 use common::{key, local_value, start};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane,
-    settings::{DEFAULT_REDIS_CHANNEL, RedisBackplaneSettings},
-    store::HybridCacheStore,
+    backplane::RedisBackplane, settings::RedisBackplaneSettings, store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::{connection::SentinelConnection, store::RedisCacheStore};
@@ -48,7 +46,7 @@ async fn node_on(conn: SentinelConnection) -> Node {
 async fn subscribers_on(sentinel: &RedisSentinel, port: u16) -> usize {
     let (_, count): (String, usize) = redis::cmd("PUBSUB")
         .arg("NUMSUB")
-        .arg(DEFAULT_REDIS_CHANNEL)
+        .arg("users:backplane")
         .query_async(
             &mut sentinel
                 .server(port)
