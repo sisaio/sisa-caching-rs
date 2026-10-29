@@ -40,10 +40,11 @@ opentelemetry = { workspace = true, features = ["trace"] }
 redis = { workspace = true }
 sisa-caching-redis = { workspace = true }
 serde_json = { workspace = true }
-futures-util = { workspace = true }
 
 [dev-dependencies]
 sisa-caching-testing = { workspace = true }
+# `now_or_never` in the store state tests.
+futures-util = { workspace = true }
 # Paused time for the reconnect backoff tests.
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }
 

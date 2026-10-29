@@ -309,6 +309,34 @@ async fn an_unreadable_message_is_an_error_and_delivery_goes_on() {
 }
 
 #[tokio::test]
+async fn a_subscription_that_falls_too_far_behind_ends() {
+    let redis = Redis::start().await;
+    let backplane = connect_backplane(&redis, RedisBackplaneSettings::default()).await;
+    let mut subscription = backplane.subscribe().await.unwrap();
+    let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
+    let mut publish = redis::pipe();
+
+    // More than the 8,192 messages a subscription holds, all read off the connection before
+    // anything reads the subscription.
+    for _ in 0..20_000 {
+        publish
+            .cmd("PUBLISH")
+            .arg(DEFAULT_REDIS_CHANNEL)
+            .arg(&payload)
+            .ignore();
+    }
+    publish
+        .query_async::<()>(&mut redis.connection().await)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let error = next(&mut subscription).await.unwrap_err();
+
+    assert!(error.contains("fell too far behind"), "{error}");
+}
+
+#[tokio::test]
 async fn subscribing_to_a_server_that_does_not_answer_times_out() {
     let redis = Redis::start().await;
     let backplane = connect_backplane(&redis, quick_pings()).await;

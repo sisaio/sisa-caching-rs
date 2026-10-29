@@ -88,3 +88,41 @@ async fn a_sharded_subscription_ends_only_when_its_channel_slot_moves() {
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn a_sharded_subscription_that_falls_too_far_behind_ends() {
+    let cluster = RedisCluster::start().await;
+    let backplane = RedisBackplane::cluster(cluster.client(), RedisBackplaneSettings::default())
+        .await
+        .unwrap();
+    let mut subscription = backplane.subscribe().await.unwrap();
+    let payload = serde_json::to_vec(&BackplaneMessage::new(
+        NodeId::new("node-a"),
+        KeyPrefix::new("users").unwrap(),
+        Invalidation::Clear,
+    ))
+    .unwrap();
+    let mut publish = redis::pipe();
+
+    // More than the 8,192 messages a subscription holds, all read off the connection before
+    // anything reads the subscription.
+    for _ in 0..20_000 {
+        publish
+            .cmd("SPUBLISH")
+            .arg(DEFAULT_REDIS_CHANNEL)
+            .arg(&payload)
+            .ignore();
+    }
+    publish
+        .query_async::<()>(&mut cluster.connection().await)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let error = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+        .await
+        .expect("the subscription ends")
+        .unwrap_err();
+
+    assert!(error.to_string().contains("fell too far behind"), "{error}");
+}
