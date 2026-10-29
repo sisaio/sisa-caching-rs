@@ -87,12 +87,13 @@ status_id=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$field_list"
 have_status=$(jq -c '[.fields[] | select(.name == "Status") | (.options // [])[]]' <<<"$field_list")
 jq -n --arg fieldId "$status_id" --argjson have "$have_status" '
   [
-    {name: "Backlog",     color: "GRAY",   description: "Triaged, not planned yet."},
-    {name: "Ready",       color: "BLUE",   description: "Accepted and in a milestone; anyone can start."},
-    {name: "In Progress", color: "YELLOW", description: "Someone is assigned and working on it."},
-    {name: "Blocked",     color: "RED",    description: "Waiting on something outside this issue; the issue says what."},
-    {name: "In Review",   color: "PURPLE", description: "A pull request is open."},
-    {name: "Done",        color: "GREEN",  description: "Merged or closed."}
+    {name: "Backlog",         color: "GRAY",   description: "Triaged, not planned yet."},
+    {name: "Ready",           color: "BLUE",   description: "Accepted and in a milestone; anyone can start."},
+    {name: "In Progress",     color: "YELLOW", description: "Someone is assigned and working on it."},
+    {name: "Blocked",         color: "RED",    description: "Waiting on something outside this issue; the issue says what."},
+    {name: "In Review",       color: "PURPLE", description: "A pull request is open."},
+    {name: "Pending Release", color: "ORANGE", description: "Merged, waiting for the next release."},
+    {name: "Done",            color: "GREEN",  description: "Released, or closed without a change."}
   ]
   | map(. as $option | . + ([$have[] | select(.name == $option.name) | {id}] | first // {}))
   | {
@@ -196,7 +197,7 @@ view "Blocked" '{layout: "table", filter: "status:Blocked",
   visible_fields: [$title, $priority, $assignees, $milestone, $linked]}'
 
 # Whoever is looking: their open work.
-view "My work" '{layout: "table", filter: "assignee:@me -status:Done",
+view "My work" '{layout: "table", filter: "assignee:@me -status:Done,\"Pending Release\"",
   group_by: [$status], sort_by: [[$priority, "asc"]],
   visible_fields: [$title, $priority, $milestone, $target, $linked]}'
 
@@ -221,5 +222,6 @@ Done. Three steps are left by hand, because GitHub has no API for them.
   - Item added to project: set Status to Backlog
   - Item reopened: set Status to Backlog
   - Pull request linked to issue: set Status to In Review
-  - Item closed and Pull request merged: set Status to Done
+  - Item closed and Pull request merged: set Status to Pending Release. This can't tell a
+    duplicate or not-planned close from a fix, so move those to Done by hand.
 MSG
