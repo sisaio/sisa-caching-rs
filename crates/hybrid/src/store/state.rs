@@ -66,8 +66,14 @@ impl State {
         }
     }
 
-    fn generation(&self, key: &str) -> &AtomicU64 {
+    fn slot(&self, key: &str) -> &AtomicU64 {
         &self.generations[self.hasher.hash_one(key) as usize % GENERATION_SLOTS]
+    }
+
+    /// The key's generation, which a read takes before it goes to the distributed store and hands
+    /// to `promote`.
+    pub(crate) fn generation(&self, key: &str) -> u64 {
+        self.slot(key).load(Ordering::SeqCst)
     }
 
     pub(crate) fn local_reads_enabled(&self) -> bool {
@@ -78,20 +84,15 @@ impl State {
         self.local_reads_enabled.store(false, Ordering::SeqCst);
     }
 
-    /// The key's generation, and its local copy when local reads are on and no prefix being
-    /// removed covers it.
-    pub(crate) async fn read<CV: CacheValue>(&self, key: &str) -> (u64, Option<CacheEntry<CV>>) {
-        let generation = self.generation(key).load(Ordering::SeqCst);
-
+    /// The key's local copy, when local reads are on and no prefix being removed covers it.
+    pub(crate) async fn read<CV: CacheValue>(&self, key: &str) -> Option<CacheEntry<CV>> {
         if !self.local_reads_enabled() || self.removing.covers(key) {
-            return (generation, None);
+            return None;
         }
 
         // A local copy of another Rust type reads as a miss: shared encoded data may still fit
         // the requested type.
-        let local = self.local_store.get_entry(key).await.ok().flatten();
-
-        (generation, local)
+        self.local_store.get_entry(key).await.ok().flatten()
     }
 
     /// Copies a distributed hit into the local layer, unless the key was invalidated since `seen`.
@@ -103,7 +104,7 @@ impl State {
     ) {
         let _turn = self.turns.read().await;
 
-        if self.local_reads_enabled() && self.generation(key).load(Ordering::SeqCst) == seen {
+        if self.local_reads_enabled() && self.generation(key) == seen {
             _ = self.local_store.set_entry(key, entry).await;
         }
     }
@@ -155,7 +156,7 @@ impl State {
 
         match invalidation {
             Invalidation::Key(key) => {
-                self.generation(key).fetch_add(1, Ordering::SeqCst);
+                self.slot(key).fetch_add(1, Ordering::SeqCst);
             }
             Invalidation::Prefix(_) | Invalidation::Clear => self.bump_all(),
             Invalidation::Heartbeat | Invalidation::Stopping => {}
@@ -318,13 +319,13 @@ mod tests {
     #[tokio::test]
     async fn a_promotion_copies_a_hit_into_the_local_layer() {
         let state = state().await;
-        let (seen, local) = state.read::<String>(&key()).await;
+        let seen = state.generation(&key());
 
-        assert!(local.is_none());
+        assert!(state.read::<String>(&key()).await.is_none());
 
         state.promote(&key(), seen, entry(&state, "a")).await;
 
-        let (_, local) = state.read::<String>(&key()).await;
+        let local = state.read::<String>(&key()).await;
 
         assert_eq!(local.map(|entry| entry.value).as_deref(), Some("a"));
     }
@@ -332,41 +333,41 @@ mod tests {
     #[tokio::test]
     async fn a_promotion_after_an_invalidation_is_dropped() {
         let state = state().await;
-        let (seen, _) = state.read::<String>(&key()).await;
+        let seen = state.generation(&key());
 
         state.invalidate(&Invalidation::Key(key())).await;
         state.promote(&key(), seen, entry(&state, "old")).await;
 
-        assert!(state.read::<String>(&key()).await.1.is_none());
+        assert!(state.read::<String>(&key()).await.is_none());
     }
 
     #[tokio::test]
     async fn a_resync_while_disconnected_turns_local_reads_off() {
         let state = state().await;
-        let (seen, _) = state.read::<String>(&key()).await;
-
-        state.promote(&key(), seen, entry(&state, "a")).await;
+        state
+            .promote(&key(), state.generation(&key()), entry(&state, "a"))
+            .await;
         state.resync(false).await;
 
         assert!(!state.local_reads_enabled());
-        assert!(state.read::<String>(&key()).await.1.is_none());
+        assert!(state.read::<String>(&key()).await.is_none());
 
-        let (seen, _) = state.read::<String>(&key()).await;
-
-        state.promote(&key(), seen, entry(&state, "b")).await;
+        state
+            .promote(&key(), state.generation(&key()), entry(&state, "b"))
+            .await;
         state.resync(true).await;
 
-        assert!(state.read::<String>(&key()).await.1.is_none());
+        assert!(state.read::<String>(&key()).await.is_none());
     }
 
     async fn promote(state: &State, key: &str) {
-        let (seen, _) = state.read::<String>(key).await;
-
-        state.promote(key, seen, entry(state, key)).await;
+        state
+            .promote(key, state.generation(key), entry(state, key))
+            .await;
     }
 
     async fn local(state: &State, key: &str) -> Option<String> {
-        state.read::<String>(key).await.1.map(|entry| entry.value)
+        state.read::<String>(key).await.map(|entry| entry.value)
     }
 
     /// A runtime whose one blocking thread waits until the returned sender drops.
@@ -501,7 +502,7 @@ mod tests {
         ));
         state.resync(true).await;
 
-        let (seen, _) = state.read::<String>(&key()).await;
+        let seen = state.generation(&key());
         let old = entry(&state, "old");
         let waiting = Arc::new(Mutex::new(None));
         let (invalidated, started) = (Arc::clone(&state), Arc::clone(&waiting));
@@ -518,13 +519,13 @@ mod tests {
         }));
         state.promote(&key(), seen, old).await;
 
-        let (_, local) = state.read::<String>(&key()).await;
+        let local = state.read::<String>(&key()).await;
         assert_eq!(local.map(|entry| entry.value).as_deref(), Some("old"));
 
         let invalidation = waiting.lock().unwrap().take().unwrap();
         invalidation.await;
 
-        assert!(state.read::<String>(&key()).await.1.is_none());
+        assert!(state.read::<String>(&key()).await.is_none());
     }
 
     /// A value whose drop says on its oneshot that it started, then waits up to five seconds until
@@ -561,7 +562,7 @@ mod tests {
     ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (release, gate) = std::sync::mpsc::channel();
         let (dropping, dropped) = oneshot::channel();
-        let (seen, _) = state.read::<SlowDrop>(&key()).await;
+        let seen = state.generation(&key());
         let slow = SlowDrop {
             gate: Some((dropping, Mutex::new(gate))),
         };
@@ -587,7 +588,7 @@ mod tests {
         dropped.await.unwrap();
 
         let other = "user:2";
-        let (seen, _) = state.read::<String>(other).await;
+        let seen = state.generation(other);
         let promotion = tokio::time::timeout(
             std::time::Duration::from_secs(1),
             state.promote(other, seen, entry(&state, "a")),
@@ -623,7 +624,7 @@ mod tests {
         state.resync(true).await;
         dropped.await.unwrap();
 
-        assert!(state.read::<SlowDrop>(&key()).await.1.is_none());
+        assert!(state.read::<SlowDrop>(&key()).await.is_none());
         release.send(()).expect("the resync held up the worker");
     }
 }
