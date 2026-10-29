@@ -35,13 +35,28 @@ Both scripts can run any number of times:
   which fails when a job it needs fails and passes when they pass or are skipped, the two CodeQL
   `analyze` jobs, and dependency `review`. A new CI job goes in `ci`'s `needs`, not in the list;
   when a listed check is renamed, update the list too, or merges wait on a check that never runs.
-- Release PRs from release-plz get no CI, since the built-in token doesn't trigger workflows, so
-  repository admins can bypass the `main` rules on a PR (never by a direct push). Merge a release
-  PR with "Merge without waiting for requirements".
+- Repository admins can still bypass the `main` rules on a PR (never by a direct push), for an
+  emergency only. Release PRs don't need it once the release app below is set up: they run CI
+  like any other PR.
 - `release-tags.json`: once a `v*` tag exists, only admins can move or delete it. Creating one
   isn't restricted: GitHub rejects the GitHub Actions app as a bypass actor on this repository's
-  rulesets, so a creation rule would stop release-plz from tagging. A published release's tag is
-  also locked by release immutability.
+  rulesets, so a creation rule would stop the release workflow from tagging. A published
+  release's tag is also locked by release immutability.
+
+## Releases
+
+`release.yml` needs three things no script can set up:
+
+- **The release app**, so release PRs run CI. Create a GitHub App in the `sisaio` organization
+  with Contents and Pull requests set to read and write, and no webhook. Install it on this
+  repository, then add its ID as the `RELEASE_APP_ID` secret and a private key as
+  `RELEASE_APP_PRIVATE_KEY`. Without them, release PRs fall back to the built-in token and get no
+  CI.
+- **The `release` environment**, under Settings → Environments, with the maintainer as required
+  reviewer and deployments limited to `main`. The publish job waits there until approved.
+- **A trusted publisher on each crate** on crates.io (Settings → Trusted Publishing → Add):
+  owner `sisaio`, repository `sisa-caching-rs`, workflow `release.yml`, environment `release`.
+  Then delete the `CARGO_REGISTRY_TOKEN` secret: no workflow reads it.
 
 ## By hand
 

@@ -1,15 +1,9 @@
-# Releases with release-plz: the maintainer opens the release PR by running the release workflow,
-# and every push to main keeps it up to date. Every push to main also publishes any crate version
-# that isn't on crates.io yet. Only the release PR bumps versions, so merging it publishes, and if
-# that push starts no run, the next push publishes instead. The five crates share one version, one
-# changelog at the root, and one `v` tag and GitHub release, all carried by `sisa-caching-core`.
-# Crates with `publish = false` are skipped on their own; listing them here would turn publishing
-# back on and fail the release.
+# release-plz opens and updates the release PR: the maintainer opens it by running the release
+# workflow, and every push to main keeps it up to date. Tagging, the GitHub release and publishing
+# are release.yml's own jobs, not release-plz's. The five crates share one version and one changelog
+# at the root, carried by `sisa-caching-core`.
 [workspace]
-release_always = true
 changelog_update = false
-git_release_enable = false
-git_tag_enable = false
 pr_labels = ["release"]
 
 # Changelog sections come from each commit's type (CONTRIBUTING.md#commit-messages). Work users
@@ -29,10 +23,3 @@ name = "sisa-caching-core"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["sisa-caching", "sisa-caching-memory", "sisa-caching-redis", "sisa-caching-hybrid"]
-git_tag_enable = true
-git_tag_name = "v{{ version }}"
-git_release_enable = true
-git_release_name = "v{{ version }}"
-# A draft, so the bench job can attach its files before the release is published and locked.
-git_release_draft = true
-

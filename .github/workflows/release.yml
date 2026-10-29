@@ -1,14 +1,20 @@
-# Releases with release-plz (see release-plz.toml). It:
-# - opens the release PR when the maintainer runs this workflow by hand, and updates it on every
-#   push to main while it is open. The PR bumps the versions, checks the public API for breaking
-#   changes with cargo-semver-checks, and adds the changelog section;
-# - on a push that brings crate versions crates.io doesn't have yet, as merging that PR does,
-#   publishes to crates.io, tags `v<version>`, creates the GitHub release from the changelog as a
-#   draft, runs the benchmarks for it, and then publishes it. Releases are immutable once
-#   published, so the benchmark files go on while it's a draft.
+# Releases. It:
+# - opens the release PR with release-plz (see release-plz.toml) when the maintainer runs this
+#   workflow by hand, and updates it on every push to main while it is open. The PR bumps the
+#   versions, checks the public API for breaking changes with cargo-semver-checks, and adds the
+#   changelog section;
+# - on a push to main whose version has no `v<version>` tag yet, as merging that PR brings: tags
+#   the commit, creates the GitHub release from the changelog as a draft, runs the benchmarks for
+#   it, waits for CI to pass on that commit and for the maintainer to approve the `release`
+#   environment, publishes the crates to crates.io, and then publishes the release.
 #
-# Publishing uses crates.io trusted publishing (no secret) once each crate exists there. The very
-# first publish of a crate needs a `CARGO_REGISTRY_TOKEN` secret, removed afterwards.
+# crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
+# draft and someone has read it. Releases are immutable once published, so the release stays a
+# draft until every crate is out. If crates.io rejects a crate, the tag stays: ship the fix as the
+# next version, or have an admin delete the tag and the draft.
+#
+# Publishing uses crates.io trusted publishing from the `release` environment, so no registry
+# token is stored. A crate's very first publish needs a token instead.
 name: release
 
 on:
@@ -22,15 +28,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: release
+  # Tags the pushed commit and drafts its release, unless its version is tagged already. A push
+  # while an earlier release waits for approval finds the tag and does nothing.
+  tag:
+    name: tag
     runs-on: ubuntu-24.04
     if: github.repository_owner == 'sisaio' && github.event_name == 'push'
-    timeout-minutes: 30
+    timeout-minutes: 5
     permissions:
       contents: write
-      pull-requests: read
-      id-token: write
+    concurrency:
+      group: release-tag
+      cancel-in-progress: false
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -39,44 +48,108 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-
-      - name: Publish and tag
-        id: release
-        uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      # release-plz names a tag for every crate it published, in no documented order; the `v` tag
-      # is core's.
-      - name: Find the release tag
+      - name: Tag and draft the release
         id: tag
-        if: steps.release.outputs.releases_created == 'true'
         env:
-          RELEASES: ${{ steps.release.outputs.releases }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(jq -r '.[] | select(.package_name == "sisa-caching-core") | .tag' <<< "$RELEASES")
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "$tag exists; nothing to release"
+            exit 0
+          fi
+          # The changelog section for this version, without its heading.
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   bench:
     name: bench
-    needs: release
-    if: needs.release.outputs.tag
+    needs: tag
+    if: needs.tag.outputs.tag
     permissions:
       contents: write
     uses: ./.github/workflows/bench.yml
     with:
-      tag: ${{ needs.release.outputs.tag }}
+      tag: ${{ needs.tag.outputs.tag }}
 
-  # Publishes the draft even when the benchmarks fail, since the crates are already out.
+  # The ci workflow's run for this exact commit must succeed. A failed or cancelled run, or none
+  # within the timeout, stops the release before crates.io.
+  ci:
+    name: wait for CI
+    needs: tag
+    if: needs.tag.outputs.tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the ci run on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while true; do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --json status,conclusion,url --jq 'first // empty')
+            if [ -n "$run" ] && [ "$(jq -r .status <<< "$run")" = completed ]; then
+              echo "$(jq -r .url <<< "$run"): $(jq -r .conclusion <<< "$run")"
+              [ "$(jq -r .conclusion <<< "$run")" = success ]
+              exit
+            fi
+            sleep 30
+          done
+
+  # Waits for the maintainer to approve the `release` environment, after reading the benchmark
+  # table on the draft. It runs even when the benchmarks failed, so that call is theirs. Each crate
+  # whose version crates.io already has is skipped, so a re-run finishes a half-done publish.
+  publish:
+    name: publish
+    needs: [tag, bench, ci]
+    if: always() && needs.tag.outputs.tag && needs.ci.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Get a crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      # In dependency order. cargo waits for each crate to show in the index before the next.
+      - name: Publish the crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          for crate in sisa-caching-core sisa-caching-memory sisa-caching-redis sisa-caching-hybrid sisa-caching; do
+            if curl -sfo /dev/null -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$crate/$version"; then
+              echo "$crate $version is on crates.io already"
+            else
+              cargo publish -p "$crate" --locked
+            fi
+          done
+
   publish-release:
     name: publish release
-    needs: [release, bench]
-    if: always() && needs.release.outputs.tag
+    needs: [tag, publish]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -85,9 +158,12 @@ jobs:
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
 
+  # With the release app's secrets set, the PR is opened with the app's token, so GitHub runs CI
+  # on it like on any other PR. Without them, it falls back to the built-in token, whose PRs get
+  # no CI.
   release-pr:
     name: release PR
     runs-on: ubuntu-24.04
@@ -99,6 +175,8 @@ jobs:
     concurrency:
       group: release-pr
       cancel-in-progress: false
+    env:
+      HAS_APP: ${{ secrets.RELEASE_APP_ID != '' }}
     steps:
       # A push only updates a release PR that is already open; opening one is the maintainer's call.
       - name: Check for an open release PR
@@ -112,6 +190,14 @@ jobs:
             count=$(gh pr list --repo "$GITHUB_REPOSITORY" --label release --state open --json number --jq length)
             echo "run=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Get the release app's token
+        id: app
+        if: steps.open.outputs.run == 'true' && env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.open.outputs.run == 'true'
@@ -129,5 +215,4 @@ jobs:
         with:
           command: release-pr
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app.outputs.token || github.token }}
