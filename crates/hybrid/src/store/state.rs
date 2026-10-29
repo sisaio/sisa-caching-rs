@@ -14,7 +14,8 @@ use sisa_caching_core::{
     locker::Locker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
-use tokio::sync::RwLock;
+use tokio::{runtime::Handle, sync::RwLock};
+use tracing::Span;
 
 use crate::backplane::{Invalidation, NodeId};
 
@@ -101,17 +102,7 @@ impl State {
     /// A promotion that starts after the bump sees the new generation and copies nothing, so the
     /// eviction runs outside the turn: dropping the evicted values holds up no other promotion.
     pub(crate) async fn invalidate(&self, invalidation: &Invalidation) {
-        {
-            let _turn = self.turns.write().await;
-
-            match invalidation {
-                Invalidation::Key(key) => {
-                    self.generation(key).fetch_add(1, Ordering::SeqCst);
-                }
-                Invalidation::Prefix(_) | Invalidation::Clear => self.bump_all(),
-                Invalidation::Heartbeat => return,
-            }
-        }
+        self.bump(invalidation).await;
 
         match invalidation {
             Invalidation::Key(key) => _ = self.local_store.remove(key).await,
@@ -119,6 +110,36 @@ impl State {
                 _ = self.local_store.remove_prefix(prefix.as_str()).await
             }
             Invalidation::Clear => _ = self.local_store.clear().await,
+            Invalidation::Heartbeat => {}
+        }
+    }
+
+    /// Applies another node's invalidation. A prefix's copies are removed on the blocking pool, as
+    /// that walks every local entry, so the worker goes on receiving meanwhile. The bump comes
+    /// first, so no stale copy lands after it, and the walk removes the ones from before.
+    pub(crate) async fn apply(&self, invalidation: &Invalidation) {
+        let Invalidation::Prefix(prefix) = invalidation else {
+            return self.invalidate(invalidation).await;
+        };
+        let (local, prefix, span) = (self.local_store.clone(), prefix.clone(), Span::current());
+        let runtime = Handle::current();
+
+        self.bump(invalidation).await;
+        // The memory store never waits, so `block_on` returns when the walk does.
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| _ = runtime.block_on(local.remove_prefix(prefix.as_str())))
+        });
+    }
+
+    /// Bumps the generations `invalidation` covers, once no promotion is copying.
+    async fn bump(&self, invalidation: &Invalidation) {
+        let _turn = self.turns.write().await;
+
+        match invalidation {
+            Invalidation::Key(key) => {
+                self.generation(key).fetch_add(1, Ordering::SeqCst);
+            }
+            Invalidation::Prefix(_) | Invalidation::Clear => self.bump_all(),
             Invalidation::Heartbeat => {}
         }
     }
@@ -200,7 +221,10 @@ impl Drop for Publishing<'_> {
 mod tests {
     use super::*;
     use futures_util::FutureExt;
-    use sisa_caching_core::clock::{Clock, SystemClock};
+    use sisa_caching_core::{
+        cache::KeyPrefix,
+        clock::{Clock, SystemClock},
+    };
     use std::sync::{Arc, Mutex};
     use tokio::sync::oneshot;
 
@@ -339,8 +363,9 @@ mod tests {
         assert!(state.read::<String>(&key()).await.1.is_none());
     }
 
-    /// A value whose drop says on its oneshot that it started, then waits until the test sends on
-    /// its gate, or drops the gate's sender. Its clones drop at once.
+    /// A value whose drop says on its oneshot that it started, then waits up to five seconds until
+    /// the test sends on its gate, or drops the gate's sender. A drop that runs on the test's own
+    /// thread holds the test up that long, and the test's send then fails. Its clones drop at once.
     #[derive(serde::Serialize, serde::Deserialize)]
     struct SlowDrop {
         #[serde(skip)]
@@ -357,14 +382,19 @@ mod tests {
         fn drop(&mut self) {
             if let Some((dropping, gate)) = self.gate.take() {
                 _ = dropping.send(());
-                _ = gate.lock().unwrap().recv();
+                _ = gate
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(5));
             }
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_slow_drop_during_an_invalidation_holds_up_no_promotion() {
-        let state = Arc::new(state().await);
+    /// Copies a `SlowDrop` into the local layer under `key()`, and returns the receiver that hears
+    /// its drop start and the sender that lets it finish.
+    async fn promote_slow_drop(
+        state: &State,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (release, gate) = std::sync::mpsc::channel();
         let (dropping, dropped) = oneshot::channel();
         let (seen, _) = state.read::<SlowDrop>(&key()).await;
@@ -375,6 +405,14 @@ mod tests {
         state
             .promote(&key(), seen, CacheEntry::new(slow, SystemClock.now(), None))
             .await;
+
+        (dropped, release)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_slow_drop_during_an_invalidation_holds_up_no_promotion() {
+        let state = Arc::new(state().await);
+        let (dropped, release) = promote_slow_drop(&state).await;
 
         let invalidating = Arc::clone(&state);
         let invalidation = tokio::spawn(async move {
@@ -395,5 +433,33 @@ mod tests {
         release.send(()).unwrap();
         invalidation.await.unwrap();
         assert!(promotion.is_ok(), "the promotion waited for the drop");
+    }
+
+    #[tokio::test]
+    async fn another_nodes_prefix_is_removed_on_the_blocking_pool_while_the_worker_goes_on() {
+        let state = state().await;
+        let (dropped, release) = promote_slow_drop(&state).await;
+
+        state
+            .apply(&Invalidation::Prefix(KeyPrefix::new("user").unwrap()))
+            .await;
+        dropped.await.unwrap();
+
+        // The test runtime has one thread, so the walk frees the copy on another while the next
+        // invalidation applies here.
+        state.apply(&Invalidation::Key("user:2".to_owned())).await;
+        release.send(()).expect("the walk held up the worker");
+    }
+
+    #[tokio::test]
+    async fn a_resync_empties_the_local_layer_at_once_and_frees_it_on_the_blocking_pool() {
+        let state = state().await;
+        let (dropped, release) = promote_slow_drop(&state).await;
+
+        state.resync(true).await;
+        dropped.await.unwrap();
+
+        assert!(state.read::<SlowDrop>(&key()).await.1.is_none());
+        release.send(()).expect("the resync held up the worker");
     }
 }

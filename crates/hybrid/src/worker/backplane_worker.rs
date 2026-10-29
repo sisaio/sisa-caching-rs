@@ -98,7 +98,7 @@ impl BackplaneWorker {
         tracing::debug!(parent: &span, invalidation = ?message.invalidation, "applying an invalidation");
         METRICS.invalidation_received(store);
         self.state
-            .invalidate(&message.invalidation)
+            .apply(&message.invalidation)
             .instrument(span)
             .await;
     }

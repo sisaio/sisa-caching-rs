@@ -209,6 +209,10 @@ The worker publishes its own heartbeat every `heartbeat_interval_ms`, subscribed
 own heartbeats stop coming back for `heartbeat_timeout_ms`, the subscription has stopped
 delivering, so the worker treats it as lost.
 
+A prefix invalidation walks every local entry, so the worker bumps the generations, leaves the walk
+to the blocking pool and goes on receiving. A clear empties the local layer at once and frees what
+it held there too.
+
 ## Purge worker
 
 ```mermaid
