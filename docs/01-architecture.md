@@ -124,8 +124,8 @@ the caller's thread.
 `RedisCacheStore` keeps one hash per key, with `value` (JSON), `created_at` and `ttl_ms`. A write is
 one transaction: `DEL`, `HSET`, `PEXPIRE` with the remaining TTL. A read is `HMGET` and `PTTL` in
 one transaction, so the expiry comes from Redis, not from the writer's clock. It works over any
-`RedisConnection`: a `ConnectionManager` (the usual one, which reconnects on its own; with `connection_config()` a
-call while the server is down fails at once instead of waiting about 9 s), a
+`RedisConnection`: a `ConnectionManager` (the usual one, which reconnects on its own; with
+`connection_config()` a call while the server is down fails at once instead of waiting about 9 s), a
 `MultiplexedConnection`, a `ClusterConnection` or a `SentinelConnection`. `remove_prefix` and
 `clear` walk keys with `SCAN` and `UNLINK`, on each primary of a cluster. `SCAN MATCH` visits every
 key in the database, not only the store's, so their cost grows with the whole database: on one with
@@ -259,7 +259,9 @@ stays subscribed.
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
 | **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default). They clear whenever a process stops, even cleanly, so a rolling deploy clears every node's local layer once for each node it replaces. |
 | **Not guaranteed** | Delivery is at most once: pub/sub drops messages to a node that is reconnecting. The clear on resubscribe covers the gap. |
-| **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by `max_ttl_secs`. So is one lost just before its writer stops for good, on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. While a writer can't publish for longer than `heartbeat_timeout_ms`, other nodes clear when its heartbeats stop and again at its first heartbeat after, so a copy read in between can be stale until then. |
+| **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by `max_ttl_secs`. |
+| **Not guaranteed** | An invalidation lost just before its writer stops for good is bounded only by `max_ttl_secs` on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. |
+| **Not guaranteed** | While a writer can't publish for longer than `heartbeat_timeout_ms`, other nodes clear when its heartbeats stop and again at its first heartbeat after, so a copy read in between can be stale until then. |
 | **Not guaranteed** | A read that overlaps a write on another node may copy the old value; the write's invalidation then evicts it. |
 | **Not guaranteed** | A write the primary acknowledged just before a failover; see [Compatibility](03-compatibility.md). |
 | **Not guaranteed** | A Redis write held up on its way to the server (queued behind other commands, waiting for a reconnect, or resent after a failover) gives its entry that much longer: Redis counts down the time left from when it runs the write. |
