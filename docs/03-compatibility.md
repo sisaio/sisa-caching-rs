@@ -134,11 +134,11 @@ TLS-only server that requires a client certificate. CI then runs the `native_tls
 ### Timeouts
 
 Every connection the crates build for one server or behind Sentinel, through `connect`,
-`from_client`, `SentinelConnection` or `RedisBackplane::sentinel`, uses `connection_config()`: while the server is down a call fails at once, and
-the next call connects again. redis-rs's own default retries the connection six times first, so
-every call waits about 9 s before it fails, and a `get_or_set` whose loader works takes three times
-that. Timeouts stay redis-rs's: a command fails after 500 ms without a reply, and a connection
-attempt after 1 s.
+`from_client`, `SentinelConnection` or `RedisBackplane::sentinel`, uses `connection_config()`: while
+the server is down a call fails at once, and the next call connects again. redis-rs's own default
+retries the connection six times first, so every call waits about 9 s before it fails, and a
+`get_or_set` whose loader works takes three times that. Timeouts stay redis-rs's: a command fails
+after 500 ms without a reply, and a connection attempt after 1 s.
 
 A large value or a `remove_prefix` on a busy server can need longer. Start from
 `connection_config()`, change the timeouts, and pass the connection to `RedisCacheStore::new`:
@@ -152,9 +152,9 @@ let conn = ConnectionManager::new_with_config(Client::open(url)?, config).await?
 let cache = RedisCacheStore::new("app", conn)?;
 ```
 
-A `ClusterConnection`, and `RedisBackplane::cluster`, keep the cluster client's settings: by
-default redis-rs retries a failed command up to 16 times with growing waits. Lower them with `ClusterClientBuilder::retries` and
-`retry_wait_formula`.
+A `ClusterConnection`, and `RedisBackplane::cluster`, keep the cluster client's settings: by default
+redis-rs retries a failed command up to 16 times with growing waits. Lower them with
+`ClusterClientBuilder::retries` and `retry_wait_formula`.
 
 ## Data formats
 

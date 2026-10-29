@@ -18,9 +18,12 @@ and a hybrid of the two that keeps every node's local copy coherent.
 | `redis` | `RedisCacheStore` | Several processes share the cache. Redis, Valkey, Dragonfly or Garnet: one primary with or without replicas, a Redis Cluster, or Sentinel. Other languages can read and write the same keys. |
 | `hybrid` | `HybridCacheStore` | Several processes, and reads must be local-fast. A memory layer per node in front of Redis, kept coherent by pub/sub invalidation. |
 
-Everything comes from one crate, `sisa-caching`. No store is on by default, so name the one you
-use; `tls-rustls` or `tls-native-tls` adds `rediss://` URLs. Each part is also its own crate ([core](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/core),
-[memory](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/memory), [redis](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/redis), [hybrid](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/hybrid)), for implementing a
+Everything comes from one crate, `sisa-caching`. No store is on by default, so name the one you use;
+`tls-rustls` or `tls-native-tls` adds `rediss://` URLs. Each part is also its own crate
+([core](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/core),
+[memory](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/memory),
+[redis](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/redis),
+[hybrid](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/hybrid)), for implementing a
 store of your own.
 
 Every store has the same calls: `get`, `set`, `get_or_set`, `remove`, `remove_prefix` and
@@ -71,17 +74,19 @@ local `max_ttl_secs`, 60 seconds by default, still caps every local copy.
 
 ## Compatibility
 
-Tested in CI against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, each as one primary,
-a three-primary cluster, and a primary and replica behind Sentinel through a failover, except
-Sentinel on Garnet, which has none. [docs/03-compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/03-compatibility.md) says how to connect to
-each.
+Tested in CI against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, each as one primary, a
+three-primary cluster, and a primary and replica behind Sentinel through a failover, except Sentinel
+on Garnet, which has none.
+[docs/03-compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/03-compatibility.md)
+says how to connect to each.
 
 ## Observability
 
 Stores trace through `tracing` and count hits, misses, loads, failed store calls and evictions
-through the OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations it causes
-on other nodes share one trace. [docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md) lists every
-metric and span; the examples show the setup.
+through the OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations
+it causes on other nodes share one trace.
+[docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md)
+lists every metric and span; the examples show the setup.
 
 ## Examples
 
