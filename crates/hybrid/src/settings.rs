@@ -94,12 +94,11 @@ pub(crate) fn check_local_common(local: &InMemoryCacheSettings) -> Result<(), Ca
         return Ok(());
     }
 
-    Err(CacheError::InvalidSettings {
-        field: "local.common",
-        reason: "is ignored: hybrid calls use distributed.common; cap local copies with \
-                 local.max_ttl_secs"
-            .to_owned(),
-    })
+    Err(CacheError::invalid_settings(
+        "local.common",
+        "is ignored: hybrid calls use distributed.common; cap local copies with \
+         local.max_ttl_secs",
+    ))
 }
 
 /// Settings for a [`RedisBackplane`](crate::backplane::RedisBackplane).
@@ -139,10 +138,10 @@ impl RedisBackplaneSettings {
             ("ping_timeout_ms", self.ping_timeout_ms),
         ] {
             if ms == 0 {
-                return Err(CacheError::InvalidSettings {
+                return Err(CacheError::invalid_settings(
                     field,
-                    reason: "is 0; it must be at least 1 ms".to_owned(),
-                });
+                    "is 0; it must be at least 1 ms",
+                ));
             }
         }
 
@@ -201,16 +200,16 @@ impl BackplaneWorkerSettings {
     /// since every node would then miss heartbeats that are on time.
     pub fn validate(&self) -> Result<(), CacheError> {
         if self.heartbeat_interval_ms == 0 {
-            return Err(CacheError::InvalidSettings {
-                field: "heartbeat_interval_ms",
-                reason: "is 0; it must be at least 1 ms".to_owned(),
-            });
+            return Err(CacheError::invalid_settings(
+                "heartbeat_interval_ms",
+                "is 0; it must be at least 1 ms",
+            ));
         }
         if self.heartbeat_timeout_ms <= self.heartbeat_interval_ms {
-            return Err(CacheError::InvalidSettings {
-                field: "heartbeat_timeout_ms",
-                reason: "must be longer than heartbeat_interval_ms".to_owned(),
-            });
+            return Err(CacheError::invalid_settings(
+                "heartbeat_timeout_ms",
+                "must be longer than heartbeat_interval_ms",
+            ));
         }
 
         Ok(())

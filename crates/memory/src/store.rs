@@ -296,9 +296,7 @@ impl CacheStore for InMemoryCacheStore {
             .value
             .downcast_ref::<CV>()
             .cloned()
-            .ok_or(CacheError::TypeMismatch {
-                expected: type_name::<CV>(),
-            })?;
+            .ok_or(CacheError::type_mismatch(type_name::<CV>()))?;
 
         METRICS.read(&self.name, Layer::Memory, true);
 
@@ -520,7 +518,10 @@ mod tests {
         assert_eq!(store.get::<u64>(&key(2)).await.unwrap(), Some(42));
         assert!(matches!(
             store.get::<u64>(&key(1)).await,
-            Err(CacheError::TypeMismatch { expected: "u64" })
+            Err(CacheError::TypeMismatch {
+                expected: "u64",
+                ..
+            })
         ));
 
         // Any string is a key.

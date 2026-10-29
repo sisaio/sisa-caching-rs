@@ -11,15 +11,32 @@ pub enum CacheError {
     /// `get::<User>` on a key that `set` filled with an `Order`. Encoded stores validate their
     /// serialized data through the codec instead.
     #[error("cached value is not a `{expected}`")]
+    #[non_exhaustive]
     TypeMismatch { expected: &'static str },
 
     /// A setting or a write's `ttl` is out of range, such as a TTL over
     /// [`MAX_TTL_SECS`](crate::settings::MAX_TTL_SECS) or a `refresh_threshold` of `80`.
     #[error("`{field}` {reason}")]
+    #[non_exhaustive]
     InvalidSettings { field: &'static str, reason: String },
 }
 
 impl CacheError {
+    /// A value read as `expected` that was stored as another type.
+    #[doc(hidden)]
+    pub fn type_mismatch(expected: &'static str) -> Self {
+        Self::TypeMismatch { expected }
+    }
+
+    /// A setting that is out of range, and why.
+    #[doc(hidden)]
+    pub fn invalid_settings(field: &'static str, reason: impl Into<String>) -> Self {
+        Self::InvalidSettings {
+            field,
+            reason: reason.into(),
+        }
+    }
+
     /// A duration over [`MAX_TTL_SECS`](crate::settings::MAX_TTL_SECS).
     #[doc(hidden)]
     pub fn too_long(field: &'static str, secs: u64) -> Self {
