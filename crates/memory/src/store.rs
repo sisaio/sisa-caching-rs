@@ -1286,6 +1286,77 @@ mod tests {
         assert_eq!(loaded, Err("down"));
     }
 
+    #[tokio::test]
+    async fn a_failed_refresh_serves_only_what_the_store_still_holds() {
+        let clock = ManualClock::new();
+        let store = store(
+            &clock,
+            InMemoryCacheSettings {
+                common: CacheSettings {
+                    ttl_secs: Some(10),
+                    refresh_threshold: Some(0.5),
+                    ..CacheSettings::default()
+                },
+                max_ttl_secs: Some(8),
+                ..InMemoryCacheSettings::default()
+            },
+        );
+        let user = key(1);
+        let refresh = |advance: u64| {
+            let clock = clock.clone();
+
+            store.get_or_set(
+                &user,
+                move || async move {
+                    clock.advance(secs(advance));
+                    Err::<String, _>("down")
+                },
+                None,
+            )
+        };
+
+        // Still held: the cached value.
+        store.set(&user, "old".to_owned(), None).await.unwrap();
+        clock.advance(secs(6));
+        assert_eq!(refresh(0).await.as_deref(), Ok("old"));
+
+        // The store's 8-second cap passes during the load, though the entry's TTL is 10 seconds.
+        assert_eq!(refresh(3).await, Err("down"));
+        assert_eq!(store.get::<String>(&key(1)).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_refresh_does_not_serve_a_value_removed_meanwhile() {
+        let clock = ManualClock::new();
+        let store = store(
+            &clock,
+            InMemoryCacheSettings {
+                common: CacheSettings {
+                    ttl_secs: Some(10),
+                    refresh_threshold: Some(0.5),
+                    ..CacheSettings::default()
+                },
+                ..InMemoryCacheSettings::default()
+            },
+        );
+
+        store.set(&key(1), "old".to_owned(), None).await.unwrap();
+        clock.advance(secs(6));
+
+        let loaded = store
+            .get_or_set(
+                &key(1),
+                || async {
+                    store.remove(&key(1)).await.unwrap();
+                    Err::<String, _>("down")
+                },
+                None,
+            )
+            .await;
+
+        assert_eq!(loaded, Err("down"));
+    }
+
     /// Calls its store from `clone` and `drop`, as a value holding a handle to its own cache
     /// might. A store that cloned or freed values under its lock would deadlock on it.
     #[derive(Serialize, Deserialize)]

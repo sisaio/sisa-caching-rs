@@ -193,12 +193,16 @@ where
         };
 
         return match load().await {
-            // The cached value only while it is live: the load may have outlasted it.
-            Err(_) if !entry.is_expired(clock.now()) => {
-                tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
+            // The cached value only while the store still holds it: the load may have outlasted
+            // its TTL or the store's own cap, or a write may have removed it.
+            Err(error) => match store.get_entry::<CV>(key).await {
+                Ok(Some(entry)) => {
+                    tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
 
-                Ok(entry.value)
-            }
+                    Ok(entry.value)
+                }
+                _ => Err(error),
+            },
             loaded => loaded,
         };
     }
