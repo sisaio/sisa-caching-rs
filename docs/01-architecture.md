@@ -312,10 +312,10 @@ Settled; reopen only with new evidence.
 - The Redis hash and the backplane message are formats other languages write, so they change only
   with a version bump.
 - Durations in settings are `u64` seconds or milliseconds. Each store's settings and
-  `HybridCacheSettings` have one `validate`, and `with_settings` returns a `Result`. Settings nest
-  (a store's shared `CacheSettings` sit under `common`, a hybrid's parts under `local`,
-  `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
-  misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
-  hybrid calls read `distributed.common`.
+  `HybridCacheSettings` have one `validate`, and `with_settings` and `with_worker_settings` return a
+  `Result`; `HybridCacheStore::new` checks the backplane's settings. Settings nest (a store's shared
+  `CacheSettings` sit under `common`, a hybrid's parts under `local`, `distributed`, `backplane` and
+  `worker`), and an unknown field fails to deserialize, so a misspelled setting can't silently keep
+  its default. A hybrid's `local.common` fails `validate`: hybrid calls read `distributed.common`.
 - Info spans and warnings carry the store and the invalidation kind, never a key; only debug
   spans carry keys. Stores log only the errors they swallow.

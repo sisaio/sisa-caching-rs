@@ -63,7 +63,7 @@ pub async fn start_with<D: CacheStore + 'static>(
     store: HybridCacheStore<D>,
     settings: BackplaneWorkerSettings,
 ) -> HybridCacheStore<D> {
-    let store = store.with_worker_settings(settings);
+    let store = store.with_worker_settings(settings).unwrap();
 
     store.start_worker();
     eventually("the backplane worker subscribes", || async {

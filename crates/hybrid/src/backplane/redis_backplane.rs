@@ -40,7 +40,7 @@ const QUEUE_LIMIT: usize = 8192;
 #[derive(Clone)]
 pub struct RedisBackplane {
     server: Server,
-    settings: RedisBackplaneSettings,
+    pub(crate) settings: RedisBackplaneSettings,
 }
 
 /// The server the backplane publishes and subscribes on.
