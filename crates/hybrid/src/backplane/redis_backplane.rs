@@ -30,11 +30,6 @@ use super::BackplaneMessage;
 /// without a bound or getting lost without a sign.
 const QUEUE_LIMIT: usize = 8192;
 
-/// The channel every store shared before 0.3. Each node also publishes there for one release, so
-/// that 0.2 nodes still get its invalidations and heartbeats during a rolling upgrade.
-// TODO(0.4): stop publishing on it.
-const SHARED_CHANNEL: &str = "sisa-caching:backplane";
-
 /// A backplane over Redis pub/sub. Each hybrid store has its own channel, `<store>:backplane`, such
 /// as `catalog:backplane`, so a node gets only its own stores' messages. Publishing shares one
 /// connection. Each subscription opens its own connection, on RESP3, and holds up to 8,192
@@ -159,24 +154,16 @@ impl RedisBackplane {
     }
 
     /// Sends the message to all subscribers, including this node's own, and returns how many the
-    /// server delivered it to. It also goes to 0.2 nodes on the shared channel, at the same time;
-    /// a failure there is left to their gap detection.
+    /// server delivered it to.
     pub(crate) async fn publish(&self, message: &BackplaneMessage) -> Result<usize> {
-        let payload = serde_json::to_vec(message)?;
-        let (subscribers, shared) = tokio::join!(
-            self.publish_on(&self.channel, &payload),
-            self.publish_on(SHARED_CHANNEL, &payload),
-        );
-
-        Ok(subscribers? + shared.unwrap_or(0))
-    }
-
-    async fn publish_on(&self, channel: &str, payload: &[u8]) -> Result<usize> {
         let command = match self.server {
             Server::Cluster { .. } => "SPUBLISH",
             _ => "PUBLISH",
         };
-        let publish = ::redis::cmd(command).arg(channel).arg(payload).to_owned();
+        let publish = ::redis::cmd(command)
+            .arg(&*self.channel)
+            .arg(serde_json::to_vec(message)?)
+            .to_owned();
 
         let subscribers = match &self.server {
             Server::Standalone { conn, .. } => {
@@ -495,50 +482,6 @@ mod tests {
                 assert_eq!(&next(subscription).await, message);
             }
         }
-    }
-
-    #[tokio::test]
-    async fn a_message_also_reaches_nodes_on_the_shared_channel() {
-        let redis = Redis::start().await;
-        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
-        let mut subscription = backplane.subscribe().await.unwrap();
-        // A 0.2 node, subscribed to the channel every store used to share.
-        let (sender, mut pushes) = tokio::sync::mpsc::unbounded_channel();
-        let info = Client::open(redis.url())
-            .unwrap()
-            .get_connection_info()
-            .clone();
-        let resp3 = info
-            .redis_settings()
-            .clone()
-            .set_protocol(ProtocolVersion::RESP3);
-        let config = AsyncConnectionConfig::new().set_push_sender(sender);
-        let mut legacy = Client::open(info.set_redis_settings(resp3))
-            .unwrap()
-            .get_multiplexed_async_connection_with_config(&config)
-            .await
-            .unwrap();
-        let sent = message(Invalidation::Clear);
-
-        legacy.subscribe(SHARED_CHANNEL).await.unwrap();
-        let subscribers = backplane.publish(&sent).await.unwrap();
-
-        assert_eq!(subscribers, 2);
-        assert_eq!(next(&mut subscription).await, sent);
-        let push = loop {
-            let push = tokio::time::timeout(Duration::from_secs(5), pushes.recv())
-                .await
-                .expect("the shared channel gets the message")
-                .unwrap();
-            if push.kind == PushKind::Message {
-                break push;
-            }
-        };
-        let payload: Vec<u8> = from_redis_value(push.data[1].clone()).unwrap();
-        assert_eq!(
-            serde_json::from_slice::<BackplaneMessage>(&payload).unwrap(),
-            sent
-        );
     }
 
     #[tokio::test]
