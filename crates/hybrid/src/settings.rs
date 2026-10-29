@@ -15,7 +15,7 @@ pub const DEFAULT_REDIS_CHANNEL: &str = "sisa-caching:backplane";
 pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 
 /// Everything a hybrid deployment on Redis is configured with, as one config section for
-/// [`HybridCacheStore::connect`](crate::store::HybridCacheStore::connect) and the workers:
+/// [`HybridCacheStore::connect`](crate::store::HybridCacheStore::connect):
 ///
 /// ```
 /// # use sisa_caching_hybrid::settings::HybridCacheSettings;
@@ -47,7 +47,7 @@ pub struct HybridCacheSettings {
     /// The Redis backplane that carries invalidations between nodes.
     pub backplane: RedisBackplaneSettings,
 
-    /// For the [`BackplaneWorker`](crate::BackplaneWorker) the application registers.
+    /// For the backplane worker the store starts.
     pub worker: BackplaneWorkerSettings,
 }
 
@@ -157,7 +157,9 @@ impl RedisBackplaneSettings {
     }
 }
 
-/// How a [`BackplaneWorker`](crate::BackplaneWorker) waits before subscribing again.
+/// How a hybrid store's backplane worker waits before subscribing again. `connect` takes it from
+/// [`HybridCacheSettings::worker`]; a store built with `new` takes it from
+/// [`with_worker_settings`](crate::store::HybridCacheStore::with_worker_settings).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BackplaneWorkerSettings {

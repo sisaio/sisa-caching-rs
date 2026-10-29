@@ -15,8 +15,7 @@
 //! `REDIS_URL` picks another server.
 
 use sisa_caching::{
-    BackplaneWorker, CacheSettings, HybridCacheSettings, HybridCacheStore, InMemoryCacheSettings,
-    RedisCacheSettings, WorkerHost,
+    CacheSettings, HybridCacheSettings, HybridCacheStore, InMemoryCacheSettings, RedisCacheSettings,
 };
 
 #[tokio::main]
@@ -45,16 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    // The local layer, the Redis store and the backplane, all on one server.
+    // The local layer, the Redis store and the backplane, all on one server, and the worker that
+    // applies other instances' invalidations. Until it has subscribed, reads skip the local layer,
+    // so serving right away is safe.
     let cache = HybridCacheStore::connect("example", url, &settings).await?;
 
-    // The backplane worker applies other instances' invalidations. Until it has subscribed, reads
-    // skip the local layer, so serving right away is safe.
-    let workers = WorkerHost::new();
-    workers.register(BackplaneWorker::new(&cache).with_settings(settings.worker));
-
     let served = users_api::serve(users_api::router(cache)).await;
-    workers.shutdown().await;
 
     telemetry.shutdown();
 

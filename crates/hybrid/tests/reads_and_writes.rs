@@ -15,9 +15,7 @@ use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
     settings::{CacheSettings, MAX_TTL_SECS},
 };
-use sisa_caching_hybrid::{
-    error::HybridCacheError, store::HybridCacheStore, worker::BackplaneWorker,
-};
+use sisa_caching_hybrid::{error::HybridCacheError, store::HybridCacheStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::ManualClock;
 
@@ -386,13 +384,13 @@ async fn a_local_store_with_common_settings_is_rejected() {
 }
 
 #[tokio::test]
-async fn debug_shows_the_store_and_its_worker_but_never_a_value() {
+async fn debug_shows_the_store_but_never_a_value() {
     let node = node(&memory("users"), &InMemoryBackplane::new()).await;
 
     node.set(&key(1), "secret".to_owned(), None).await.unwrap();
     node.get::<String>(&key(1)).await.unwrap();
 
-    let shown = format!("{node:?} {:?}", BackplaneWorker::new(&node));
+    let shown = format!("{node:?}");
 
     assert!(shown.contains(r#"name: KeyPrefix("users")"#), "{shown}");
     assert!(shown.contains("local_reads_enabled: true"), "{shown}");

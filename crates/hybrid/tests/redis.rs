@@ -76,8 +76,15 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
         ..HybridCacheSettings::default()
     };
     let connect = || HybridCacheStore::connect("users", redis.url(), &settings);
-    let writer = start(connect().await.unwrap()).await;
-    let reader = start(connect().await.unwrap()).await;
+    let writer = connect().await.unwrap();
+    let reader = connect().await.unwrap();
+
+    for node in [&writer, &reader] {
+        eventually("connect starts the worker", || async {
+            node.local_reads_enabled()
+        })
+        .await;
+    }
 
     assert_eq!(reader.local_store().settings(), &settings.local);
     assert_eq!(reader.distributed_store().settings(), &settings.distributed);
