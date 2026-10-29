@@ -1,5 +1,4 @@
-//! Background jobs, the host that runs and stops them, and the [`Worker`] that runs a store's own
-//! background task.
+//! The background task each store runs for itself.
 
 use std::{
     future::Future,
@@ -7,15 +6,6 @@ use std::{
 };
 
 use tokio::task::AbortHandle;
-
-mod worker_host;
-mod worker_service;
-
-pub use worker_host::*;
-pub use worker_service::*;
-
-/// The signal a [`WorkerHost`] gives its workers to stop.
-pub use tokio_util::sync::CancellationToken;
 
 /// The background task a store runs for itself, such as its purge, shared by the store's clones.
 /// It starts once, on the store's first call inside a tokio runtime, and stops when the store's
