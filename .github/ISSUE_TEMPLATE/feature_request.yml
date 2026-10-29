@@ -1,6 +1,6 @@
 name: Feature request
 description: Something the library should do but doesn't.
-labels: [enhancement]
+type: Feature
 body:
   - type: markdown
     attributes:
