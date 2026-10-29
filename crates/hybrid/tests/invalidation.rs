@@ -12,14 +12,19 @@ use std::{
     time::Duration,
 };
 
-use common::{WRITES, Write, backplane, key, local_value, memory, node, publish_removal, start};
+use common::{
+    Node, WRITES, Write, backplane, fast_heartbeats, key, local_value, memory, node, publish,
+    publish_removal, start, start_with,
+};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,
     settings::CacheSettings,
 };
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane, settings::RedisBackplaneSettings, store::HybridCacheStore,
+    backplane::RedisBackplane,
+    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
+    store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::{Redis, eventually};
@@ -107,31 +112,45 @@ async fn a_node_skips_its_own_invalidations_and_other_stores() {
     assert_eq!(local_value(&node, &key(1)).await.as_deref(), Some("ada"));
 }
 
-#[tokio::test]
-async fn a_failed_publish_is_tried_again_then_given_up() {
-    let redis = Redis::start().await;
-    let Some(writer_url) = redis.add_user("writer").await else {
-        return;
-    };
+/// A node over `distributed` that sends fast heartbeats, with its backplane on `url`.
+async fn heartbeating_node(distributed: &InMemoryCacheStore, url: &str) -> Node {
+    let backplane = RedisBackplane::connect(url, RedisBackplaneSettings::default())
+        .await
+        .unwrap();
+    let store = HybridCacheStore::new(memory("users"), distributed.clone(), backplane).unwrap();
+
+    start_with(store, fast_heartbeats()).await
+}
+
+/// A writer whose publishes the test can refuse, and a reader holding copies of `user:1` = `old`
+/// and `user:other` = `x`, both sending fast heartbeats. `None` when the server can't add a user.
+async fn writer_and_reader(redis: &Redis) -> Option<(Node, Node)> {
     let distributed = memory("users");
-    let writer = start(
-        HybridCacheStore::new(
-            memory("users"),
-            distributed.clone(),
-            RedisBackplane::connect(writer_url, RedisBackplaneSettings::default())
-                .await
-                .unwrap(),
-        )
-        .unwrap(),
-    )
-    .await;
-    let reader = node(&distributed, &redis).await;
+    let writer = heartbeating_node(&distributed, &redis.add_user("writer").await?).await;
+    let reader = heartbeating_node(&distributed, redis.url()).await;
 
     distributed
         .set(&key(1), "old".to_owned(), None)
         .await
         .unwrap();
     reader.get::<String>(&key(1)).await.unwrap();
+    reader
+        .local_store()
+        .set(&key("other"), "x".to_owned(), None)
+        .await
+        .unwrap();
+    // Time for each to hear the other's heartbeats, so the reader already tracks the writer.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    Some((writer, reader))
+}
+
+#[tokio::test]
+async fn a_failed_publish_is_tried_again() {
+    let redis = Redis::start().await;
+    let Some((writer, reader)) = writer_and_reader(&redis).await else {
+        return;
+    };
 
     // The first try is refused; the next comes 50 ms later.
     redis.set_user("writer", "-publish").await;
@@ -143,26 +162,165 @@ async fn a_failed_publish_is_tried_again_then_given_up() {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;
-
-    // Every try refused: the write still succeeds, and the reader keeps its copy until it expires.
-    reader.get::<String>(&key(1)).await.unwrap();
-    reader
-        .local_store()
-        .set(&key("marker"), "x".to_owned(), None)
-        .await
-        .unwrap();
-    redis.set_user("writer", "-publish").await;
-    writer.set(&key(1), "newer".to_owned(), None).await.unwrap();
-    // The three tries are over well within this.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    // Messages arrive in order: once this one is applied, nothing else is on its way.
+    // The heartbeats after it find no number missing, so the reader clears nothing else. Messages
+    // arrive in order: once the marker is applied, those heartbeats have been handled.
+    tokio::time::sleep(Duration::from_millis(100)).await;
     publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
     eventually("the reader catches up", || async {
         local_value(&reader, &key("marker")).await.is_none()
     })
     .await;
 
-    assert_eq!(local_value(&reader, &key(1)).await.as_deref(), Some("new"));
+    assert_eq!(
+        local_value(&reader, &key("other")).await.as_deref(),
+        Some("x")
+    );
+}
+
+#[tokio::test]
+async fn a_publish_refused_on_every_try_clears_the_other_nodes_at_the_next_heartbeat() {
+    let redis = Redis::start().await;
+    let Some((writer, reader)) = writer_and_reader(&redis).await else {
+        return;
+    };
+
+    redis.set_user("writer", "-publish").await;
+    writer.set(&key(1), "new".to_owned(), None).await.unwrap();
+    // The three tries are over well within this.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    redis.set_user("writer", "+publish").await;
+
+    eventually("the next heartbeat shows the number missing", || async {
+        local_value(&reader, &key("other")).await.is_none()
+    })
+    .await;
+    assert!(reader.local_reads_enabled());
+    assert_eq!(
+        reader.get::<String>(&key(1)).await.unwrap().as_deref(),
+        Some("new")
+    );
+}
+
+#[tokio::test]
+async fn a_publish_refused_before_a_node_first_hears_the_writer_clears_it_at_the_first_heartbeat() {
+    let redis = Redis::start().await;
+    let Some(url) = redis.add_user("writer").await else {
+        return;
+    };
+    let distributed = memory("users");
+    let writer = heartbeating_node(&distributed, &url).await;
+
+    // From here nothing of the writer's reaches the reader, which subscribes and copies the old
+    // value, as after a failover that the writer's connection takes longer to follow.
+    redis.set_user("writer", "-publish").await;
+
+    let reader = heartbeating_node(&distributed, redis.url()).await;
+
+    distributed
+        .set(&key(1), "old".to_owned(), None)
+        .await
+        .unwrap();
+    reader.get::<String>(&key(1)).await.unwrap();
+    writer.set(&key(1), "new".to_owned(), None).await.unwrap();
+    // The three tries are over well within this.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    redis.set_user("writer", "+publish").await;
+
+    eventually(
+        "the first heartbeat counts a number the reader never got",
+        || async { local_value(&reader, &key(1)).await.is_none() },
+    )
+    .await;
+    assert!(reader.local_reads_enabled());
+    assert_eq!(
+        reader.get::<String>(&key(1)).await.unwrap().as_deref(),
+        Some("new")
+    );
+}
+
+#[tokio::test]
+async fn a_node_whose_heartbeats_stop_makes_the_others_clear() {
+    let redis = Redis::start().await;
+    let distributed = memory("users");
+    let writer = heartbeating_node(&distributed, redis.url()).await;
+    let reader = heartbeating_node(&distributed, redis.url()).await;
+
+    distributed
+        .set(&key(1), "old".to_owned(), None)
+        .await
+        .unwrap();
+    reader.get::<String>(&key(1)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // The writer stops between its write and the publish: no invalidation, and no heartbeats.
+    drop(writer);
+    distributed
+        .set(&key(1), "new".to_owned(), None)
+        .await
+        .unwrap();
+
+    eventually("the reader notices the writer is gone", || async {
+        local_value(&reader, &key(1)).await.is_none()
+    })
+    .await;
+    assert!(reader.local_reads_enabled());
+    assert_eq!(
+        reader.get::<String>(&key(1)).await.unwrap().as_deref(),
+        Some("new")
+    );
+}
+
+#[tokio::test]
+async fn a_node_that_stops_hearing_its_own_heartbeats_subscribes_again() {
+    let redis = Redis::start().await;
+    let Some(url) = redis.add_user("node").await else {
+        return;
+    };
+    let node = heartbeating_node(&memory("users"), &url).await;
+
+    node.local_store()
+        .set(&key(1), "ada".to_owned(), None)
+        .await
+        .unwrap();
+    // Its heartbeats are refused, so none comes back, while the subscription stays up.
+    redis.set_user("node", "-publish").await;
+
+    eventually("the node takes its subscription for lost", || async {
+        local_value(&node, &key(1)).await.is_none()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_unreadable_message_clears_the_local_layer_and_keeps_the_subscription() {
+    let redis = Redis::start().await;
+    // A lost subscription would read through for a minute.
+    let node = start_with(
+        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap(),
+        BackplaneWorkerSettings {
+            reconnect_delay_ms: 60_000,
+            max_reconnect_delay_ms: 60_000,
+            ..BackplaneWorkerSettings::default()
+        },
+    )
+    .await;
+
+    for payload in [
+        "not json",
+        r#"{"v":2,"source":"elsewhere","store":"users","kind":"clear"}"#,
+    ] {
+        node.local_store()
+            .set(&key(1), "ada".to_owned(), None)
+            .await
+            .unwrap();
+        publish(&redis, payload).await;
+
+        eventually(&format!("{payload}: the node clears"), || async {
+            local_value(&node, &key(1)).await.is_none()
+        })
+        .await;
+        assert!(node.local_reads_enabled(), "{payload}");
+    }
 }
 
 #[tokio::test]

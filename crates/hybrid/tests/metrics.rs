@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{key, memory, node};
+use common::{key, memory, node, publish};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::metrics::{
     InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
@@ -99,6 +99,13 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         ),
         1
     );
+
+    // A message no node can read counts once on each.
+    publish(&redis, "not json").await;
+    eventually("both nodes count it", || async {
+        metric("sisa.caching.backplane.unreadable", &[]) == 2
+    })
+    .await;
 
     // With the server gone, every try fails, which counts as one failed publish.
     redis.stop().await;

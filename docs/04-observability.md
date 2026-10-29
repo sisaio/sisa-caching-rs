@@ -21,6 +21,7 @@ All under the meter `sisa-caching`. Every metric has a `store` attribute with th
 | `sisa.caching.invalidations.received` | counter | | Other nodes' invalidations a hybrid store applied |
 | `sisa.caching.publish.failures` | counter | | Invalidations a hybrid store couldn't publish after 3 tries |
 | `sisa.caching.backplane.connected` | gauge | | 1 while a hybrid store's backplane is subscribed, else 0 |
+| `sisa.caching.backplane.unreadable` | counter | | Backplane messages a hybrid store couldn't read, each of which cleared its local layer |
 
 `layer` is `memory`, `redis`, or `hybrid` for a hybrid store as a whole. A hybrid store records
 all three, so its local hit rate is the `memory` series and its overall hit rate the `hybrid`
@@ -30,8 +31,11 @@ A `get_or_set` that has to load reads before and after taking its lock, so it co
 Count loads with the histogram's count instead.
 
 Worth an alert:
-- `publish.failures` above 0: other nodes may serve stale values for up to `max_ttl_secs`.
+- `publish.failures` above 0: other nodes clear their local layers at the writer's next heartbeat,
+  so hit rates dip.
 - `backplane.connected` at 0: that node reads everything from Redis.
+- `backplane.unreadable` above 0: something publishes messages this release can't read, and each
+  one clears the local layer.
 - `evictions` growing fast: `max_entries` is smaller than the working set.
 
 ## Spans
@@ -62,10 +66,11 @@ sends OpenTelemetry's current context, and that holds the span only while activa
 
 The stores log only errors they handle themselves, as warnings: a loaded value that couldn't be
 stored, a key that couldn't be read so the loaded value is stored over it, a refresh whose load
-failed while the cached value was still live, which serves that value, a lock wait that
-timed out, an invalidation that couldn't be published, and a backplane subscription lost or
-failing. The backplane worker also logs at info when it subscribes, and each store's worker logs
-starting and stopping at info, and a panic at error.
+failed while the cached value was still live, which serves that value, a lock wait that timed out,
+an invalidation that couldn't be published, a backplane subscription lost or failing, a backplane
+message that couldn't be read, and a local layer cleared because an invalidation went missing or a
+node's heartbeats stopped. The backplane worker also logs at info when it subscribes, and each
+store's worker logs starting and stopping at info, and a panic at error.
 
 Warnings name the store, not the key. A `get_or_set` warning fires inside the `cache get_or_set`
 debug span, so with debug on it shows next to the key. An error's text can still quote part of a

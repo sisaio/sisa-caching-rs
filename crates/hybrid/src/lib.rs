@@ -42,8 +42,8 @@
 //! and the backplane's publishing to the new one.
 //!
 //! A write returns once the shared store has answered; its invalidation is published in the
-//! background. If that fails after three tries, a warning is logged. Other nodes then keep their
-//! old copy until the local `max_ttl_secs` (60 seconds by default) drops it.
+//! background. If that fails after three tries, a warning is logged, and the other nodes clear
+//! their local layers when this node's next heartbeat shows the invalidation missing.
 //!
 //! Each invalidation carries the writer's trace context, so a write and the `hybrid
 //! apply_invalidation` spans it causes on other nodes land in one trace. This needs a text map
@@ -54,21 +54,32 @@
 //!
 //! Reads copy a shared hit into the local layer with its original creation time and TTL. Writes
 //! and removals evict the local copy, update the shared store, evict again, and publish. Delivery
-//! is at most once, so when the subscription fails (a dropped connection, a failed ping, a message
-//! that can't be read) the worker clears the local layer and reads go to the shared store until it
-//! has subscribed again. [`local_reads_enabled`](store::HybridCacheStore::local_reads_enabled)
-//! reports which mode the store is in.
+//! is at most once, so when the subscription fails (a dropped connection, a failed ping) the
+//! worker clears the local layer and reads go to the shared store until it has subscribed again.
+//! [`local_reads_enabled`](store::HybridCacheStore::local_reads_enabled) reports which mode the
+//! store is in.
 //!
 //! Each invalidation bumps a generation for its key's slot before it evicts. A read copies into
 //! the local layer only if the generation hasn't moved since it started, and an invalidation
 //! waits for a copy in progress, so a slow read can't bring back a value that was just
 //! invalidated.
 //!
-//! The local `max_ttl_secs` is the only bound when an invalidation never arrives: every publish
-//! attempt failed, the writer crashed before publishing, or a Redis write timed out on the client
-//! but was applied later. `HybridCacheSettings` sets it to 60 seconds unless told otherwise; a
-//! local store built without those settings has none. `0` removes the bound. It doesn't change
-//! freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
+//! Each worker also publishes a heartbeat every `heartbeat_interval_ms` (1 second by default)
+//! with the last sequence number its store has finished publishing; every invalidation carries
+//! its own. A node clears its local layer when another node's heartbeat shows a number it never
+//! received (every publish attempt failed, or a message was lost on the way), when that node's
+//! heartbeats stop for `heartbeat_timeout_ms` (5 seconds by default), as it may have stopped
+//! between a write and its publish, or when a message can't be read. A node that stops hearing
+//! its own heartbeats, such as a Garnet subscription left on a node that lost the channel's slot,
+//! treats its subscription as lost. A node that stops for good costs every other node one clear,
+//! and a node that subscribes clears once more at the first heartbeat of each node that published
+//! before, as one of those invalidations may have been lost after the subscribe.
+//!
+//! The local `max_ttl_secs` is the bound when an invalidation never arrives and nothing shows it: a
+//! Redis write timed out on the client but was applied later, or the writer, such as a service in
+//! another language, sends no sequence numbers. `HybridCacheSettings` sets it to 60 seconds unless
+//! told otherwise; a local store built without those settings has none. `0` removes the bound. It
+//! doesn't change freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
 //! `refresh_threshold` of `0.8`.
 //!
 //! # Invalidations from other languages
@@ -83,6 +94,10 @@
 //! `clear` has none. `source` is any id unique to the writing process. An optional `trace` object
 //! carries propagation fields such as `traceparent`. A writer in another language publishes this
 //! after each write, so hybrid nodes drop their copies.
+//!
+//! Hybrid nodes also number their invalidations in `seq` and publish `heartbeat` messages, so the
+//! others notice one that goes missing. A writer in another language can leave both out: nodes
+//! apply its invalidations without tracking them.
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]

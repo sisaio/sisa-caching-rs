@@ -54,8 +54,8 @@ Don't re-propose these without new evidence:
 - No byte-size cap on the memory store; the entry cap `max_entries` is enough.
 - No deduplication of invalidation messages.
 - No per-entry version in Redis, because clocks skew between nodes.
-- A hybrid `set` returns `Ok` when every publish attempt fails; it logs a warning, and
-  `max_ttl_secs` bounds how stale peers get.
+- A hybrid `set` returns `Ok` when every publish attempt fails; it logs a warning, and peers
+  clear their local layers at the writer's next heartbeat.
 - Reads stay on the Redis primary, never on replicas, because replica lag would undo invalidations.
   The known exception: behind Sentinel, a connection keeps reading from the old primary after a
   failover until its next write.

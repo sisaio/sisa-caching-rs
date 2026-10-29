@@ -196,7 +196,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.invalidate(&message.invalidation).await;
-                tokio::spawn(publish(backplane, message).in_current_span());
+                tokio::spawn(publish(state, backplane, message).in_current_span());
 
                 result
             }
@@ -207,10 +207,14 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     }
 }
 
-/// Publishes one invalidation, retrying with a growing wait. When every try fails, the other nodes
-/// keep their copies until the local `max_ttl_secs` drops them.
-async fn publish(backplane: Arc<RedisBackplane>, message: BackplaneMessage) {
+/// Publishes one invalidation under the store's next sequence number, retrying with a growing wait.
+/// When every try fails, the other nodes see the number missing at this node's next heartbeat and
+/// clear their local layers.
+async fn publish(state: Arc<State>, backplane: Arc<RedisBackplane>, mut message: BackplaneMessage) {
+    let publishing = state.sequence.start();
     let mut delay = Duration::from_millis(50);
+
+    message.seq = Some(publishing.seq);
 
     for attempt in 1..=PUBLISH_ATTEMPTS {
         match backplane.publish(&message).await {
@@ -221,7 +225,7 @@ async fn publish(backplane: Arc<RedisBackplane>, message: BackplaneMessage) {
                     store = %message.store,
                     %error,
                     kind = message.invalidation.kind(),
-                    "could not publish an invalidation; other nodes may serve stale values"
+                    "could not publish an invalidation; other nodes clear their local layers at the next heartbeat"
                 );
             }
             Err(error) => {

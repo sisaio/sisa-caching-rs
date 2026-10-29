@@ -37,13 +37,33 @@ pub fn fast_retries() -> BackplaneWorkerSettings {
     BackplaneWorkerSettings {
         reconnect_delay_ms: 1,
         max_reconnect_delay_ms: 10,
+        ..BackplaneWorkerSettings::default()
+    }
+}
+
+/// Fast retries, and a heartbeat every 20 ms that is missed after 1 s, so a slow CI runner doesn't
+/// miss one that is on time.
+pub fn fast_heartbeats() -> BackplaneWorkerSettings {
+    BackplaneWorkerSettings {
+        heartbeat_interval_ms: 20,
+        heartbeat_timeout_ms: 1_000,
+        ..fast_retries()
     }
 }
 
 /// Starts the store's backplane worker with fast retries, unless it already runs, and waits until
 /// it has subscribed.
 pub async fn start<D: CacheStore + 'static>(store: HybridCacheStore<D>) -> HybridCacheStore<D> {
-    let store = store.with_worker_settings(fast_retries());
+    start_with(store, fast_retries()).await
+}
+
+/// Starts the store's backplane worker with `settings`, unless it already runs, and waits until it
+/// has subscribed.
+pub async fn start_with<D: CacheStore + 'static>(
+    store: HybridCacheStore<D>,
+    settings: BackplaneWorkerSettings,
+) -> HybridCacheStore<D> {
+    let store = store.with_worker_settings(settings);
 
     store.start_worker();
     eventually("the backplane worker subscribes", || async {
@@ -75,18 +95,23 @@ pub async fn local_value<D: CacheStore + 'static>(
     node.local_store().get(key).await.unwrap()
 }
 
-/// Publishes the removal of `key` from `store`, as the node `source` would.
+/// Publishes `payload` on the backplane's channel, as another process would.
+pub async fn publish(redis: &Redis, payload: &str) {
+    redis::cmd("PUBLISH")
+        .arg(DEFAULT_REDIS_CHANNEL)
+        .arg(payload)
+        .query_async::<usize>(&mut redis.connection().await)
+        .await
+        .unwrap();
+}
+
+/// Publishes the removal of `key` from `store` as `source`, without a `seq`.
 pub async fn publish_removal(redis: &Redis, source: &str, store: &str, key: &str) {
     let message = serde_json::json!({
         "v": 1, "source": source, "store": store, "kind": "key", "target": key,
     });
 
-    redis::cmd("PUBLISH")
-        .arg(DEFAULT_REDIS_CHANNEL)
-        .arg(message.to_string())
-        .query_async::<usize>(&mut redis.connection().await)
-        .await
-        .unwrap();
+    publish(redis, &message.to_string()).await;
 }
 
 /// Writes `user:1` = `old` to the distributed store, has `reader` copy it, then overwrites it

@@ -165,7 +165,7 @@ impl CacheMetrics {
     }
 
     /// Counts one invalidation a hybrid store could not publish after every retry. Other nodes
-    /// may serve stale copies for up to the local `max_ttl_secs`.
+    /// clear their local layers at the store's next heartbeat.
     pub fn publish_failed(&self, store: &KeyPrefix) {
         self.publish_failures.add(1, &[store_attribute(store)]);
     }
