@@ -112,13 +112,11 @@ stateDiagram-v2
     Blocked --> InProgress: unblocked
     InProgress --> InReview: PR opened with "Closes #n"
     InReview --> InProgress: changes requested
-    InReview --> PendingRelease: PR merged
-    PendingRelease --> Done: released
+    InReview --> Done: PR merged
     Backlog --> Done: closed as duplicate or not planned
     Done --> Backlog: reopened
     InProgress: In Progress
     InReview: In Review
-    PendingRelease: Pending Release
 ```
 
 Only the maintainer moves an issue to Ready and sets its milestone and Priority (P0 urgent to P3
@@ -126,9 +124,9 @@ low); milestones are release versions. Assign yourself before starting so two pe
 the same issue. A Blocked issue says in a comment what it waits on. Start date and Target date
 place an issue on the Roadmap view.
 
-Releases are cut by hand, so merged work waits in Pending Release until the next one. The board
-moves every closed issue there, so the maintainer moves one closed as a duplicate or not planned
-to Done, and after publishing a release sets the whole Pending Release column to Done.
+Releases are cut by hand, so a merged issue can be Done before it ships. Its milestone tells:
+while the milestone is open, its release isn't out yet. The maintainer closes a milestone once
+its release is published.
 
 The labels, milestones, board and the rulesets on `main` and the `v*` tags are kept in
 [.github/scripts](.github/scripts/README.md). Change them there in a PR, and a maintainer runs the
