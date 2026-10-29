@@ -101,11 +101,12 @@ impl RedisConnection for ClusterConnection {
 }
 
 /// A connection to the primary that Redis Sentinel names. When a command fails because the old
-/// primary went away or refuses writes with `READONLY`, this asks Sentinel for the new primary and
-/// moves there. A command that surely didn't run, refused with `READONLY` or `LOADING` or never
-/// sent because the connection was refused, is sent once more on the new primary. Any other
-/// failed command returns its error, since it may have run. A demoted Dragonfly primary answers
-/// `LOADING` instead of `READONLY` while it syncs from the new one.
+/// primary went away or refuses writes with `READONLY`, this asks Sentinel for the primary and
+/// moves there if it changed; while Sentinel names the same one, the connection stays and
+/// reconnects by itself. A command that surely didn't run, refused with `READONLY` or `LOADING` or
+/// never sent because the connection was refused, is sent once more. Any other failed command
+/// returns its error, since it may have run. A demoted Dragonfly primary answers `LOADING` instead
+/// of `READONLY` while it syncs from the new one.
 ///
 /// It moves on an error, not on Sentinel's announcement. After a manual failover the old primary
 /// keeps accepting writes until Sentinel demotes it, about ten seconds later, and those writes are
@@ -160,17 +161,8 @@ impl SentinelConnection {
     pub async fn primary_client(&self) -> RedisResult<Client> {
         let mut sentinel = self.sentinel.lock().await;
         let client = sentinel.async_get_client().await?;
-        let current = self.primary();
 
-        if client.get_connection_info().addr() == current.client.get_connection_info().addr() {
-            return Ok(current.client);
-        }
-
-        let primary = Primary::connect(client, current.generation + 1).await?;
-        let client = primary.client.clone();
-
-        self.set_primary(primary);
-        Ok(client)
+        Ok(self.move_to(client).await?.client)
     }
 
     fn primary(&self) -> Primary {
@@ -189,16 +181,25 @@ impl SentinelConnection {
             return Ok(current.connection);
         }
 
-        let primary =
-            Primary::connect(sentinel.async_get_client().await?, current.generation + 1).await?;
-        let connection = primary.connection.clone();
+        let client = sentinel.async_get_client().await?;
 
-        self.set_primary(primary);
-        Ok(connection)
+        Ok(self.move_to(client).await?.connection)
     }
 
-    fn set_primary(&self, primary: Primary) {
-        *self.primary.write().unwrap_or_else(|e| e.into_inner()) = primary;
+    /// Moves to the server `client` names, unless the connection is there already: a connection
+    /// to a primary that didn't move reconnects by itself. Callers hold the Sentinel lock, so
+    /// clones don't move at once.
+    async fn move_to(&self, client: Client) -> RedisResult<Primary> {
+        let current = self.primary();
+
+        if client.get_connection_info().addr() == current.client.get_connection_info().addr() {
+            return Ok(current);
+        }
+
+        let primary = Primary::connect(client, current.generation + 1).await?;
+
+        *self.primary.write().unwrap_or_else(|e| e.into_inner()) = primary.clone();
+        Ok(primary)
     }
 }
 
