@@ -11,9 +11,7 @@ changelog at the root and one `v<version>` tag.
 
 - Releases are cut by hand, so each one batches several changes. The maintainer opens the release
   PR by running the release workflow from the Actions tab (`gh workflow run release.yml`). It
-  opens only if a `feat`, `fix`, `perf`, `revert` or breaking commit landed since the last
-  release; other commits, such as `build(deps)` bumps, ship with it (`release_commits` in
-  release-plz.toml).
+  opens if any crate changed since the last release.
 - While the release PR is open, every push to `main` updates it. With none open, a push opens
   none.
 - The release PR bumps the versions, runs cargo-semver-checks
