@@ -17,7 +17,7 @@ cargo +1.89 check --workspace --all-targets --all-features --locked
 cargo test --workspace --all-features --locked
 cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
 cargo deny check
-cargo semver-checks --workspace --all-features   # unless the PR is labeled `breaking`
+cargo semver-checks --workspace --all-features --baseline-rev origin/main   # unless labeled `breaking`
 lychee --offline --include-fragments --exclude-path target './**/*.md'
 ```
 
@@ -105,7 +105,8 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 - `documentation`: docs only, such as doc comments, `docs/` or the README.
 - `needs info`: the reporter owes details or a reproduction. Remove it once they answer.
 - `breaking`: the public API or a data format changes. The PR says how to migrate. CI's `semver`
-  job fails a PR that breaks a published crate's API without it; re-run the job after adding it.
+  job fails a PR that breaks a published crate's API, against the PR's base, without it; re-run
+  the job after adding it.
 - Close a duplicate as "duplicate" with a link, and a declined request as "not planned" with the
   reason. Answer a question in its issue, then close it.
 

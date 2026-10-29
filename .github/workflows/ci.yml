@@ -151,8 +151,9 @@ jobs:
       - name: Check the dependency policy
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
-  # A breaking change to a published crate's API, against its latest version on crates.io, fails
-  # unless the PR carries the `breaking` label. The label is read when the job runs, so after
+  # A change that breaks a published crate's API, against the PR's base, fails unless the PR
+  # carries the `breaking` label. The base rather than crates.io, so that a break already merged
+  # for the next release doesn't fail every later PR. The label is read when the job runs, so after
   # adding it, re-run the job.
   semver:
     name: semver
@@ -166,6 +167,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Look for the breaking label
@@ -196,7 +198,9 @@ jobs:
       # The facade with every feature, so it re-exports every store crate's API.
       - name: Check the public API
         if: steps.label.outputs.breaking != 'true'
-        run: cargo semver-checks --workspace --all-features
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
 
   # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
   # rustdoc checks the links in doc comments.
