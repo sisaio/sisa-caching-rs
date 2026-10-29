@@ -58,10 +58,9 @@
 
 pub use sisa_caching_core::{
     CacheEntry, CacheError, CacheKey, CacheOptions, CacheSettings, CacheStore, CacheValue,
-    KeyPrefix, WorkerHost, WorkerService,
+    KeyPrefix,
     cache::PurgeableStore,
     clock::{Clock, SystemClock},
-    worker::CancellationToken,
 };
 
 #[cfg(feature = "memory")]

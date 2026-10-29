@@ -2544,7 +2544,6 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -2920,7 +2919,6 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
- "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

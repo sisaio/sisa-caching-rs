@@ -29,7 +29,6 @@ rustls = { version = "0.23.46", default-features = false }
 
 # Async building blocks.
 tokio = { version = "1.53.3", features = ["rt", "macros", "time", "sync"] }
-tokio-util = { version = "0.7.20", features = ["rt"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 tracing = { version = "0.1.44" }
 

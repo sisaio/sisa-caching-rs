@@ -1,5 +1,5 @@
 //! The shared parts of Sisa Caching: keys, entries, settings, the [`CacheStore`] trait every store
-//! implements, and the [`WorkerHost`] that runs background jobs.
+//! implements, and the [`Worker`](worker::Worker) that runs a store's background task.
 //!
 //! Applications depend on `sisa-caching`, which re-exports this crate's types; depend on this one
 //! directly to implement a store. Every store has the same calls:
@@ -45,4 +45,3 @@ pub use cache::{
     CacheEntry, CacheError, CacheKey, CacheOptions, CacheStore, CacheValue, KeyPrefix,
 };
 pub use settings::CacheSettings;
-pub use worker::{WorkerHost, WorkerService};

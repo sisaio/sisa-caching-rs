@@ -18,10 +18,9 @@ thiserror = { workspace = true }
 # The settings' and keys' serialization traits, and the bound on cached values.
 serde = { workspace = true }
 
-# The per-key lock behind `get_or_set` and its wait timeout.
+# The per-key lock behind `get_or_set` and its wait timeout, and the task each store runs.
 tokio = { workspace = true }
 
-# The worker host: task tracking and the stop signal.
-tokio-util = { workspace = true }
+# Spans and logs, and the OpenTelemetry metrics API the stores count through.
 tracing = { workspace = true }
 opentelemetry = { workspace = true }
