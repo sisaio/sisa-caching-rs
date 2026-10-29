@@ -1,5 +1,5 @@
-//! The shared parts of Sisa Caching: keys, entries, settings, the [`CacheStore`] trait every store
-//! implements, and the [`Worker`](worker::Worker) that runs a store's background task.
+//! The shared parts of Sisa Caching: keys, entries, settings, and the [`CacheStore`] trait every
+//! store implements.
 //!
 //! Applications depend on `sisa-caching`, which re-exports this crate's types; depend on this one
 //! directly to implement a store. Every store has the same calls:
@@ -39,6 +39,8 @@ pub mod clock;
 pub mod locker;
 pub mod metrics;
 pub mod settings;
+// The task each store runs for itself: public for the store crates, not part of the API.
+#[doc(hidden)]
 pub mod worker;
 
 pub use cache::{
