@@ -93,7 +93,7 @@ live, which serves that value, a lock wait that timed out, an invalidation that 
 published, a backplane subscription lost or failing, a backplane message that couldn't be read,
 and a local layer cleared because an invalidation went missing or a node's heartbeats stopped. The
 backplane worker also logs at info when it subscribes. Each store's worker logs starting and
-stopping at info, and a panic at error.
+stopping at info, and a panic at error, with the worker's name and the store's.
 
 Warnings name the store, not the key. A `get_or_set` warning fires inside the `cache get_or_set`
 debug span, so with debug on it shows next to the key. An error's text can still quote part of a

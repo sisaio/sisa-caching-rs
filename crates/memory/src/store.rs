@@ -343,9 +343,10 @@ impl CacheStore for InMemoryCacheStore {
     ) -> Result<(), CacheError> {
         // Entries only come in here, so the purge starts with the first one.
         if self.settings.purge_interval().is_some() {
-            self.worker.start("in-memory-cache-purge-worker", || {
-                PurgeWorker::new(self.for_worker()).run()
-            });
+            self.worker
+                .start("in-memory-cache-purge-worker", &self.name, || {
+                    PurgeWorker::new(self.for_worker()).run()
+                });
         }
 
         let now = self.clock.instant();
@@ -1150,6 +1151,33 @@ mod tests {
         assert!(lines[0].contains(r#"operation="get""#), "{lines:?}");
         assert!(lines[1].starts_with("INFO"), "{lines:?}");
         assert!(lines[1].contains("store calls work again"), "{lines:?}");
+    }
+
+    #[tokio::test]
+    async fn the_purge_worker_logs_its_start_and_stop_with_the_store() {
+        let logs = Logs::default();
+        let _logging = tracing::subscriber::set_default(logs.clone());
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+
+        store.set(&key(1), 1_u32, None).await.unwrap();
+        eventually("the worker starts", || async {
+            logs.lines()
+                .iter()
+                .any(|line| line.contains("worker started"))
+        })
+        .await;
+        drop(store);
+        eventually("the worker stops", || async {
+            logs.lines()
+                .iter()
+                .any(|line| line.contains("worker stopped"))
+        })
+        .await;
+
+        for line in logs.lines() {
+            assert!(line.contains("store=app"), "{line}");
+            assert!(line.contains("in-memory-cache-purge-worker"), "{line}");
+        }
     }
 
     #[tokio::test]
