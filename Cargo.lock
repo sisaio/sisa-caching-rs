@@ -2536,6 +2536,8 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "futures-util",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "sisa-caching-core",

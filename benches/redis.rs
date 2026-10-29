@@ -4,13 +4,15 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use sisa_caching_benches::{User, key, user};
+use sisa_caching_benches::{User, key, meter_provider, user};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::Redis;
 use tokio::runtime::Runtime;
 
 fn redis(c: &mut Criterion) {
+    meter_provider();
+
     let runtime = Runtime::new().unwrap();
     // Removing the container at the end needs the runtime.
     let _runtime = runtime.enter();

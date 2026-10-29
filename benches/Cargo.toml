@@ -34,6 +34,9 @@ path = "hybrid.rs"
 harness = false
 
 [dependencies]
+# A meter provider for the benchmarks, so they include what recording the metrics costs.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["experimental_metrics_custom_reader"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sisa-caching-core = { workspace = true }
