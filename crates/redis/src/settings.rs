@@ -27,7 +27,7 @@ pub struct RedisCacheSettings {
 
     /// How many keys each `SCAN` asks for while `remove_prefix` or `clear` walks the store's
     /// keys. Redis treats it as a hint and may return more or fewer. A larger batch means fewer
-    /// round trips but more server work per call. 0 counts as 1.
+    /// round trips but more server work per call. `validate` rejects `0`.
     pub scan_batch_size: u32,
 }
 
@@ -41,13 +41,44 @@ impl Default for RedisCacheSettings {
 }
 
 impl RedisCacheSettings {
-    /// Fails when a shared setting is out of range, as
+    /// Fails when `scan_batch_size` is 0, or a shared setting is out of range, as
     /// [`CacheSettings::validate`](sisa_caching_core::settings::CacheSettings::validate) says.
     pub fn validate(&self) -> Result<(), CacheError> {
-        self.common.validate()
+        self.common.validate()?;
+
+        if self.scan_batch_size == 0 {
+            return Err(CacheError::invalid_settings(
+                "scan_batch_size",
+                "is 0; it must be at least 1",
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn scan_batch_size(&self) -> u32 {
-        self.scan_batch_size.max(1)
+        self.scan_batch_size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_zero_scan_batch_size_is_rejected() {
+        let settings = |scan_batch_size| RedisCacheSettings {
+            scan_batch_size,
+            ..RedisCacheSettings::default()
+        };
+
+        assert!(settings(1).validate().is_ok());
+        assert!(matches!(
+            settings(0).validate(),
+            Err(CacheError::InvalidSettings {
+                field: "scan_batch_size",
+                ..
+            })
+        ));
     }
 }

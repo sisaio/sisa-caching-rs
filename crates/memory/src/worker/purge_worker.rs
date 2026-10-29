@@ -3,7 +3,7 @@ use std::time::Duration;
 use sisa_caching_core::cache::PurgeableStore;
 
 /// Drops a store's expired entries every `purge_interval_secs` of its settings. With no interval,
-/// or a zero one, it stops at once.
+/// it stops at once.
 #[derive(Debug)]
 pub(crate) struct PurgeWorker<C> {
     cache: C,
@@ -13,9 +13,7 @@ pub(crate) struct PurgeWorker<C> {
 impl<C: PurgeableStore> PurgeWorker<C> {
     /// A worker for `cache`. It reads the store's purge interval once, here.
     pub(crate) fn new(cache: C) -> Self {
-        let interval = cache
-            .purge_interval()
-            .filter(|interval| !interval.is_zero());
+        let interval = cache.purge_interval();
 
         Self { cache, interval }
     }
@@ -76,13 +74,11 @@ mod tests {
 
     #[tokio::test]
     async fn without_an_interval_the_worker_stops_at_once() {
-        for secs in [None, Some(0)] {
-            let worker = PurgeWorker::new(purging_every(secs));
+        let worker = PurgeWorker::new(purging_every(None));
 
-            tokio::time::timeout(Duration::from_secs(1), worker.run())
-                .await
-                .expect("the worker returns");
-        }
+        tokio::time::timeout(Duration::from_secs(1), worker.run())
+            .await
+            .expect("the worker returns");
     }
 
     #[tokio::test(start_paused = true)]

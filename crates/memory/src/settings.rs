@@ -28,22 +28,24 @@ pub struct InMemoryCacheSettings {
     pub common: CacheSettings,
 
     /// How often the store drops its expired entries: 60 seconds by default, from its first
-    /// write. `None` or `0` turns that off, for an application that calls `purge` itself.
+    /// write. `None` turns that off, for an application that calls `purge` itself; `validate`
+    /// rejects `0`.
     pub purge_interval_secs: Option<u64>,
 
     /// The most entries the store holds. Past it, an insert drops expired entries, then the least
     /// recently used, down to about nine tenths of the limit. Inserts from several threads can go a
-    /// few over it until that trim finishes. `None` or `0` sets no limit.
+    /// few over it until that trim finishes. `None` sets no limit; `validate` rejects `0`.
     pub max_entries: Option<usize>,
 
     /// The longest an entry stays in the store, whatever its TTL. The entry keeps its own creation
-    /// time and TTL; only how long the store holds it is capped. `None` or `0` sets no cap.
+    /// time and TTL; only how long the store holds it is capped. `None` sets no cap; `validate`
+    /// rejects `0`.
     pub max_ttl_secs: Option<u64>,
 
     /// How many maps the entries are split over, each with its own lock. More maps let threads
     /// using different keys run side by side, and a `remove_prefix`, purge or trim holds up one
     /// map at a time instead of the whole store; each call then hashes its key once more.
-    /// `None` or `0` means one map.
+    /// `None` means one map; `validate` rejects `0`.
     pub shards: Option<usize>,
 }
 
@@ -60,10 +62,28 @@ impl Default for InMemoryCacheSettings {
 }
 
 impl InMemoryCacheSettings {
-    /// Fails when `purge_interval_secs` or `max_ttl_secs` is over [`MAX_TTL_SECS`], or a shared
-    /// setting is out of range, as [`CacheSettings::validate`] says.
+    /// Fails when a setting is 0, `purge_interval_secs` or `max_ttl_secs` is over
+    /// [`MAX_TTL_SECS`], or a shared setting is out of range, as [`CacheSettings::validate`] says.
     pub fn validate(&self) -> Result<(), CacheError> {
         self.common.validate()?;
+
+        for (field, zero, none) in [
+            (
+                "purge_interval_secs",
+                self.purge_interval_secs == Some(0),
+                "to turn purging off",
+            ),
+            ("max_entries", self.max_entries == Some(0), "for no limit"),
+            ("max_ttl_secs", self.max_ttl_secs == Some(0), "for no cap"),
+            ("shards", self.shards == Some(0), "for one map"),
+        ] {
+            if zero {
+                return Err(CacheError::invalid_settings(
+                    field,
+                    format!("is 0; use None {none}"),
+                ));
+            }
+        }
 
         for (field, secs) in [
             ("purge_interval_secs", self.purge_interval_secs),
@@ -78,23 +98,19 @@ impl InMemoryCacheSettings {
     }
 
     pub fn purge_interval(&self) -> Option<Duration> {
-        self.purge_interval_secs
-            .filter(|secs| *secs > 0)
-            .map(Duration::from_secs)
+        self.purge_interval_secs.map(Duration::from_secs)
     }
 
     pub fn max_entries(&self) -> Option<usize> {
-        self.max_entries.filter(|max| *max > 0)
+        self.max_entries
     }
 
     pub fn shards(&self) -> usize {
-        self.shards.filter(|shards| *shards > 0).unwrap_or(1)
+        self.shards.unwrap_or(1)
     }
 
     pub fn max_ttl(&self) -> Option<Duration> {
-        self.max_ttl_secs
-            .filter(|secs| *secs > 0)
-            .map(Duration::from_secs)
+        self.max_ttl_secs.map(Duration::from_secs)
     }
 }
 
@@ -162,18 +178,58 @@ mod tests {
     }
 
     #[test]
-    fn zero_turns_a_limit_off() {
+    fn none_turns_a_limit_off() {
         let settings = InMemoryCacheSettings {
-            purge_interval_secs: Some(0),
-            max_entries: Some(0),
-            max_ttl_secs: Some(0),
-            shards: Some(0),
+            purge_interval_secs: None,
+            max_entries: None,
+            max_ttl_secs: None,
+            shards: None,
             ..InMemoryCacheSettings::default()
         };
 
+        assert!(settings.validate().is_ok());
         assert_eq!(settings.purge_interval(), None);
         assert_eq!(settings.max_entries(), None);
         assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 1);
+    }
+
+    #[test]
+    fn zero_is_rejected() {
+        for (field, settings) in [
+            (
+                "purge_interval_secs",
+                InMemoryCacheSettings {
+                    purge_interval_secs: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "max_entries",
+                InMemoryCacheSettings {
+                    max_entries: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "max_ttl_secs",
+                InMemoryCacheSettings {
+                    max_ttl_secs: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "shards",
+                InMemoryCacheSettings {
+                    shards: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+        ] {
+            assert!(
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                "{field}"
+            );
+        }
     }
 }

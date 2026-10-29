@@ -251,7 +251,7 @@ stays subscribed.
 | | |
 | --- | --- |
 | **Guaranteed** | After a write returns, this node's local copy is gone, and every node that receives the message drops its copy. |
-| **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `0`, or a local store built without those settings, the bound is the entry's own TTL. |
+| **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `None`, or a local store built without those settings, the bound is the entry's own TTL. |
 | **Guaranteed** | Once the worker notices the backplane is down (a failed read or ping, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
 | **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default). |
@@ -311,11 +311,13 @@ Settled; reopen only with new evidence.
   `PurgeableStore` and the generic `PurgeWorker<C>`.
 - The Redis hash and the backplane message are formats other languages write, so they change only
   with a version bump.
-- Durations in settings are `u64` seconds or milliseconds. Each store's settings and
-  `HybridCacheSettings` have one `validate`, and `with_settings` and `with_worker_settings` return a
-  `Result`; `HybridCacheStore::new` checks the backplane's settings. Settings nest (a store's shared
-  `CacheSettings` sit under `common`, a hybrid's parts under `local`, `distributed`, `backplane` and
-  `worker`), and an unknown field fails to deserialize, so a misspelled setting can't silently keep
-  its default. A hybrid's `local.common` fails `validate`: hybrid calls read `distributed.common`.
+- Durations in settings are `u64` seconds or milliseconds. A setting that can be off is an `Option`,
+  off with `None`, and `validate` rejects `0` in every setting, naming the field. Each store's
+  settings and `HybridCacheSettings` have one `validate`, and `with_settings` and
+  `with_worker_settings` return a `Result`; `HybridCacheStore::new` checks the backplane's settings.
+  Settings nest (a store's shared `CacheSettings` sit under `common`, a hybrid's parts under
+  `local`, `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
+  misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
+  hybrid calls read `distributed.common`.
 - Info spans and warnings carry the store and the invalidation kind, never a key; only debug
   spans carry keys. Stores log only the errors they swallow.

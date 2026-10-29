@@ -35,9 +35,10 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 #[serde(default, deny_unknown_fields)]
 pub struct HybridCacheSettings {
     /// The in-memory layer on each node. Its `max_ttl_secs` bounds how long a node can serve a
-    /// stale copy when a lost invalidation goes unnoticed. Left unset, here or in a config file, it
-    /// is [`DEFAULT_LOCAL_MAX_TTL_SECS`]; `0` turns the cap off. Its `common` must stay unset:
-    /// hybrid calls take TTLs and locks from `distributed.common`.
+    /// stale copy when a lost invalidation goes unnoticed. It is [`DEFAULT_LOCAL_MAX_TTL_SECS`]
+    /// by default, and when a config file leaves it out or sets it to null; only code can turn
+    /// the cap off, with `None`. Its `common` must stay unset: hybrid calls take TTLs and locks
+    /// from `distributed.common`.
     #[serde(deserialize_with = "local_settings")]
     pub local: InMemoryCacheSettings,
 
@@ -112,11 +113,11 @@ pub struct RedisBackplaneSettings {
     pub channel: String,
 
     /// How often a subscription is pinged to detect a silently lost connection: 5 seconds by
-    /// default.
+    /// default. `validate` rejects `0`.
     pub ping_interval_ms: u64,
 
     /// How long subscribing or a ping may take before the subscription fails: 2 seconds by
-    /// default.
+    /// default. `validate` rejects `0`.
     pub ping_timeout_ms: u64,
 }
 
@@ -149,11 +150,11 @@ impl RedisBackplaneSettings {
     }
 
     pub fn ping_interval(&self) -> Duration {
-        Duration::from_millis(self.ping_interval_ms.max(1))
+        Duration::from_millis(self.ping_interval_ms)
     }
 
     pub fn ping_timeout(&self) -> Duration {
-        Duration::from_millis(self.ping_timeout_ms.max(1))
+        Duration::from_millis(self.ping_timeout_ms)
     }
 }
 
@@ -165,16 +166,17 @@ impl RedisBackplaneSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct BackplaneWorkerSettings {
     /// The first wait before subscribing again after a lost subscription: 100 ms by default. It
-    /// doubles after each failure.
+    /// doubles after each failure. `validate` rejects `0`.
     pub reconnect_delay_ms: u64,
 
     /// The longest wait between tries: 5 seconds by default. A subscription must also stay up
-    /// this long before the next loss starts the wait over from `reconnect_delay_ms`.
+    /// this long before the next loss starts the wait over from `reconnect_delay_ms`. It must be
+    /// at least `reconnect_delay_ms`.
     pub max_reconnect_delay_ms: u64,
 
     /// How often the worker publishes a heartbeat with the last sequence number its store has
     /// finished publishing: 1 second by default. A node that missed one of the store's
-    /// invalidations clears its local layer at the next heartbeat.
+    /// invalidations clears its local layer at the next heartbeat. `validate` rejects `0`.
     pub heartbeat_interval_ms: u64,
 
     /// How long without a heartbeat from another node before this node clears its local layer, as
@@ -196,13 +198,25 @@ impl Default for BackplaneWorkerSettings {
 }
 
 impl BackplaneWorkerSettings {
-    /// Fails when `heartbeat_interval_ms` is 0, or `heartbeat_timeout_ms` isn't longer than it,
-    /// since every node would then miss heartbeats that are on time.
+    /// Fails when `reconnect_delay_ms` or `heartbeat_interval_ms` is 0, `max_reconnect_delay_ms`
+    /// is shorter than `reconnect_delay_ms`, or `heartbeat_timeout_ms` isn't longer than
+    /// `heartbeat_interval_ms`, since every node would then miss heartbeats that are on time.
     pub fn validate(&self) -> Result<(), CacheError> {
-        if self.heartbeat_interval_ms == 0 {
+        for (field, ms) in [
+            ("reconnect_delay_ms", self.reconnect_delay_ms),
+            ("heartbeat_interval_ms", self.heartbeat_interval_ms),
+        ] {
+            if ms == 0 {
+                return Err(CacheError::invalid_settings(
+                    field,
+                    "is 0; it must be at least 1 ms",
+                ));
+            }
+        }
+        if self.max_reconnect_delay_ms < self.reconnect_delay_ms {
             return Err(CacheError::invalid_settings(
-                "heartbeat_interval_ms",
-                "is 0; it must be at least 1 ms",
+                "max_reconnect_delay_ms",
+                "must be at least reconnect_delay_ms",
             ));
         }
         if self.heartbeat_timeout_ms <= self.heartbeat_interval_ms {
@@ -216,24 +230,19 @@ impl BackplaneWorkerSettings {
     }
 
     pub fn heartbeat_interval(&self) -> Duration {
-        Duration::from_millis(self.heartbeat_interval_ms.max(1))
+        Duration::from_millis(self.heartbeat_interval_ms)
     }
 
     pub fn heartbeat_timeout(&self) -> Duration {
         Duration::from_millis(self.heartbeat_timeout_ms)
-            .max(self.heartbeat_interval() + Duration::from_millis(1))
     }
 
     pub fn reconnect_delay(&self) -> Duration {
-        Duration::from_millis(self.reconnect_delay_ms.max(1))
+        Duration::from_millis(self.reconnect_delay_ms)
     }
 
     pub fn max_reconnect_delay(&self) -> Duration {
-        Duration::from_millis(
-            self.max_reconnect_delay_ms
-                .max(self.reconnect_delay_ms)
-                .max(1),
-        )
+        Duration::from_millis(self.max_reconnect_delay_ms)
     }
 }
 
@@ -254,11 +263,25 @@ mod tests {
         assert_eq!(HybridCacheSettings::default().local.max_ttl(), minute);
         assert_eq!(cap("{}"), minute);
         assert_eq!(cap(r#"{ "local": { "max_entries": 1000 } }"#), minute);
+        assert_eq!(cap(r#"{ "local": { "max_ttl_secs": null } }"#), minute);
         assert_eq!(
             cap(r#"{ "local": { "max_ttl_secs": 5 } }"#),
             Some(Duration::from_secs(5))
         );
-        assert_eq!(cap(r#"{ "local": { "max_ttl_secs": 0 } }"#), None);
+    }
+
+    #[test]
+    fn a_zero_local_cap_is_rejected() {
+        let settings: HybridCacheSettings =
+            serde_json::from_str(r#"{ "local": { "max_ttl_secs": 0 } }"#).unwrap();
+
+        assert!(matches!(
+            settings.validate(),
+            Err(CacheError::InvalidSettings {
+                field: "max_ttl_secs",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -303,6 +326,29 @@ mod tests {
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
                 "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_reconnect_delay_or_a_longest_wait_below_it_is_rejected() {
+        for (field, first, longest) in [
+            ("reconnect_delay_ms", 0, 5_000),
+            ("max_reconnect_delay_ms", 100, 99),
+            ("max_reconnect_delay_ms", 100, 0),
+        ] {
+            let settings = HybridCacheSettings {
+                worker: BackplaneWorkerSettings {
+                    reconnect_delay_ms: first,
+                    max_reconnect_delay_ms: longest,
+                    ..BackplaneWorkerSettings::default()
+                },
+                ..HybridCacheSettings::default()
+            };
+
+            assert!(
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                "{first} and {longest}"
             );
         }
     }

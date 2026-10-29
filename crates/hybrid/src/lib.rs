@@ -78,8 +78,8 @@
 //! The local `max_ttl_secs` is the bound when an invalidation never arrives and nothing shows it: a
 //! Redis write timed out on the client but was applied later, or the writer, such as a service in
 //! another language, sends no sequence numbers. `HybridCacheSettings` sets it to 60 seconds unless
-//! told otherwise; a local store built without those settings has none. `0` removes the bound. It
-//! doesn't change freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
+//! told otherwise; a local store built without those settings has none. `None` removes the bound.
+//! It doesn't change freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
 //! `refresh_threshold` of `0.8`.
 //!
 //! # Invalidations from other languages
