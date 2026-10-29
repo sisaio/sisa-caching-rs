@@ -9,7 +9,7 @@ use std::{
 
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use futures_util::FutureExt;
-use sisa_caching_benches::{User, key, user};
+use sisa_caching_benches::{User, key, meter_provider, user};
 use sisa_caching_core::cache::{CacheOptions, CacheStore};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::ManualClock;
@@ -40,6 +40,8 @@ fn fill(runtime: &Runtime, store: &InMemoryCacheStore, ids: Range<u64>, ttl: Opt
 }
 
 fn single(c: &mut Criterion) {
+    meter_provider();
+
     let runtime = Runtime::new().unwrap();
     let store = store(1);
     // Built before timing, so the times leave out formatting a key.
@@ -73,6 +75,8 @@ fn single(c: &mut Criterion) {
 
 /// Eight tasks reading different keys, through one map or sixteen.
 fn parallel(c: &mut Criterion) {
+    meter_provider();
+
     const TASKS: u64 = 8;
 
     let runtime = Runtime::new().unwrap();
@@ -118,6 +122,8 @@ fn parallel(c: &mut Criterion) {
 /// The calls that walk every entry of one map, at a million entries. Each holds that map's lock,
 /// and the thread it runs on, until it is done.
 fn large(c: &mut Criterion) {
+    meter_provider();
+
     const ENTRIES: u64 = 1_000_000;
 
     let runtime = Runtime::new().unwrap();

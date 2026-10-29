@@ -9,7 +9,9 @@ current numbers. v0.1.0 has no table on its page; its numbers are in the summary
 ## What they measure
 
 Every value is a small `User { id, name, email }`, so a read decodes and a write encodes a real
-object.
+object. An OpenTelemetry meter provider is installed, so each call records its metrics as it would
+in an application that exports them. Benchmarks before 0.3.0 ran without one, so their table
+leaves that cost out of the previous release's column.
 
 | Group | Benchmark | What it times |
 | --- | --- | --- |
