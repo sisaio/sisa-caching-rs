@@ -237,9 +237,11 @@ jobs:
       - name: Measure coverage
         run: cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex 'crates/testing/' --lcov --output-path lcov.info
 
+      # A Codecov outage only leaves the badge stale; it doesn't turn main red, which would hold up
+      # a release waiting on this run.
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
