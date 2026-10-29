@@ -252,11 +252,13 @@ impl InMemoryCacheStore {
                 let mut ties = excess - below.iter().filter(|&&used| used < cutoff).count();
                 let evicted = self.extract(|_, stored| {
                     let used = stored.last_used.load(Ordering::Relaxed);
-                    let tied = used == cutoff && ties > 0;
 
-                    ties -= usize::from(tied);
+                    if used == cutoff && ties > 0 {
+                        ties -= 1;
+                        return true;
+                    }
 
-                    used < cutoff || tied
+                    used < cutoff
                 });
 
                 METRICS.evicted(&self.name, evicted.len());
