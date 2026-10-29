@@ -112,7 +112,7 @@ impl State {
     /// Bumps every affected generation once no promotion is copying, then evicts the local copies.
     /// A promotion that starts after the bump sees the new generation and copies nothing, so the
     /// eviction runs outside the turn: dropping the evicted values holds up no other promotion.
-    pub(crate) async fn invalidate(&self, invalidation: &Invalidation) {
+    async fn invalidate(&self, invalidation: &Invalidation) {
         self.bump(invalidation).await;
 
         match invalidation {
@@ -125,11 +125,11 @@ impl State {
         }
     }
 
-    /// Applies another node's invalidation. A prefix's copies are removed on the blocking pool, as
-    /// that walks every local entry, so the worker goes on receiving meanwhile. Its keys read as
-    /// misses until the walk is done, the bump keeps a stale copy from landing after it, and the
-    /// walk removes the ones from before. With `REMOVING_LIMIT` walks already queued, the prefix
-    /// clears the local layer instead, which takes no walk.
+    /// Applies an invalidation, this node's own or another's. A prefix's copies are removed on the
+    /// blocking pool, as that walks every local entry, so neither the write nor the worker waits
+    /// for it. Its keys read as misses until the walk is done, the bump keeps a stale copy from
+    /// landing after it, and the walk removes the ones from before. With `REMOVING_LIMIT` walks
+    /// already queued, the prefix clears the local layer instead, which takes no walk.
     pub(crate) async fn apply(&self, invalidation: &Invalidation) {
         let Invalidation::Prefix(prefix) = invalidation else {
             return self.invalidate(invalidation).await;
