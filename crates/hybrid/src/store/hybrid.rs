@@ -210,8 +210,12 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
             tracing::warn!(%store, "invalidations were still being published at shutdown; other nodes may clear once");
         }
 
-        let stopping =
-            BackplaneMessage::stopping(self.node_id().clone(), store.clone(), sequence.finished());
+        let stopping = BackplaneMessage::accounting(
+            self.node_id().clone(),
+            store.clone(),
+            sequence.finished(),
+            Invalidation::Stopping,
+        );
 
         match send(&self.backplane, &stopping).await {
             Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
@@ -296,20 +300,20 @@ async fn send(
     message: &BackplaneMessage,
 ) -> sisa_caching_redis::error::Result<usize> {
     let mut delay = Duration::from_millis(50);
+    let mut attempt = 1;
 
-    for attempt in 1.. {
+    loop {
         match backplane.publish(message).await {
             Err(error) if attempt < PUBLISH_ATTEMPTS => {
                 tracing::debug!(store = %message.store, %error, attempt, "publish failed; retrying");
 
                 tokio::time::sleep(delay).await;
                 delay *= 2;
+                attempt += 1;
             }
             result => return result,
         }
     }
-
-    unreachable!("the last try returns")
 }
 
 impl RedisHybridCacheStore {
@@ -325,7 +329,6 @@ impl RedisHybridCacheStore {
         settings: &HybridCacheSettings,
     ) -> Result<Self> {
         settings.validate()?;
-        KeyPrefix::validate(name)?;
 
         let info = info
             .into_connection_info()

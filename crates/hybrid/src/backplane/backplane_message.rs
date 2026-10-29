@@ -56,17 +56,14 @@ impl BackplaneMessage {
         }
     }
 
-    /// A heartbeat saying `source` has finished publishing every invalidation up to `seq`.
-    pub(crate) fn heartbeat(source: NodeId, store: KeyPrefix, seq: u64) -> Self {
-        Self::accounting(source, store, seq, Invalidation::Heartbeat)
-    }
-
-    /// The last heartbeat of `source`, which stops and sends nothing more after it.
-    pub(crate) fn stopping(source: NodeId, store: KeyPrefix, seq: u64) -> Self {
-        Self::accounting(source, store, seq, Invalidation::Stopping)
-    }
-
-    fn accounting(source: NodeId, store: KeyPrefix, seq: u64, invalidation: Invalidation) -> Self {
+    /// A heartbeat or a stop, saying `source` has finished publishing every invalidation up to
+    /// `seq`.
+    pub(crate) fn accounting(
+        source: NodeId,
+        store: KeyPrefix,
+        seq: u64,
+        invalidation: Invalidation,
+    ) -> Self {
         Self {
             version: MESSAGE_VERSION,
             source,
@@ -185,10 +182,16 @@ mod tests {
     #[test]
     fn published_invalidations_and_heartbeats_carry_a_sequence_number() {
         let mut invalidation = message(Invalidation::Key("42".to_owned()));
-        let heartbeat =
-            BackplaneMessage::heartbeat(NodeId::new("node-a"), KeyPrefix::new("users").unwrap(), 7);
-        let stopping =
-            BackplaneMessage::stopping(NodeId::new("node-a"), KeyPrefix::new("users").unwrap(), 7);
+        let accounting = |invalidation| {
+            BackplaneMessage::accounting(
+                NodeId::new("node-a"),
+                KeyPrefix::new("users").unwrap(),
+                7,
+                invalidation,
+            )
+        };
+        let heartbeat = accounting(Invalidation::Heartbeat);
+        let stopping = accounting(Invalidation::Stopping);
 
         invalidation.seq = Some(7);
 
