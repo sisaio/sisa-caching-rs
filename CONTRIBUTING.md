@@ -83,15 +83,18 @@ don't check:
 
 ## Issues and labels
 
-Every issue and pull request gets labels from these groups, so anyone can filter the work:
+Every issue has a type: Bug, Feature or Task. The issue forms set it; set it yourself on an issue
+opened another way. Docs work is a Task. Pull requests have no type; their linked issue has it.
+
+Every issue and pull request also gets labels from these groups, so anyone can filter the work:
 
 | Group | Labels | Rule |
 | --- | --- | --- |
-| Kind | `bug`, `enhancement`, `task`, `documentation` | Exactly one. The issue forms set it. |
 | Crate | `crate: sisa-caching`, `crate: core`, `crate: memory`, `crate: redis`, `crate: hybrid`, `ci` | Every part the change touches. |
-| Other | `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
+| Other | `documentation`, `needs info`, `breaking`, `good first issue`, `help wanted` | When they apply. |
 | Automated | `dependencies`, `release` | Set by Dependabot and release-plz on their PRs. |
 
+- `documentation`: docs only, such as doc comments, `docs/` or the README.
 - `needs info`: the reporter owes details or a reproduction. Remove it once they answer.
 - `breaking`: the public API or a data format changes. The PR says how to migrate.
 - Close a duplicate as "duplicate" with a link, and a declined request as "not planned" with the

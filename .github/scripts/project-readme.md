@@ -25,7 +25,7 @@ Only the maintainer moves an issue to Ready and sets its milestone and Priority.
 
 - **Board**: issues by Status.
 - **Backlog**: issues waiting for triage.
-- **Delivery**: issues per milestone, which is a release, with their status and kind (bug, enhancement, task).
+- **Delivery**: issues per milestone, which is a release, with their status and type (Bug, Feature, Task).
 - **Roadmap**: the same issues on a timeline.
 - **Blocked**: what is stuck.
 - **My work**: your open issues.

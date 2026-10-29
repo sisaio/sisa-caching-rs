@@ -1,6 +1,6 @@
 name: Task
 description: Planned work the maintainers have agreed to do.
-labels: [task]
+type: Task
 body:
   - type: textarea
     id: goal

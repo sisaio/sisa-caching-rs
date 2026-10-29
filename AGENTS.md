@@ -28,7 +28,8 @@ exit codes rather than piped output. The Redis tests need Docker.
 - Never open a PR without an issue. Work only on an issue in Ready, or one the maintainer named;
   when the maintainer asks for work that has none, open it first with the matching form. Assign
   it and move it to In Progress, and to In Review when the PR opens. The PR says `Closes #<n>`
-  and carries the issue's kind and crate labels.
+  and carries the issue's crate labels. An issue opened without a form gets its type (Bug,
+  Feature or Task) set by hand.
 - Fill in the [PR template](.github/pull_request_template.md): What changes gives a Before and an
   After, and Evidence shows the commands you ran and what they printed.
 - When asked to show or evaluate a change, present the diff for review before pushing.

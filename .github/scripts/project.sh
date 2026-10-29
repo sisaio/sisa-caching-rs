@@ -16,9 +16,6 @@ TITLE=sisa-caching
 # --- Labels ---------------------------------------------------------------------------------------
 # name|color|description
 labels=(
-  "bug|d73a4a|Something works differently than documented."
-  "enhancement|a2eeef|A new feature or a change to how one works."
-  "task|0e8a16|Planned work with acceptance criteria."
   "documentation|0075ca|Docs only: doc comments, docs/, README."
   "crate: sisa-caching|1d76db|sisa-caching: the facade crate, its features and re-exports."
   "crate: core|1d76db|sisa-caching-core: traits, entries, settings, metrics."
@@ -38,9 +35,10 @@ for line in "${labels[@]}"; do
   gh label create "$name" --repo "$REPO" --color "$color" --description "$description" --force
 done
 
-# GitHub's defaults we don't use: issues close as "duplicate" or "not planned" instead, and
-# questions are answered in their issue. Deleting a label removes it from every issue that has it.
-for name in duplicate invalid question wontfix; do
+# Labels we don't use: issues close as "duplicate" or "not planned" instead, questions are
+# answered in their issue, and an issue's type (Bug, Feature, Task) says its kind. Deleting a
+# label removes it from every issue and PR that has it.
+for name in duplicate invalid question wontfix bug enhancement task; do
   gh label delete "$name" --repo "$REPO" --yes 2>/dev/null || true
 done
 
