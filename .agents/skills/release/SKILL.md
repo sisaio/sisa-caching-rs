@@ -1,13 +1,13 @@
 ---
 name: release
-description: Prepares a release of the sisa-caching crates (versions, changelog, semver checks, tag, GitHub release, benchmark table) with release-plz, and diagnoses failed release runs. Use when asked about the release PR, the changelog, a version bump, publishing to crates.io, release notes, or a red release workflow.
+description: Prepares a release of the sisa-caching crates (versions, changelog, semver checks, tag, GitHub release, benchmark table, approval, crates.io) and diagnoses failed release runs. Use when asked about the release PR, the changelog, a version bump, publishing to crates.io, release notes, or a red release workflow.
 ---
 
 # Release
 
-[release.yml](../../../.github/workflows/release.yml) runs release-plz
-([release-plz.toml](../../../release-plz.toml)). The five library crates share one version, one
-changelog at the root and one `v<version>` tag.
+[release.yml](../../../.github/workflows/release.yml) opens the release PR with release-plz
+([release-plz.toml](../../../release-plz.toml)) and does the rest in its own jobs. The five
+library crates share one version, one changelog at the root and one `v<version>` tag.
 
 - Releases are cut by hand, so each one batches several changes. The maintainer opens the release
   PR by running the release workflow from the Actions tab (`gh workflow run release.yml`). It
@@ -16,14 +16,16 @@ changelog at the root and one `v<version>` tag.
   none.
 - The release PR bumps the versions, runs cargo-semver-checks
   against the last published version, and adds a changelog section.
-- Merging the release PR publishes to crates.io, tags `v<version>`, creates the GitHub release
-  as a draft, runs the benchmarks, whose table and report go on the draft, and then publishes
-  it. Releases are immutable once published, so nothing may change one after that.
+- Merging the release PR tags `v<version>`, creates the GitHub release as a draft from the
+  changelog section, and runs the benchmarks, whose table and report go on the draft. The
+  publish job then waits for the CI run on that commit to pass and for the maintainer to approve
+  the `release` environment. Once approved, it publishes the crates to crates.io, and the draft
+  is published. Releases are immutable once published, so nothing may change one after that.
 - Merged issues show as Done on the board; their milestone stays open until the release is
   published, and then the maintainer closes it.
 
-The maintainer starts and merges the release PR. An agent never starts or merges it, publishes, or
-pushes a tag.
+The maintainer starts and merges the release PR and approves the publish. An agent never starts
+or merges it, approves, publishes, or pushes a tag.
 
 ## Preparing the release PR
 
@@ -46,21 +48,22 @@ pushes a tag.
 - Edit the release PR right before it is merged. If anything lands on `main` first, release-plz
   closes the edited PR and opens a fresh one without the edits.
 - If merging the release PR starts no workflow run, GitHub dropped the push. The next push to
-  `main` publishes the versions crates.io doesn't have yet. Running the workflow by hand doesn't
-  help: a manual run only opens release PRs.
+  `main` tags and drafts the version, since its tag doesn't exist yet. Running the workflow by
+  hand doesn't help: a manual run only opens release PRs.
+- A push while a release waits for approval starts no second release: its version's tag exists.
+- A publish that stopped halfway is finished by re-running the publish job: it skips the crates
+  crates.io already has.
 - The first release PR lists every commit since the start. Replace it with the summary in
   [CHANGELOG.md](../../../CHANGELOG.md).
-- Never list a `publish = false` crate in `release-plz.toml`. Any `[[package]]` entry turns
-  publishing on, and the release job fails with "has `publish = false` ... but it has
-  `publish = true` in the release-plz configuration".
 
 ## When the workflow fails
 
 | Error in the log | Fix |
 | --- | --- |
 | `GitHub Actions is not permitted to create or approve pull requests` | The maintainer allows it in Settings → Actions → General → Workflow permissions |
-| `has publish = false ... publish = true in the release-plz configuration` | Remove that crate's entry from `release-plz.toml` |
 | `Cannot upload assets to an immutable release` | Something wrote to a published release; record on the draft before `publish release` runs |
-| crates.io `403` or no token | A crate's first publish needs the `CARGO_REGISTRY_TOKEN` secret; later ones use trusted publishing |
+| `wait for CI` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
+| crates.io `403`, or no token from `crates-io-auth-action` | The crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
+| `crate ... already exists` | crates.io has that version; re-run the publish job, which skips it |
 
 For anything else, find the first error in the failed step's log and report it with a fix.
