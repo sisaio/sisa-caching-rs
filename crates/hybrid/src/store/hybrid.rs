@@ -126,7 +126,7 @@ impl<D: CacheStore + 'static, B: Backplane> HybridCacheStore<D, B> {
     /// so local reads come on, and the `sisa.caching.backplane.connected` gauge reports, before
     /// the first call. It does nothing outside a tokio runtime or once the worker has started.
     pub fn start_worker(&self) {
-        self.worker.start_once("hybrid-cache-backplane-worker", || {
+        self.worker.start("hybrid-cache-backplane-worker", || {
             let state = Arc::clone(&self.state);
 
             BackplaneWorker::new(state, self.worker_settings.clone()).run()

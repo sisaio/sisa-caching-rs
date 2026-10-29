@@ -36,10 +36,10 @@ impl Worker {
         Self(None)
     }
 
-    /// Spawns the task `start` returns on the current tokio runtime, the first time this runs
+    /// Spawns the future `task` returns on the current tokio runtime, the first time this runs
     /// inside one. Later calls, and calls outside a runtime, do nothing. The task's start, stop
     /// and panic are logged under `name`.
-    pub fn start_once<F>(&self, name: &'static str, start: impl FnOnce() -> F)
+    pub fn start<F>(&self, name: &'static str, task: impl FnOnce() -> F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -53,7 +53,7 @@ impl Worker {
             return;
         }
 
-        running.get_or_init(|| Running(tokio::spawn(logged(name, start())).abort_handle()));
+        running.get_or_init(|| Running(tokio::spawn(logged(name, task())).abort_handle()));
     }
 }
 
@@ -106,7 +106,7 @@ mod tests {
         let mut stopped = Some(stopped);
 
         for worker in [&worker, &clone, &worker] {
-            worker.start_once("waiting", || {
+            worker.start("waiting", || {
                 starts.fetch_add(1, Ordering::SeqCst);
 
                 let stopped = stopped.take().unwrap();
@@ -134,18 +134,18 @@ mod tests {
     fn outside_a_runtime_nothing_starts_until_a_call_inside_one() {
         let worker = Worker::new();
         let starts = AtomicUsize::new(0);
-        let start = || {
+        let task = || {
             starts.fetch_add(1, Ordering::SeqCst);
             async {}
         };
 
-        worker.start_once("counting", start);
+        worker.start("counting", task);
         assert_eq!(starts.load(Ordering::SeqCst), 0);
 
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(async { worker.start_once("counting", start) });
+            .block_on(async { worker.start("counting", task) });
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
@@ -153,7 +153,7 @@ mod tests {
     async fn none_never_starts() {
         let starts = AtomicUsize::new(0);
 
-        Worker::none().start_once("counting", || {
+        Worker::none().start("counting", || {
             starts.fetch_add(1, Ordering::SeqCst);
             async {}
         });
@@ -166,13 +166,13 @@ mod tests {
         let worker = Worker::new();
         let (ran, panicked) = oneshot::channel::<()>();
 
-        worker.start_once("panicking", || async move {
+        worker.start("panicking", || async move {
             let _ran = ran;
 
             panic!("the task failed");
         });
 
         assert!(panicked.await.is_err(), "the task panicked");
-        worker.start_once("panicking", || async { unreachable!("it started once") });
+        worker.start("panicking", || async { unreachable!("it started once") });
     }
 }

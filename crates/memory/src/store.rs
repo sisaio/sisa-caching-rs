@@ -313,7 +313,7 @@ impl CacheStore for InMemoryCacheStore {
     ) -> Result<(), CacheError> {
         // Entries only come in here, so the purge starts with the first one.
         if self.settings.purge_interval().is_some() {
-            self.worker.start_once("in-memory-cache-purge-worker", || {
+            self.worker.start("in-memory-cache-purge-worker", || {
                 PurgeWorker::new(self.for_worker()).run()
             });
         }
