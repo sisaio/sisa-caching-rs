@@ -169,7 +169,8 @@ where
     E: Send,
 {
     let (settings, locker, clock) = (store.cache_settings(), store.locker(), store.clock());
-    let full_key = store.name().format_key(key);
+    // The locks go by the store's full key, built only when a call locks: a hit never needs it.
+    let full_key = || store.name().format_key(key);
     // Loads, records how long it took, and stores what it got.
     let load = || async move {
         let started = Instant::now();
@@ -196,7 +197,7 @@ where
             .is_some_and(|share| entry.is_refresh_due(clock.now(), share));
 
         // One caller refreshes; the rest are served the cached value meanwhile.
-        let Some(_guard) = due.then(|| locker.try_lock(&full_key)).flatten() else {
+        let Some(_guard) = due.then(|| locker.try_lock(&full_key())).flatten() else {
             return Ok(entry.value);
         };
 
@@ -212,7 +213,7 @@ where
     }
 
     let _guard = match settings.lock_timeout() {
-        Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key)).await {
+        Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
             Ok(guard) => Some(guard),
             Err(_) => {
                 // Another caller's load is still running: this one loads too, without the lock.
@@ -221,7 +222,7 @@ where
                 None
             }
         },
-        None => Some(locker.lock(&full_key).await),
+        None => Some(locker.lock(&full_key()).await),
     };
 
     // Another caller may have stored the value while this one waited.
