@@ -54,7 +54,8 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 (`RedisBackplane::sentinel`). Redis Sentinel watches Redis, Valkey and Dragonfly.
 
 - When a command fails because the primary went away or answers `READONLY` or `LOADING`, the
-  connection asks Sentinel for the primary again and moves there. A command refused with either
+  connection asks Sentinel for the primary again and moves there if it changed; while Sentinel
+  names the same one, the connection stays and reconnects by itself. A command refused with either
   didn't run, so it is sent once more; one cut off by a broken connection may have run, so it
   returns its error.
 - A hybrid node notices a new primary within one ping interval (5 s by default): each backplane

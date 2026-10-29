@@ -86,6 +86,26 @@ async fn a_call_cut_off_during_a_failover_fails_and_the_next_one_reaches_the_new
 }
 
 #[tokio::test]
+async fn a_call_cut_off_without_a_failover_keeps_the_connection() {
+    let Some(sentinel) = RedisSentinel::start().await else {
+        return;
+    };
+    let conn = connect(&sentinel).await;
+    let store = RedisCacheStore::new("app", conn.clone()).unwrap();
+
+    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
+    sentinel.drop_clients(6379).await;
+
+    assert!(store.remove(&key(1)).await.is_err(), "not sent again");
+    assert!(store.remove(&key(1)).await.unwrap());
+    assert_eq!(
+        format!("{conn:?}"),
+        "SentinelConnection { failovers: 0, .. }",
+        "Sentinel still names the same primary"
+    );
+}
+
+#[tokio::test]
 async fn primary_client_moves_to_the_new_primary_without_a_failed_command() {
     let Some(sentinel) = RedisSentinel::start().await else {
         return;
