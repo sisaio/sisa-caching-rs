@@ -16,7 +16,7 @@ use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     clock::{Clock, SystemClock},
     locker::Locker,
-    metrics::{Layer, METRICS},
+    metrics::{Layer, METRICS, Reads},
     settings::CacheSettings,
     worker::Worker,
 };
@@ -129,6 +129,7 @@ pub struct InMemoryCacheStore {
     entries: Arc<Entries>,
     locker: Arc<Locker>,
     worker: Worker,
+    reads: &'static Reads,
 }
 
 /// The name, the settings and how many entries it holds; never a value.
@@ -147,8 +148,11 @@ impl InMemoryCacheStore {
     /// A store named `name`, such as `app` or `tenant:eu`, on the system clock. Fails with
     /// [`CacheError::InvalidKey`] when the name is empty or has an empty level.
     pub fn new(name: &str) -> Result<Self, CacheError> {
+        let name = KeyPrefix::new(name)?;
+
         Ok(Self {
-            name: KeyPrefix::new(name)?,
+            reads: METRICS.reads(&name, Layer::Memory),
+            name,
             clock: Arc::new(SystemClock),
             settings: InMemoryCacheSettings::default(),
             entries: Arc::new(Entries::new(1)),
@@ -333,7 +337,7 @@ impl CacheStore for InMemoryCacheStore {
             });
 
         let Some(entry) = found else {
-            METRICS.read(&self.name, Layer::Memory, false);
+            self.reads.record(false);
 
             return Ok(None);
         };
@@ -341,7 +345,7 @@ impl CacheStore for InMemoryCacheStore {
         let value = entry.value.downcast_ref::<CV>().cloned();
 
         // A value of another type is a miss too: the caller gets none.
-        METRICS.read(&self.name, Layer::Memory, value.is_some());
+        self.reads.record(value.is_some());
 
         let value = value.ok_or(CacheError::type_mismatch(type_name::<CV>()))?;
 

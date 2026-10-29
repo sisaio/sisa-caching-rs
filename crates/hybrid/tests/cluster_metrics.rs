@@ -1,5 +1,5 @@
 //! `invalidations.delivered` on a cluster, where the backplane publishes with `SPUBLISH`. A test
-//! binary of its own, so its meter provider is installed before any store is used.
+//! binary of its own, so its meter provider is installed before any store is built.
 
 mod common;
 

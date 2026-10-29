@@ -28,8 +28,8 @@ pub fn key(id: u64) -> CacheKey {
 }
 
 /// Installs a meter provider, once, so the stores record their metrics as an application that
-/// exports them would. Its reader is never collected, so nothing is exported. Call it before the
-/// first store call: the stores' instruments come from the provider installed then.
+/// exports them would. Its reader is never collected, so nothing is exported. Call it before
+/// building the first store: the stores' instruments come from the provider installed then.
 pub fn meter_provider() {
     static PROVIDER: OnceLock<SdkMeterProvider> = OnceLock::new();
 

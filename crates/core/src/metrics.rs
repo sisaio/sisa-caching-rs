@@ -1,7 +1,8 @@
 //! The metrics the stores record, through the [OpenTelemetry](https://opentelemetry.io) metrics
 //! API under the meter `sisa-caching`. Nothing is recorded until the application installs an
-//! OpenTelemetry SDK meter provider, for example one that pushes over OTLP. Install it before the
-//! first cache call: the instruments are created then, from the provider installed at that time.
+//! OpenTelemetry SDK meter provider, for example one that pushes over OTLP. Install it before
+//! building the first store: the instruments are created then, from the provider installed at
+//! that time.
 //!
 //! | Metric | Type | What it counts |
 //! | --- | --- | --- |
@@ -36,7 +37,13 @@
 //! global::set_text_map_propagator(TraceContextPropagator::new());
 //! ```
 
-use std::{sync::LazyLock, time::Duration};
+use std::{
+    sync::{
+        LazyLock, Mutex,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use opentelemetry::{
     KeyValue, Value, global,
@@ -50,15 +57,26 @@ use crate::cache::KeyPrefix;
 pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
     let meter = global::meter("sisa-caching");
 
+    // An SDK update per read would cost more than the read, so the stores count their reads and
+    // these report the counts when the meter provider collects.
+    for (name, description, hits) in [
+        ("sisa.caching.hits", "Reads that found a live entry", true),
+        ("sisa.caching.misses", "Reads that returned no value", false),
+    ] {
+        meter
+            .u64_observable_counter(name)
+            .with_description(description)
+            .with_callback(move |observer| {
+                for reads in READS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+                    let count = if hits { &reads.hits } else { &reads.misses };
+
+                    observer.observe(count.sum(), &reads.attributes);
+                }
+            })
+            .build();
+    }
+
     CacheMetrics {
-        hits: meter
-            .u64_counter("sisa.caching.hits")
-            .with_description("Reads that found a live entry")
-            .build(),
-        misses: meter
-            .u64_counter("sisa.caching.misses")
-            .with_description("Reads that returned no value")
-            .build(),
         load_duration: meter
             .f64_histogram("sisa.caching.load.duration")
             .with_unit("s")
@@ -123,12 +141,69 @@ impl Layer {
     }
 }
 
+/// The read counts of every store layer, which the hit and miss counters report.
+static READS: Mutex<Vec<&'static Reads>> = Mutex::new(Vec::new());
+
+/// One store layer's hits and misses, with the attributes they are reported under.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Reads {
+    store: KeyPrefix,
+    layer: Layer,
+    attributes: [KeyValue; 2],
+    hits: Striped,
+    misses: Striped,
+}
+
+impl Reads {
+    /// Counts one read as a hit when it `found` a live entry, else as a miss, as is a value that
+    /// doesn't read as the requested type, since the caller gets none.
+    ///
+    /// Hits and misses count reads: `get_entry`, and `get` and `get_or_set` through it. A
+    /// `get_or_set` that has to load reads before and after taking its lock, so it counts two
+    /// misses; the count of the load duration is the number of loads.
+    pub fn record(&self, found: bool) {
+        if found { &self.hits } else { &self.misses }.add();
+    }
+}
+
+const STRIPES: usize = 16;
+
+/// A count split over `STRIPES` cache lines, so threads that count at once rarely share one.
+/// Each thread adds to the stripe it was given on its first count.
+#[derive(Debug, Default)]
+struct Striped([Stripe; STRIPES]);
+
+/// 128 bytes, as some CPUs fetch cache lines in pairs.
+#[derive(Debug, Default)]
+#[repr(align(128))]
+struct Stripe(AtomicU64);
+
+impl Striped {
+    fn add(&self) {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        thread_local! {
+            static STRIPE: usize = NEXT.fetch_add(1, Ordering::Relaxed) % STRIPES;
+        }
+
+        let stripe = STRIPE.with(|stripe| *stripe);
+
+        self.0[stripe].0.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn sum(&self) -> u64 {
+        self.0
+            .iter()
+            .map(|stripe| stripe.0.load(Ordering::Relaxed))
+            .sum()
+    }
+}
+
 /// The instruments, each recorded through one method so the attribute names are written once.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct CacheMetrics {
-    hits: Counter<u64>,
-    misses: Counter<u64>,
     load_duration: Histogram<f64>,
     errors: Counter<u64>,
     evictions: Counter<u64>,
@@ -141,22 +216,33 @@ pub struct CacheMetrics {
 }
 
 impl CacheMetrics {
-    /// Counts one read as a hit when it `found` a live entry, else as a miss, as is a value that
-    /// doesn't read as the requested type, since the caller gets none.
-    ///
-    /// Hits and misses count reads: `get_entry`, and `get` and `get_or_set` through it. A
-    /// `get_or_set` that has to load reads before and after taking its lock, so it counts two
-    /// misses; the count of the load duration is the number of loads.
-    pub fn read(&self, store: &KeyPrefix, layer: Layer, found: bool) {
-        let counter = if found { &self.hits } else { &self.misses };
+    /// The hit and miss counts of `store`'s `layer`, which a store takes when it is built. Stores
+    /// with the same name share them, as they share a series, and they are never freed, so a
+    /// rebuilt store's series counts on instead of starting over.
+    pub fn reads(&self, store: &KeyPrefix, layer: Layer) -> &'static Reads {
+        let mut all = READS.lock().unwrap_or_else(|e| e.into_inner());
 
-        counter.add(
-            1,
-            &[
+        if let Some(reads) = all
+            .iter()
+            .find(|reads| reads.store == *store && reads.layer == layer)
+        {
+            return reads;
+        }
+
+        let reads = Box::leak(Box::new(Reads {
+            store: store.clone(),
+            layer,
+            attributes: [
                 store_attribute(store),
                 KeyValue::new("layer", layer.as_str()),
             ],
-        );
+            hits: Striped::default(),
+            misses: Striped::default(),
+        }));
+
+        all.push(reads);
+
+        reads
     }
 
     /// Records how long one `get_or_set` loader ran, with `outcome` `ok` or `error`.

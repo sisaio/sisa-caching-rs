@@ -5,7 +5,7 @@ use sisa_caching_core::{
     cache::{CacheEntry, CacheStore, CacheValue, KeyPrefix},
     clock::Clock,
     locker::Locker,
-    metrics::{Layer, METRICS},
+    metrics::{Layer, METRICS, Reads},
     settings::CacheSettings,
     worker::Worker,
 };
@@ -51,6 +51,7 @@ pub struct HybridCacheStore<D: CacheStore + 'static> {
     worker_settings: BackplaneWorkerSettings,
     /// The backplane worker. It holds `state` but not this, so it doesn't keep itself running.
     worker: Worker,
+    reads: &'static Reads,
 }
 
 impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
@@ -61,6 +62,7 @@ impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
             backplane: Arc::clone(&self.backplane),
             worker_settings: self.worker_settings.clone(),
             worker: self.worker.clone(),
+            reads: self.reads,
         }
     }
 }
@@ -115,6 +117,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         }
 
         let backplane = backplane.for_store(local_store.name());
+        let reads = METRICS.reads(local_store.name(), Layer::Hybrid);
 
         Ok(Self {
             distributed_store: Arc::new(distributed_store),
@@ -122,6 +125,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
             backplane: Arc::new(backplane),
             worker_settings: BackplaneWorkerSettings::default(),
             worker: Worker::new(),
+            reads,
         })
     }
 
@@ -387,7 +391,7 @@ impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
                 entry
             }
         };
-        METRICS.read(self.name(), Layer::Hybrid, entry.is_some());
+        self.reads.record(entry.is_some());
 
         Ok(entry)
     }

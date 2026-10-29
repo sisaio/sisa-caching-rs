@@ -1,6 +1,6 @@
 //! The hit, miss and eviction counters a memory store records. A test binary of its own: the
-//! instruments are created on the first cache call, from the meter provider installed then, so
-//! this test must install its provider before any other test touches a store.
+//! instruments are created when the first store is built, from the meter provider installed then,
+//! so this test must install its provider before any other test builds a store.
 
 use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::metrics::{

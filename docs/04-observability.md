@@ -5,8 +5,10 @@ don't export anything themselves: install an OpenTelemetry SDK, for example with
 and a `tracing` subscriber with the `tracing-opentelemetry` layer. The
 [examples](../examples/users-api) set up all three signals.
 
-Install the meter provider before the first cache call. The stores create their instruments on
-that call, from the provider installed then, so a provider installed later never sees them.
+Install the meter provider before building the first store. The stores create their instruments
+then, from the provider installed at that time, so a provider installed later never sees them.
+Hits and misses are counted in the store and reported when the provider collects, so a read costs
+no more with a provider than without one.
 
 ## Metrics
 
