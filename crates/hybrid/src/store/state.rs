@@ -4,13 +4,13 @@ use std::{
     collections::BTreeSet,
     hash::{BuildHasher, RandomState},
     sync::{
-        Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
 
 use sisa_caching_core::{
-    cache::{CacheEntry, CacheStore, CacheValue},
+    cache::{CacheEntry, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -20,6 +20,8 @@ use tracing::Span;
 use crate::backplane::{Invalidation, NodeId};
 
 const GENERATION_SLOTS: usize = 64;
+/// Prefixes being removed at once, past which another prefix clears the local layer instead.
+const REMOVING_LIMIT: usize = 16;
 
 /// The local layer, the `get_or_set` lock, a generation number per slot of keys, and the sequence
 /// numbers of the store's invalidations. Every invalidation bumps the generations it covers before
@@ -38,6 +40,8 @@ pub(crate) struct State {
     /// Promotions share it; an invalidation takes it alone to bump generations.
     turns: RwLock<()>,
     local_reads_enabled: AtomicBool,
+    /// The prefixes whose copies the blocking pool is still removing.
+    removing: Arc<Removing>,
     /// Numbers this node's invalidations for its heartbeats.
     pub(crate) sequence: Sequence,
 }
@@ -53,6 +57,7 @@ impl State {
             generations: std::array::from_fn(|_| AtomicU64::default()),
             hasher: RandomState::new(),
             turns: RwLock::new(()),
+            removing: Arc::default(),
             sequence: Sequence::default(),
         }
     }
@@ -69,11 +74,12 @@ impl State {
         self.local_reads_enabled.store(false, Ordering::SeqCst);
     }
 
-    /// The key's generation, and its local copy when local reads are on.
+    /// The key's generation, and its local copy when local reads are on and no prefix being
+    /// removed covers it.
     pub(crate) async fn read<CV: CacheValue>(&self, key: &str) -> (u64, Option<CacheEntry<CV>>) {
         let generation = self.generation(key).load(Ordering::SeqCst);
 
-        if !self.local_reads_enabled() {
+        if !self.local_reads_enabled() || self.removing.covers(key) {
             return (generation, None);
         }
 
@@ -115,19 +121,27 @@ impl State {
     }
 
     /// Applies another node's invalidation. A prefix's copies are removed on the blocking pool, as
-    /// that walks every local entry, so the worker goes on receiving meanwhile. The bump comes
-    /// first, so no stale copy lands after it, and the walk removes the ones from before.
+    /// that walks every local entry, so the worker goes on receiving meanwhile. Its keys read as
+    /// misses until the walk is done, the bump keeps a stale copy from landing after it, and the
+    /// walk removes the ones from before. With `REMOVING_LIMIT` walks already queued, the prefix
+    /// clears the local layer instead, which takes no walk.
     pub(crate) async fn apply(&self, invalidation: &Invalidation) {
         let Invalidation::Prefix(prefix) = invalidation else {
             return self.invalidate(invalidation).await;
         };
+
+        if !self.removing.add(prefix) {
+            return self.invalidate(&Invalidation::Clear).await;
+        }
+
         let (local, prefix, span) = (self.local_store.clone(), prefix.clone(), Span::current());
-        let runtime = Handle::current();
+        let (removing, runtime) = (Arc::clone(&self.removing), Handle::current());
 
         self.bump(invalidation).await;
         // The memory store never waits, so `block_on` returns when the walk does.
         tokio::task::spawn_blocking(move || {
-            span.in_scope(|| _ = runtime.block_on(local.remove_prefix(prefix.as_str())))
+            span.in_scope(|| _ = runtime.block_on(local.remove_prefix(prefix.as_str())));
+            removing.done(&prefix);
         });
     }
 
@@ -157,6 +171,49 @@ impl State {
         self.local_reads_enabled.store(false, Ordering::SeqCst);
         self.invalidate(&Invalidation::Clear).await;
         self.local_reads_enabled.store(connected, Ordering::SeqCst);
+    }
+}
+
+/// The prefixes whose local copies are being removed. A walk that never finishes, as when the
+/// runtime shuts down, leaves its keys reading as misses, which is safe.
+#[derive(Default)]
+struct Removing {
+    /// How many prefixes there are, so a read checks the list only while one is being removed.
+    count: AtomicUsize,
+    prefixes: Mutex<Vec<KeyPrefix>>,
+}
+
+impl Removing {
+    fn prefixes(&self) -> MutexGuard<'_, Vec<KeyPrefix>> {
+        self.prefixes.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn covers(&self, key: &str) -> bool {
+        self.count.load(Ordering::SeqCst) > 0
+            && self.prefixes().iter().any(|prefix| prefix.matches(key))
+    }
+
+    /// Adds `prefix`, unless `REMOVING_LIMIT` prefixes are already being removed.
+    fn add(&self, prefix: &KeyPrefix) -> bool {
+        let mut prefixes = self.prefixes();
+
+        if prefixes.len() >= REMOVING_LIMIT {
+            return false;
+        }
+
+        prefixes.push(prefix.clone());
+        self.count.fetch_add(1, Ordering::SeqCst);
+
+        true
+    }
+
+    fn done(&self, prefix: &KeyPrefix) {
+        let mut prefixes = self.prefixes();
+
+        if let Some(index) = prefixes.iter().position(|removing| removing == prefix) {
+            prefixes.swap_remove(index);
+            self.count.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -225,7 +282,10 @@ mod tests {
         cache::KeyPrefix,
         clock::{Clock, SystemClock},
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
     use tokio::sync::oneshot;
 
     async fn state() -> State {
@@ -284,6 +344,97 @@ mod tests {
         state.resync(true).await;
 
         assert!(state.read::<String>(&key()).await.1.is_none());
+    }
+
+    async fn promote(state: &State, key: &str) {
+        let (seen, _) = state.read::<String>(key).await;
+
+        state.promote(key, seen, entry(state, key)).await;
+    }
+
+    async fn local(state: &State, key: &str) -> Option<String> {
+        state.read::<String>(key).await.1.map(|entry| entry.value)
+    }
+
+    /// A runtime whose one blocking thread waits until the returned sender drops.
+    fn busy_blocking_pool() -> (tokio::runtime::Runtime, std::sync::mpsc::Sender<()>) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+
+        drop(runtime.spawn_blocking(move || wait.recv()));
+
+        (runtime, release)
+    }
+
+    #[test]
+    fn a_prefix_hides_its_copies_until_the_walk_removes_them() {
+        let (runtime, release) = busy_blocking_pool();
+
+        runtime.block_on(async {
+            let state = state().await;
+            let keys = ["user:1", "user:2:a", "users:1", "order:1"];
+
+            for key in keys {
+                promote(&state, key).await;
+            }
+
+            state
+                .apply(&Invalidation::Prefix(KeyPrefix::new("user").unwrap()))
+                .await;
+
+            // The walk hasn't run, but the prefix's keys already read as misses.
+            assert_eq!(local(&state, "user:1").await, None);
+            assert_eq!(local(&state, "user:2:a").await, None);
+            assert_eq!(local(&state, "users:1").await.as_deref(), Some("users:1"));
+            assert_eq!(local(&state, "order:1").await.as_deref(), Some("order:1"));
+
+            drop(release);
+
+            while state.removing.count.load(Ordering::SeqCst) > 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+
+            let removed = state.local_store.get::<String>("user:1").await.unwrap();
+
+            assert_eq!(removed, None);
+            assert_eq!(local(&state, "order:1").await.as_deref(), Some("order:1"));
+
+            // Once removed, the prefix's keys are copied again.
+            promote(&state, "user:1").await;
+
+            assert_eq!(local(&state, "user:1").await.as_deref(), Some("user:1"));
+        });
+    }
+
+    #[test]
+    fn a_prefix_past_the_queued_walks_clears_the_local_layer() {
+        let (runtime, release) = busy_blocking_pool();
+
+        runtime.block_on(async {
+            let state = state().await;
+
+            promote(&state, "order:1").await;
+
+            for n in 0..REMOVING_LIMIT {
+                let prefix = KeyPrefix::new(format!("p{n}")).unwrap();
+
+                state.apply(&Invalidation::Prefix(prefix)).await;
+            }
+
+            assert_eq!(local(&state, "order:1").await.as_deref(), Some("order:1"));
+
+            state
+                .apply(&Invalidation::Prefix(KeyPrefix::new("user").unwrap()))
+                .await;
+
+            assert_eq!(local(&state, "order:1").await, None);
+
+            drop(release);
+        });
     }
 
     #[test]
