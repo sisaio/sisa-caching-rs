@@ -178,24 +178,36 @@ where
         loaded
     };
 
-    let read = store.get_entry::<CV>(key).await;
+    // Reads the key, and records a failed read.
+    let read = || async {
+        let read = store.get_entry::<CV>(key).await;
 
-    record(store, "get", &locker.reads_failing, &read);
-
-    if let Ok(Some(entry)) = read {
-        let due = settings
+        record(store, "get", &locker.reads_failing, &read);
+        read
+    };
+    let due = |entry: &CacheEntry<CV>| {
+        settings
             .refresh_threshold()
-            .is_some_and(|share| entry.is_refresh_due(clock.now(), share));
+            .is_some_and(|share| entry.is_refresh_due(clock.now(), share))
+    };
 
+    if let Ok(Some(entry)) = read().await {
         // One caller refreshes; the rest are served the cached value meanwhile.
-        let Some(_guard) = due.then(|| locker.try_lock(&full_key())).flatten() else {
+        let Some(_guard) = due(&entry).then(|| locker.try_lock(&full_key())).flatten() else {
             return Ok(entry.value);
         };
+
+        // Another caller may have refreshed it between this one's read and its lock.
+        if let Ok(Some(entry)) = read().await
+            && !due(&entry)
+        {
+            return Ok(entry.value);
+        }
 
         return match load().await {
             // The cached value only while the store still holds it: the load may have outlasted
             // its TTL or the store's own cap, or a write may have removed it.
-            Err(error) => match store.get_entry::<CV>(key).await {
+            Err(error) => match read().await {
                 Ok(Some(entry)) => {
                     tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
 
@@ -220,14 +232,10 @@ where
         None => Some(locker.lock(&full_key()).await),
     };
 
-    // Another caller may have stored the value while this one waited.
-    let read = store.get_entry::<CV>(key).await;
-
-    record(store, "get", &locker.reads_failing, &read);
-
-    // On a value of another type, data that doesn't decode, or a store that can't be reached, the
-    // loaded value is stored over whatever is there.
-    match read {
+    // Another caller may have stored the value while this one waited. On a value of another type,
+    // data that doesn't decode, or a store that can't be reached, the loaded value is stored over
+    // whatever is there.
+    match read().await {
         Ok(Some(entry)) => Ok(entry.value),
         _ => load().await,
     }

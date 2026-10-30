@@ -24,10 +24,15 @@ sequenceDiagram
         alt another caller is refreshing
             Store-->>App: cached value
         else got the lock
-            Store->>Loader: load()
-            Loader-->>Store: new value, or an error
-            Store->>Store: set(key, new value)
-            Store-->>App: new value, or on an error the cached one while the store still holds it
+            Store->>Store: get_entry(key) again
+            alt another caller refreshed it meanwhile
+                Store-->>App: that value
+            else still due, missing, or unreadable
+                Store->>Loader: load()
+                Loader-->>Store: new value, or an error
+                Store->>Store: set(key, new value)
+                Store-->>App: new value, or on an error the cached one if the store still holds it
+            end
         end
     else missing
         Store->>Lock: lock(key), waiting up to lock_timeout_ms

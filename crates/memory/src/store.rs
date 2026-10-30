@@ -1397,6 +1397,72 @@ mod tests {
         assert_eq!(loaded, Err("down"));
     }
 
+    type Hook = Box<dyn FnOnce() + Send>;
+
+    /// A manual clock that runs a hook once, the next time a store reads the wall-clock time.
+    #[derive(Clone)]
+    struct HookClock(ManualClock, Arc<Mutex<Option<Hook>>>);
+
+    impl Clock for HookClock {
+        fn now(&self) -> std::time::SystemTime {
+            let hook = self.1.lock().unwrap().take();
+
+            if let Some(hook) = hook {
+                hook();
+            }
+
+            self.0.now()
+        }
+
+        fn instant(&self) -> Instant {
+            self.0.instant()
+        }
+    }
+
+    #[tokio::test]
+    async fn get_or_set_skips_a_refresh_another_caller_made_since_its_read() {
+        let clock = HookClock(ManualClock::new(), Arc::default());
+        let store = InMemoryCacheStore::new("app")
+            .unwrap()
+            .with_clock(clock.clone())
+            .with_settings(InMemoryCacheSettings {
+                common: CacheSettings {
+                    ttl_secs: Some(10),
+                    refresh_threshold: Some(0.5),
+                    ..CacheSettings::default()
+                },
+                ..InMemoryCacheSettings::default()
+            })
+            .unwrap();
+        let loads = Arc::new(AtomicUsize::new(0));
+        let load = {
+            let loads = Arc::clone(&loads);
+
+            move || {
+                loads.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<_, Infallible>("new".to_owned()) }
+            }
+        };
+
+        store.set(&key(1), "old".to_owned(), None).await.unwrap();
+        clock.0.advance(secs(6));
+
+        // `get_or_set` reads the time once it has read the entry, before it takes the lock:
+        // another caller refreshes the key right then.
+        let (other, refresh) = (store.clone(), load.clone());
+
+        *clock.1.lock().unwrap() = Some(Box::new(move || {
+            let refreshed = other.get_or_set(&key(1), refresh, None).now_or_never();
+
+            assert_eq!(refreshed.unwrap().as_deref(), Ok("new"));
+        }));
+
+        let loaded = store.get_or_set(&key(1), load, None).await;
+
+        assert_eq!(loaded.as_deref(), Ok("new"));
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+    }
+
     /// Calls its store from `clone` and `drop`, as a value holding a handle to its own cache
     /// might. A store that cloned or freed values under its lock would deadlock on it.
     #[derive(Serialize, Deserialize)]
