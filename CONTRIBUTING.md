@@ -44,13 +44,14 @@ REDIS_IMAGE=ghcr.io/dragonflydb/dragonfly:v2.0.2 cargo test --workspace --all-fe
 REDIS_IMAGE=ghcr.io/microsoft/garnet:2 cargo test --workspace --all-features
 ```
 
-A soak test, ignored by `cargo test`, runs four hybrid nodes under load while the server restarts
-and freezes, a node is cut off or crashes, and subscriptions drop, and fails on any read staler than
-[Guarantees and limits](docs/01-architecture.md#guarantees-and-limits) allow. The `soak` workflow runs it nightly for ten
-minutes on Redis 8 and Valkey 8. `SOAK_SECS` sets how long the faults go on, 90 s by default:
+A chaos test, ignored by `cargo test`, runs four hybrid nodes under load while the server restarts
+and freezes, a node is cut off or crashes, and subscriptions drop, and fails on any read staler
+than [Guarantees and limits](docs/01-architecture.md#guarantees-and-limits) allow. The `chaos`
+workflow runs it nightly for ten minutes on Redis 8 and Valkey 8. `CHAOS_SECS` sets how long the
+faults go on, 90 s by default:
 
 ```sh
-cargo test -p sisa-caching-hybrid --all-features --test soak -- --ignored --nocapture
+cargo test -p sisa-caching-hybrid --all-features --test chaos -- --ignored --nocapture
 ```
 
 Coverage comes from [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov); CI measures it on

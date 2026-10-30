@@ -1,7 +1,7 @@
-# The hybrid soak test: several nodes under load for ten minutes while the server restarts and
+# The hybrid chaos test: several nodes under load for ten minutes while the server restarts and
 # freezes, a node is cut off or crashes, and subscriptions drop, failing on any read staler than
 # the docs allow. Nightly and by hand, outside `ci`: it runs for minutes.
-name: soak
+name: chaos
 
 on:
   schedule:
@@ -20,8 +20,8 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  soak:
-    name: soak (${{ matrix.server }})
+  chaos:
+    name: chaos (${{ matrix.server }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -32,7 +32,7 @@ jobs:
           - valkey/valkey:8-alpine
     env:
       REDIS_IMAGE: ${{ matrix.server }}
-      SOAK_SECS: ${{ inputs.seconds || '600' }}
+      CHAOS_SECS: ${{ inputs.seconds || '600' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,5 +48,5 @@ jobs:
       - name: Pull the server image
         run: docker pull "$REDIS_IMAGE"
 
-      - name: Run the soak test
-        run: cargo test -p sisa-caching-hybrid --all-features --locked --test soak -- --ignored --nocapture
+      - name: Run the chaos test
+        run: cargo test -p sisa-caching-hybrid --all-features --locked --test chaos -- --ignored --nocapture
