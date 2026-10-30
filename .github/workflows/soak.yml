@@ -1,0 +1,52 @@
+# The hybrid soak test: several nodes under load for ten minutes while the server restarts and
+# freezes, a node is cut off or crashes, and subscriptions drop, failing on any read staler than
+# the docs allow. Nightly and by hand, outside `ci`: it runs for minutes.
+name: soak
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: How long the faults go on
+        default: "600"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  soak:
+    name: soak (${{ matrix.server }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        server:
+          - redis:8-alpine
+          - valkey/valkey:8-alpine
+    env:
+      REDIS_IMAGE: ${{ matrix.server }}
+      SOAK_SECS: ${{ inputs.seconds || '600' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      - name: Run the soak test
+        run: cargo test -p sisa-caching-hybrid --all-features --locked --test soak -- --ignored --nocapture
