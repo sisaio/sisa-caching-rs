@@ -6,6 +6,9 @@
 //! cargo run -p sisa-caching-benches --bin summary
 //! ```
 //!
+//! It lists every result under `target/criterion`, so remove that folder first where benchmarks
+//! ran before: one renamed since would show with its old result.
+//!
 //! Given a release, such as `v0.1.0`, it compares that release with this code instead, run on the
 //! same machine and saved as the Criterion baselines `previous` and `current`:
 //!
