@@ -85,6 +85,7 @@ impl<CV> CacheEntry<CV> {
 
     /// Whether `threshold` of the TTL, such as `0.8`, has passed since creation. An entry without a
     /// TTL is never due.
+    #[doc(hidden)]
     pub fn is_refresh_due(&self, now: SystemTime, threshold: f64) -> bool {
         self.ttl
             .and_then(|ttl| Duration::try_from_secs_f64(ttl.as_secs_f64() * threshold).ok())

@@ -55,7 +55,10 @@ use crate::{
 ///     Ok(User { id, name: "Ada".to_string() })
 /// }
 /// ```
-pub trait CacheStore: Send + Sync {
+///
+/// Only the memory, Redis and hybrid stores implement it, so a later release can add a method
+/// without breaking code that uses a store.
+pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     /// What the store's calls fail with. Every [`CacheError`] converts into it.
     type Error: From<CacheError> + std::error::Error + Send + Sync + 'static;
 
@@ -67,7 +70,8 @@ pub trait CacheStore: Send + Sync {
     fn cache_settings(&self) -> &CacheSettings;
 
     /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are
-    /// failing. A store holds one [`Locker::default()`] and returns it here.
+    /// failing. A store holds one `Locker::default()` and returns it here.
+    #[doc(hidden)]
     fn locker(&self) -> &Locker;
 
     /// Where `set` and `get_or_set` read the time.

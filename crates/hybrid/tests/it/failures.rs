@@ -33,6 +33,8 @@ enum LostReply {
     Cache(#[from] CacheError),
 }
 
+impl sisa_caching_core::sealed::Sealed for LostReplies {}
+
 impl CacheStore for LostReplies {
     type Error = LostReply;
 
@@ -180,6 +182,8 @@ impl GatedStore {
         result
     }
 }
+
+impl sisa_caching_core::sealed::Sealed for GatedStore {}
 
 impl CacheStore for GatedStore {
     type Error = CacheError;

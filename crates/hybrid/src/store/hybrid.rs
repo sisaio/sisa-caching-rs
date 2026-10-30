@@ -184,12 +184,14 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 
     /// The local layer, for inspection. Writing through it skips the distributed store and the
     /// backplane.
+    #[doc(hidden)]
     pub fn local_store(&self) -> &InMemoryCacheStore {
         &self.state.local_store
     }
 
     /// The distributed layer, for inspection. Writing through it skips the local layer and the
     /// backplane, so other nodes keep their copies.
+    #[doc(hidden)]
     pub fn distributed_store(&self) -> &D {
         &self.distributed_store
     }
@@ -385,6 +387,8 @@ impl RedisHybridCacheStore {
         Ok(store)
     }
 }
+
+impl<D: CacheStore + 'static> sisa_caching_core::sealed::Sealed for HybridCacheStore<D> {}
 
 impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
     type Error = HybridCacheError;

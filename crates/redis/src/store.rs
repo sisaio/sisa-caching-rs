@@ -202,6 +202,8 @@ impl RedisCacheStore {
     }
 }
 
+impl<Conn: RedisConnection> sisa_caching_core::sealed::Sealed for RedisCacheStore<Conn> {}
+
 impl<Conn> CacheStore for RedisCacheStore<Conn>
 where
     Conn: RedisConnection,
