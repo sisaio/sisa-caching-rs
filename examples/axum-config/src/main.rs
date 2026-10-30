@@ -27,6 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
+    // A hybrid store is kept, to shut it down once serving ends.
+    let mut hybrid = None;
     let app = match std::env::var("CACHE").as_deref().unwrap_or("memory") {
         "memory" => users_api::router(InMemoryCacheStore::new("example")?.with_settings(
             InMemoryCacheSettings {
@@ -51,13 +53,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             };
 
-            users_api::router(HybridCacheStore::connect("example", url, &settings).await?)
+            let cache = HybridCacheStore::connect("example", url, &settings).await?;
+
+            hybrid = Some(cache.clone());
+            users_api::router(cache)
         }
         other => return Err(format!("CACHE is memory, redis or hybrid, not {other}").into()),
     };
 
     let served = users_api::serve(app).await;
 
+    // Tells the other instances this one is gone, so they keep their local copies.
+    if let Some(cache) = hybrid {
+        cache.shutdown().await;
+    }
     telemetry.shutdown();
 
     Ok(served?)
