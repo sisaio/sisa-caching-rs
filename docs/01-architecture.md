@@ -242,7 +242,7 @@ publishes on the same channel:
 | `v` | Yes | The format version, `1` |
 | `source` | Yes | An id unique to the writing process; nodes skip their own messages |
 | `store` | Yes | The store name, such as `app` |
-| `seq` | No | On an invalidation, its number in the writer's sequence, from 1 up; on a heartbeat, the number up to which the writer has finished publishing |
+| `seq` | No | On an invalidation, its number in the writer's sequence, from 1 up; on a heartbeat, the number up to which the writer has finished publishing; on `stopping`, the last number it handed out |
 | `kind` | Yes | `key`, `prefix`, `clear`, `heartbeat`, or `stopping` |
 | `target` | For `key` and `prefix` | The key or prefix, without the store name |
 | `trace` | No | Trace propagation fields, such as `traceparent` |
@@ -264,9 +264,10 @@ came before the subscribe, so the writer's first heartbeat clears the local laye
 number up to it arrived: after each subscribe, a node clears once more for every writer that
 published before, which covers an invalidation lost in between, as during a failover.
 
-`HybridCacheStore::shutdown` stops the store's heartbeats, waits up to two seconds for the
-invalidations still being published, then publishes `stopping`: a last heartbeat, which the other
-nodes check like any other and then forget the writer, instead of clearing their local layers
+`HybridCacheStore::shutdown` stops the store's heartbeats and waits up to two seconds for the
+writes still running, even those whose caller gave up, to publish their invalidations. Then it
+publishes `stopping`: a last heartbeat that counts every number the writer handed out, which the
+other nodes check like any other and then forget the writer, instead of clearing their local layers
 `heartbeat_timeout_ms` later. No heartbeat follows it. Only then does it stop the store's worker.
 
 A service in another language that writes to Redis publishes the matching message after each
@@ -283,7 +284,7 @@ stays subscribed.
 | **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `None`, or a local store built without those settings, the bound is the entry's own TTL. |
 | **Guaranteed** | Once the worker notices the backplane is down (a failed read or ping, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
-| **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default). They also clear when a process stops without calling `shutdown`, so a rolling deploy that skips it clears every node's local layer once for each node it replaces. |
+| **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer at its `stopping` message, or once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default) when it sent none. They also clear when a process stops without calling `shutdown`, so a rolling deploy that skips it clears every node's local layer once for each node it replaces. |
 | **Not guaranteed** | Delivery is at most once: pub/sub drops messages to a node that is reconnecting. The clear on resubscribe covers the gap. |
 | **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by `max_ttl_secs`. |
 | **Not guaranteed** | An invalidation lost just before its writer stops for good is bounded only by `max_ttl_secs` on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. |
@@ -337,7 +338,7 @@ on a read as another type.
 | Every publish of a write fails | Hybrid | The write returns `Ok`. Other nodes see the missing number at the writer's next heartbeat and clear their local layers | About 1 s | `publish.failures` on the writer, `local.clears` with `gap` on the others |
 | A writer can't publish for over 5 s | Hybrid | Other nodes clear when its heartbeats stop, and again at its first heartbeat after | Up to the writer's first heartbeat after | `local.clears` with `peer_lost`, then `gap` |
 | A numbered message lost, subscription up | Hybrid | Nodes clear at the writer's next heartbeat | About 1 s | `local.clears` with `gap` |
-| A writer stops between the server write and the publish, or without `shutdown` | Hybrid | Other nodes clear when its heartbeats have stopped for 5 s | About 6 s | `local.clears` with `peer_lost` |
+| A writer stops between the server write and the publish, or without `shutdown` | Hybrid | Other nodes clear when its heartbeats have stopped for 5 s, or at its `stopping` message when `shutdown` gave up waiting for the write | About 6 s, or 2 s after `shutdown` | `local.clears` with `peer_lost`, or `gap` at a stop |
 | A write fails or panics at the server, or its caller gives up | Hybrid | The local copy is evicted and the invalidation published anyway, since the server may have applied the write. A write with invalid options fails before it starts and changes nothing. A panic returns `HybridCacheError::WriteStopped` | None | The returned error |
 | Failover with async replication | Redis, hybrid | A write acknowledged just before it can be lost, and the new primary serves the older value until it expires. Behind Sentinel, hybrid nodes resubscribe on the new primary and clear | Redis: the entry's TTL. Hybrid: 60 s | `local.clears` with `resubscribed` |
 | A message nodes can't read, or an unknown `v` | Hybrid | Every node clears its local layer, warns, and stays subscribed | None | `backplane.unreadable`, `local.clears` with `unreadable` |
