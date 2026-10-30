@@ -113,7 +113,11 @@ impl CacheKey {
     /// Fails with [`CacheError::InvalidKey`] when `prefix` is empty or has an empty level, or `key`
     /// is empty or holds `:`.
     pub fn new(prefix: &str, key: impl fmt::Display) -> Result<Self> {
-        let key = key.to_string();
+        KeyPrefix::validate(prefix)?;
+
+        // Formatted once, then checked: the key is what follows the prefix and its `:`.
+        let full = format!("{prefix}{KEY_SEPARATOR}{key}");
+        let key = &full[prefix.len() + KEY_SEPARATOR.len_utf8()..];
 
         if key.is_empty() || key.contains(KEY_SEPARATOR) {
             return Err(CacheError::InvalidKey(format!(
@@ -121,9 +125,7 @@ impl CacheKey {
             )));
         }
 
-        KeyPrefix::validate(prefix)?;
-
-        Ok(Self(format!("{prefix}{KEY_SEPARATOR}{key}")))
+        Ok(Self(full))
     }
 }
 
