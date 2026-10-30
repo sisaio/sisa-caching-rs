@@ -15,6 +15,7 @@ impl CacheOptions {
         Self { ttl: Some(ttl) }
     }
 
+    /// This write's TTL, or `None` to use the store's default.
     pub fn ttl(&self) -> Option<Duration> {
         self.ttl
     }

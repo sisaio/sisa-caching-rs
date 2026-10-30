@@ -118,6 +118,37 @@ impl RedisBackplane {
     /// on a server that is no longer the primary ends, so the node subscribes again on the new
     /// one. Redis Sentinel closes client connections on a failover itself, but Dragonfly refuses
     /// the command it uses (`CLIENT KILL TYPE`).
+    ///
+    /// Give the store and the backplane one connection, so a write that finds the old primary
+    /// demoted moves both:
+    ///
+    /// ```no_run
+    /// use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore, RedisBackplane};
+    /// use sisa_caching_memory::InMemoryCacheStore;
+    /// use sisa_caching_redis::{
+    ///     RedisCacheStore, SentinelConnection,
+    ///     redis::sentinel::{SentinelClient, SentinelServerType},
+    /// };
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let settings = HybridCacheSettings::default();
+    /// let sentinel = SentinelClient::build(
+    ///     vec!["redis://10.0.0.1:26379", "redis://10.0.0.2:26379"],
+    ///     String::from("mymaster"),
+    ///     None,
+    ///     SentinelServerType::Master,
+    /// )?;
+    /// let conn = SentinelConnection::connect(sentinel).await?;
+    ///
+    /// let cache = HybridCacheStore::new(
+    ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
+    ///     RedisCacheStore::new("app", conn.clone())?.with_settings(settings.distributed)?,
+    ///     RedisBackplane::sentinel(conn, settings.backplane),
+    /// )?
+    /// .with_worker_settings(settings.worker)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn sentinel(sentinel: SentinelConnection, settings: RedisBackplaneSettings) -> Self {
         Self {
             server: Server::Sentinel(sentinel),

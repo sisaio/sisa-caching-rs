@@ -24,6 +24,7 @@ pub enum RedisCacheError {
     Json(#[from] serde_json::Error),
 }
 
+/// A `Result` whose error is a [`RedisCacheError`].
 pub type Result<T> = std::result::Result<T, RedisCacheError>;
 
 /// What went wrong with the JSON, without quoting it.

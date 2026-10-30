@@ -34,8 +34,8 @@ const MAX_TTL_MS: u64 = i64::MAX as u64 / 2;
 type StoredFields = (Option<Vec<u8>>, Option<u64>, Option<u64>);
 
 /// A store on a Redis-family server. One store holds values of every type as JSON; `get::<User>`
-/// and `set(&key, user, None)` name the type per call. Reads deserialize JSON into the requested
-/// type; compatible data can be shared across languages without runtime type names in Redis.
+/// and `set(&key, user, None)` name the type per call. Reads decode the JSON into the type you
+/// name, and nothing in Redis records a Rust type, so other languages can share the keys.
 ///
 /// Connect it to a single server with a `ConnectionManager`, to a Redis Cluster with a
 /// `ClusterConnection`, or behind Sentinel with a
@@ -71,6 +71,19 @@ where
     /// A store named `name`, such as `app` or `tenant:eu`, on `conn`. Fails with
     /// [`CacheError::InvalidKey`] when the name is empty or has an empty level. A
     /// `ConnectionManager` reconnects after a lost connection.
+    ///
+    /// On a Redis Cluster, give it a cluster connection. The client finds the other nodes from the
+    /// one it is given:
+    ///
+    /// ```no_run
+    /// use sisa_caching_redis::{RedisCacheStore, redis::cluster::ClusterClient};
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClusterClient::new(vec!["redis://10.0.0.1:6379"])?;
+    /// let cache = RedisCacheStore::new("app", client.get_async_connection().await?)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(name: &str, conn: Conn) -> Result<Self, CacheError> {
         let name = KeyPrefix::new(name)?;
 
@@ -83,8 +96,8 @@ where
         })
     }
 
-    /// Fails when a setting is out of range, such as a TTL over 365 days, so a bad value stops
-    /// setup instead of a later write.
+    /// Replaces the store's settings. Fails when one is out of range, such as a TTL over 365
+    /// days, so a bad value stops setup instead of a later write.
     pub fn with_settings(mut self, settings: RedisCacheSettings) -> Result<Self, CacheError> {
         settings.validate()?;
         self.settings = settings;
@@ -92,6 +105,7 @@ where
         Ok(self)
     }
 
+    /// The settings the store runs with.
     pub fn settings(&self) -> &RedisCacheSettings {
         &self.settings
     }

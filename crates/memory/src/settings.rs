@@ -100,14 +100,17 @@ impl InMemoryCacheSettings {
         Ok(())
     }
 
+    /// `purge_interval_secs` as a `Duration`, or `None` when the store doesn't purge by itself.
     pub fn purge_interval(&self) -> Option<Duration> {
         self.purge_interval_secs.map(Duration::from_secs)
     }
 
+    /// How many maps `shards` asks for: 1 for `None`.
     pub fn shards(&self) -> usize {
         self.shards.unwrap_or(1)
     }
 
+    /// `max_ttl_secs` as a `Duration`, or `None` when the store keeps each entry for its whole TTL.
     pub fn max_ttl(&self) -> Option<Duration> {
         self.max_ttl_secs.map(Duration::from_secs)
     }

@@ -18,7 +18,9 @@ pub enum HybridCacheError {
     #[error("local store `{local}` and distributed store `{distributed}` must have the same name")]
     #[non_exhaustive]
     StoreNameMismatch {
+        /// The local store's name.
         local: KeyPrefix,
+        /// The distributed store's name.
         distributed: KeyPrefix,
     },
 
@@ -51,4 +53,5 @@ impl HybridCacheError {
     }
 }
 
+/// A `Result` whose error is a [`HybridCacheError`].
 pub type Result<T> = std::result::Result<T, HybridCacheError>;

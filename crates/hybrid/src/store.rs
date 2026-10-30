@@ -1,4 +1,4 @@
-//! A hybrid composes a configured local store, distributed store, and backplane.
+//! The hybrid store.
 
 mod hybrid;
 pub(crate) mod state;

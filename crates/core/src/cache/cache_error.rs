@@ -7,18 +7,26 @@ pub enum CacheError {
     #[error("invalid cache key: {0}")]
     InvalidKey(String),
 
-    /// A typed in-memory value was stored as another Rust type than the one requested, such as
-    /// `get::<User>` on a key that `set` filled with an `Order`. Encoded stores validate their
-    /// serialized data through the codec instead.
+    /// The memory store has a value of another Rust type under the key, such as `get::<User>` on
+    /// a key that `set` filled with an `Order`. The Redis store reports JSON that doesn't fit the
+    /// type as its own JSON error instead.
     #[error("cached value is not a `{expected}`")]
     #[non_exhaustive]
-    TypeMismatch { expected: &'static str },
+    TypeMismatch {
+        /// The requested type's name.
+        expected: &'static str,
+    },
 
     /// A setting or a write's `ttl` is out of range, such as a TTL over
     /// [`MAX_TTL_SECS`](crate::settings::MAX_TTL_SECS) or a `refresh_threshold` of `80`.
     #[error("`{field}` {reason}")]
     #[non_exhaustive]
-    InvalidSettings { field: &'static str, reason: String },
+    InvalidSettings {
+        /// The setting, such as `ttl_secs`, or `ttl` for a write's options.
+        field: &'static str,
+        /// What is wrong with its value.
+        reason: String,
+    },
 }
 
 impl CacheError {
@@ -47,4 +55,5 @@ impl CacheError {
     }
 }
 
+/// A `Result` whose error is a [`CacheError`].
 pub type Result<T> = std::result::Result<T, CacheError>;

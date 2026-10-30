@@ -31,6 +31,7 @@ impl KeyPrefix {
         Ok(Self(prefix))
     }
 
+    /// The prefix as given, such as `tenant:user`.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -60,12 +61,12 @@ impl KeyPrefix {
             .is_some_and(|rest| rest.starts_with(KEY_SEPARATOR))
     }
 
-    /// The backend key for `key` in the store named `self`.
+    /// The key the store named `self` writes for `key`: `app::user:42` for `user:42` in `app`.
     pub fn format_key(&self, key: &str) -> String {
         format!("{self}{NAME_SEPARATOR}{key}")
     }
 
-    /// The start shared by every backend key in the store named `self`.
+    /// The start of every key the store named `self` writes: `app::` for `app`.
     pub fn format_scope(&self) -> String {
         format!("{self}{NAME_SEPARATOR}")
     }

@@ -21,7 +21,40 @@ use crate::{
 ///
 /// Since each call names its value type, the trait can't be used as `dyn CacheStore`. To pick a
 /// store at startup, such as memory in development and the hybrid in production, write the code
-/// that uses the cache generic over `C: CacheStore`, or wrap the stores you use in an enum.
+/// that uses the cache generic over `C: CacheStore`, or wrap the stores you use in an enum:
+///
+/// ```
+/// use serde::{Deserialize, Serialize};
+/// use sisa_caching_core::CacheStore;
+///
+/// // What a cached value needs: `Clone`, and serde's two derives.
+/// #[derive(Clone, Serialize, Deserialize)]
+/// struct User {
+///     id: u64,
+///     name: String,
+/// }
+///
+/// // The same code runs on the memory, Redis and hybrid stores.
+/// struct Users<C> {
+///     cache: C,
+/// }
+///
+/// impl<C: CacheStore> Users<C> {
+///     async fn get(&self, id: u64) -> Result<User, std::io::Error> {
+///         self.cache
+///             .get_or_set(&format!("user:v1:{id}"), || load_user(id), None)
+///             .await
+///     }
+///
+///     async fn forget(&self, id: u64) -> Result<bool, C::Error> {
+///         self.cache.remove(&format!("user:v1:{id}")).await
+///     }
+/// }
+///
+/// async fn load_user(id: u64) -> Result<User, std::io::Error> {
+///     Ok(User { id, name: "Ada".to_string() })
+/// }
+/// ```
 pub trait CacheStore: Send + Sync {
     /// What the store's calls fail with. Every [`CacheError`] converts into it.
     type Error: From<CacheError> + std::error::Error + Send + Sync + 'static;
@@ -29,8 +62,8 @@ pub trait CacheStore: Send + Sync {
     /// The store's name, written in front of every key it stores.
     fn name(&self) -> &KeyPrefix;
 
-    /// Shared TTL, refresh-ahead and lock settings. Composed stores reuse their distributed
-    /// store's settings, so configuring that store also configures calls through the composition.
+    /// The store's TTL, refresh-ahead and lock settings. A hybrid store returns its distributed
+    /// store's.
     fn cache_settings(&self) -> &CacheSettings;
 
     /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are
@@ -43,9 +76,10 @@ pub trait CacheStore: Send + Sync {
         &SystemClock
     }
 
-    /// The entry under `key` as a `CV`. Typed memory stores use [`CacheError::TypeMismatch`] when
-    /// the stored Rust type differs. Encoded stores deserialize into `CV` and return a decoding
-    /// error if the data does not fit; they may accept different types with compatible schemas.
+    /// The entry under `key` as a `CV`, or `None` when it is missing or expired. The memory store
+    /// fails with [`CacheError::TypeMismatch`] when it holds another Rust type there. The Redis
+    /// store decodes its JSON into `CV`, so another type whose fields fit reads it too, and JSON
+    /// that doesn't fit is an error.
     fn get_entry<CV: CacheValue>(
         &self,
         key: &str,
@@ -59,7 +93,25 @@ pub trait CacheStore: Send + Sync {
         async move { Ok(self.get_entry::<CV>(key).await?.map(|entry| entry.value)) }
     }
 
-    /// `options` sets this write's TTL; `None` uses the store's default TTL.
+    /// Stores `value` under `key`, replacing what is there. `options` sets this write's TTL;
+    /// `None` uses the store's default TTL. Fails when the TTL is over 365 days.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use sisa_caching_core::{CacheOptions, CacheStore};
+    ///
+    /// async fn start_session<C: CacheStore>(cache: &C, token: &str) -> Result<(), C::Error> {
+    ///     // The store's default TTL.
+    ///     cache.set("settings:theme", "dark".to_string(), None).await?;
+    ///     // A TTL of its own.
+    ///     let fifteen_minutes = CacheOptions::with_ttl(Duration::from_secs(15 * 60));
+    ///     cache.set(&format!("session:{token}"), true, fifteen_minutes).await?;
+    ///
+    ///     let theme = cache.get::<String>("settings:theme").await?;
+    ///     assert_eq!(theme.as_deref(), Some("dark"));
+    ///     Ok(())
+    /// }
+    /// ```
     fn set<CV: CacheValue>(
         &self,
         key: &str,
@@ -88,10 +140,40 @@ pub trait CacheStore: Send + Sync {
         entry: CacheEntry<CV>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Loads a missing value, coordinating other loaders through this store's per-key lock.
-    /// Explicit mutations are not ordered against a running loader: nothing checks for writes made
-    /// while it runs, so its result can overwrite one. Stores in other processes also load
-    /// independently. Use application-level versioning when those writes require strict ordering.
+    /// Returns the value under `key`, or runs `load` when there is none, then stores and returns
+    /// what it gives. One caller per key in this process runs `load`; the others wait for it, up
+    /// to `lock_timeout_ms`, and get what it stored. A write made while `load` runs can be
+    /// overwritten by its result, and other processes load on their own. With `refresh_threshold`
+    /// set, a value past that share of its TTL is loaded again by one caller, while the others
+    /// get the cached value.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use serde::{Deserialize, Serialize};
+    /// use sisa_caching_core::{CacheOptions, CacheStore};
+    ///
+    /// #[derive(Clone, Serialize, Deserialize)]
+    /// struct User {
+    ///     id: u64,
+    ///     name: String,
+    /// }
+    ///
+    /// #[derive(Debug)]
+    /// struct DbError;
+    ///
+    /// async fn query_user(id: u64) -> Result<User, DbError> {
+    ///     Ok(User { id, name: "Ada".to_string() })
+    /// }
+    ///
+    /// // A failed query comes back as it is, and nothing is cached.
+    /// async fn user<C: CacheStore>(cache: &C, id: u64) -> Result<User, DbError> {
+    ///     let five_minutes = CacheOptions::with_ttl(Duration::from_secs(300));
+    ///
+    ///     cache
+    ///         .get_or_set(&format!("user:v1:{id}"), || query_user(id), five_minutes)
+    ///         .await
+    /// }
+    /// ```
     ///
     /// When the key holds something it can't read as `CV`, such as another type or JSON that no
     /// longer fits after a field was added without `#[serde(default)]`, it loads and stores the
@@ -120,7 +202,7 @@ pub trait CacheStore: Send + Sync {
         get_or_set_with_lock(self, key, load, options.into())
     }
 
-    /// Returns whether the key was there.
+    /// Removes `key`, and returns whether it was there.
     fn remove(&self, key: &str) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
     /// Removes every key under `prefix`, matched by whole levels (`user` removes `user:42`, not
@@ -131,6 +213,15 @@ pub trait CacheStore: Send + Sync {
     /// all its entries, and a Redis store runs `SCAN` over the whole database on each primary. A
     /// hybrid store walks Redis once and the memory layer of every node, and reads in progress on
     /// those nodes keep no local copy. Use [`remove`](Self::remove) for keys you can name.
+    ///
+    /// ```
+    /// use sisa_caching_core::CacheStore;
+    ///
+    /// // `User` changed shape and its keys moved to `user:v2`: drop the old entries.
+    /// async fn drop_old_users<C: CacheStore>(cache: &C) -> Result<usize, C::Error> {
+    ///     cache.remove_prefix("user:v1").await
+    /// }
+    /// ```
     fn remove_prefix(
         &self,
         prefix: &str,
@@ -188,7 +279,7 @@ where
     let due = |entry: &CacheEntry<CV>| {
         settings
             .refresh_threshold()
-            .is_some_and(|share| entry.is_refresh_due(clock.now(), share))
+            .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
     };
 
     let due_entry = match read().await {

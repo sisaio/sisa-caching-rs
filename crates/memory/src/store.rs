@@ -183,8 +183,9 @@ impl InMemoryCacheStore {
         self
     }
 
-    /// Fails when a setting is out of range, such as a TTL over 365 days, so a bad value stops
-    /// setup instead of a later write. The store starts empty, split over `shards` maps.
+    /// Replaces the store's settings. Fails when one is out of range, such as a TTL over 365
+    /// days, so a bad value stops setup instead of a later write. The store starts empty, split
+    /// over `shards` maps.
     pub fn with_settings(mut self, settings: InMemoryCacheSettings) -> Result<Self, CacheError> {
         settings.validate()?;
         self.entries = Arc::new(Entries::new(settings.shards()));
@@ -195,6 +196,7 @@ impl InMemoryCacheStore {
         Ok(self)
     }
 
+    /// The settings the store runs with.
     pub fn settings(&self) -> &InMemoryCacheSettings {
         &self.settings
     }
