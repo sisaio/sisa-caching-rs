@@ -22,7 +22,8 @@ testcontainers = { workspace = true }
 # No TLS library and no rustls crypto provider here: the TLS tests get them from the store's
 # `tls-rustls` or `tls-native-tls`, as an application does.
 redis = { workspace = true }
-tokio = { workspace = true }
+# `net` and `io-util` for the proxy that cuts one node off.
+tokio = { workspace = true, features = ["net", "io-util"] }
 
 # A CA, server and client certificate for the TLS server.
 rcgen = { workspace = true }

@@ -5,6 +5,7 @@
 //! - [`RedisCluster`] and [`RedisSentinel`]: the same for a three-primary cluster and for a
 //!   primary and replica behind Sentinel.
 //! - [`RedisTls`]: a server that only speaks TLS, with or without asking for a client certificate.
+//! - [`Proxy`]: a TCP proxy in front of a server that a test can cut, as a network split would.
 //! - [`eventually`]: waits for something another task does.
 //! - [`Logs`]: the info and higher events logged on the test's thread.
 //!
@@ -13,6 +14,7 @@
 mod clock;
 mod cluster;
 mod logs;
+mod proxy;
 mod sentinel;
 mod server;
 mod standalone;
@@ -21,8 +23,8 @@ mod tls;
 use std::time::Duration;
 
 pub use crate::{
-    clock::ManualClock, cluster::RedisCluster, logs::Logs, sentinel::RedisSentinel, server::Server,
-    standalone::Redis, tls::RedisTls,
+    clock::ManualClock, cluster::RedisCluster, logs::Logs, proxy::Proxy, sentinel::RedisSentinel,
+    server::Server, standalone::Redis, tls::RedisTls,
 };
 
 /// Polls `check` until it holds, and fails the test with `what` after five seconds.
