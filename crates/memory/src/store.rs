@@ -432,7 +432,7 @@ impl CacheStore for InMemoryCacheStore {
         drop(entries);
         drop(replaced);
 
-        if let Some(max) = self.settings.max_entries()
+        if let Some(max) = self.settings.max_entries
             && self.entries.len.load(Ordering::Relaxed) > max
         {
             self.start_trim(max);

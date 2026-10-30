@@ -104,10 +104,6 @@ impl InMemoryCacheSettings {
         self.purge_interval_secs.map(Duration::from_secs)
     }
 
-    pub fn max_entries(&self) -> Option<usize> {
-        self.max_entries
-    }
-
     pub fn shards(&self) -> usize {
         self.shards.unwrap_or(1)
     }
@@ -178,7 +174,7 @@ mod tests {
         let settings = InMemoryCacheSettings::default();
 
         assert_eq!(settings.purge_interval(), Some(Duration::from_secs(60)));
-        assert_eq!(settings.max_entries(), None);
+        assert_eq!(settings.max_entries, None);
         assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 16);
     }
@@ -195,7 +191,7 @@ mod tests {
 
         assert!(settings.validate().is_ok());
         assert_eq!(settings.purge_interval(), None);
-        assert_eq!(settings.max_entries(), None);
+        assert_eq!(settings.max_entries, None);
         assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 1);
     }
