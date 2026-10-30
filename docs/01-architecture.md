@@ -264,10 +264,10 @@ came before the subscribe, so the writer's first heartbeat clears the local laye
 number up to it arrived: after each subscribe, a node clears once more for every writer that
 published before, which covers an invalidation lost in between, as during a failover.
 
-`HybridCacheStore::shutdown` stops the store's worker and its heartbeats, waits up to two seconds
-for the invalidations still being published, then publishes `stopping`: a last heartbeat, which
-the other nodes check like any other and then forget the writer, instead of clearing their local
-layers `heartbeat_timeout_ms` later. No heartbeat follows it.
+`HybridCacheStore::shutdown` stops the store's heartbeats, waits up to two seconds for the
+invalidations still being published, then publishes `stopping`: a last heartbeat, which the other
+nodes check like any other and then forget the writer, instead of clearing their local layers
+`heartbeat_timeout_ms` later. No heartbeat follows it. Only then does it stop the store's worker.
 
 A service in another language that writes to Redis publishes the matching message after each
 write, so hybrid nodes drop their copies. It can leave out `seq` and the heartbeats, and nodes
