@@ -84,6 +84,24 @@ cargo run -p sisa-caching-benches --bin summary
   page a change affects in the same PR, above all the data formats in the architecture page.
 - Public names are reviewed with care; rename a parameter, its getter and its field together.
 
+### What the public API is
+
+A change to any of these is breaking: it takes `!` in the commit and the `breaking` label.
+
+- Every public Rust item that isn't `#[doc(hidden)]`. Hidden items, such as `worker`, `locker`,
+  `sealed` and `metrics::METRICS`, are public only for the store crates and their tests.
+- The settings' field names, which config files use, and what each default is.
+- The metric names and attributes, and the span names and fields, in
+  [docs/04-observability.md](docs/04-observability.md): dashboards and alerts match on them.
+- The Redis hash and the backplane message in
+  [docs/01-architecture.md](docs/01-architecture.md#data-formats), which other languages write.
+- The redis-rs version: its types reach the API through `sisa_caching_redis::redis`.
+
+What stays open: `CacheStore` is sealed, so only this workspace's stores implement it, and a
+method added to it isn't breaking. The settings structs and the error enums are
+`#[non_exhaustive]`, so a new setting or variant isn't either. Build settings from `default()`
+and set fields on it.
+
 ## Code style
 
 `rustfmt.toml` and `clippy.toml` settle layout and lints, and CI fails on either. What they
