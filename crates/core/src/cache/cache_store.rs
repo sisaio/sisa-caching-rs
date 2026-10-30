@@ -191,54 +191,65 @@ where
             .is_some_and(|share| entry.is_refresh_due(clock.now(), share))
     };
 
-    if let Ok(Some(entry)) = read().await {
-        // One caller refreshes; the rest are served the cached value meanwhile.
-        let Some(_guard) = due(&entry).then(|| locker.try_lock(&full_key())).flatten() else {
-            return Ok(entry.value);
-        };
-
-        // Another caller may have refreshed it between this one's read and its lock.
-        if let Ok(Some(entry)) = read().await
-            && !due(&entry)
-        {
-            return Ok(entry.value);
-        }
-
-        return match load().await {
-            // The cached value only while the store still holds it: the load may have outlasted
-            // its TTL or the store's own cap, or a write may have removed it.
-            Err(error) => match read().await {
-                Ok(Some(entry)) => {
-                    tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
-
-                    Ok(entry.value)
-                }
-                _ => Err(error),
-            },
-            loaded => loaded,
-        };
-    }
-
-    let _guard = match settings.lock_timeout() {
-        Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
-            Ok(guard) => Some(guard),
-            Err(_) => {
-                // Another caller's load is still running: this one loads too, without the lock.
-                tracing::warn!(store = %store.name(), ?timeout, "lock wait timed out; loading without the lock");
-
-                None
-            }
-        },
-        None => Some(locker.lock(&full_key()).await),
+    let due_entry = match read().await {
+        Ok(Some(entry)) if !due(&entry) => return Ok(entry.value),
+        Ok(Some(entry)) => Some(entry),
+        _ => None,
     };
 
-    // Another caller may have stored the value while this one waited. On a value of another type,
-    // data that doesn't decode, or a store that can't be reached, the loaded value is stored over
-    // whatever is there.
-    match read().await {
-        Ok(Some(entry)) => Ok(entry.value),
-        _ => load().await,
-    }
+    // The rest holds the lock, the loader and the write, so it goes on the heap: a hit never
+    // builds or moves it.
+    Box::pin(async move {
+        if let Some(entry) = due_entry {
+            // One caller refreshes; the rest are served the cached value meanwhile.
+            let Some(_guard) = locker.try_lock(&full_key()) else {
+                return Ok(entry.value);
+            };
+
+            // Another caller may have refreshed it between this one's read and its lock.
+            if let Ok(Some(entry)) = read().await
+                && !due(&entry)
+            {
+                return Ok(entry.value);
+            }
+
+            return match load().await {
+                // The cached value only while the store still holds it: the load may have
+                // outlasted its TTL or the store's own cap, or a write may have removed it.
+                Err(error) => match read().await {
+                    Ok(Some(entry)) => {
+                        tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
+
+                        Ok(entry.value)
+                    }
+                    _ => Err(error),
+                },
+                loaded => loaded,
+            };
+        }
+
+        let _guard = match settings.lock_timeout() {
+            Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
+                Ok(guard) => Some(guard),
+                Err(_) => {
+                    // Another caller's load is still running: this one loads too, without the lock.
+                    tracing::warn!(store = %store.name(), ?timeout, "lock wait timed out; loading without the lock");
+
+                    None
+                }
+            },
+            None => Some(locker.lock(&full_key()).await),
+        };
+
+        // Another caller may have stored the value while this one waited. On a value of another
+        // type, data that doesn't decode, or a store that can't be reached, the loaded value is
+        // stored over whatever is there.
+        match read().await {
+            Ok(Some(entry)) => Ok(entry.value),
+            _ => load().await,
+        }
+    })
+    .await
 }
 
 /// Counts a failed store call in [`METRICS`], and logs the first failure of a run and the success
