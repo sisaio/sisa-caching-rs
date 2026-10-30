@@ -42,7 +42,7 @@ impl std::fmt::Debug for KeyGuard<'_> {
 struct Claim<'a> {
     locker: &'a Locker,
     key: String,
-    mutex: Option<Arc<Mutex<()>>>,
+    mutex: Arc<Mutex<()>>,
 }
 
 impl Locker {
@@ -53,7 +53,7 @@ impl Locker {
     /// Waits for, then holds, the lock for `key` until the guard is dropped.
     pub async fn lock(&self, key: &str) -> KeyGuard<'_> {
         let claim = self.claim(key);
-        let guard = claim.clone_mutex().lock_owned().await;
+        let guard = Arc::clone(&claim.mutex).lock_owned().await;
 
         KeyGuard {
             _guard: guard,
@@ -64,7 +64,7 @@ impl Locker {
     /// Takes the lock for `key` only if it is free right now.
     pub fn try_lock(&self, key: &str) -> Option<KeyGuard<'_>> {
         let claim = self.claim(key);
-        let guard = claim.clone_mutex().try_lock_owned().ok()?;
+        let guard = Arc::clone(&claim.mutex).try_lock_owned().ok()?;
 
         Some(KeyGuard {
             _guard: guard,
@@ -78,7 +78,7 @@ impl Locker {
         Claim {
             locker: self,
             key: key.to_owned(),
-            mutex: Some(mutex),
+            mutex,
         }
     }
 
@@ -87,24 +87,13 @@ impl Locker {
     }
 }
 
-impl Claim<'_> {
-    fn clone_mutex(&self) -> Arc<Mutex<()>> {
-        Arc::clone(self.mutex.as_ref().expect("taken only on drop"))
-    }
-}
-
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
-        drop(self.mutex.take());
-
-        // Shares are only handed out under this lock, so a count of one here means the map's own
-        // copy is the last.
+        // Shares are only handed out under this lock, so a count of two, the map's and this one,
+        // means this share is the last.
         let mut locks = self.locker.lock_registry();
 
-        if locks
-            .get(&self.key)
-            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
-        {
+        if Arc::strong_count(&self.mutex) == 2 {
             locks.remove(&self.key);
         }
     }
