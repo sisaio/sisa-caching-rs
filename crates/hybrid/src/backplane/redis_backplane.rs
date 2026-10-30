@@ -11,7 +11,8 @@ use ::redis::{
 };
 use tokio::{
     sync::broadcast::{self, Receiver, error::RecvError},
-    time::{Instant, Interval, MissedTickBehavior},
+    task::JoinHandle,
+    time::{Instant, MissedTickBehavior},
 };
 
 use sisa_caching_core::cache::KeyPrefix;
@@ -241,32 +242,29 @@ impl RedisBackplane {
         .await
         .map_err(|_| io_error(ErrorKind::TimedOut, "subscribing timed out"))??;
 
-        let mut pings = tokio::time::interval_at(
-            Instant::now() + self.settings.ping_interval(),
-            self.settings.ping_interval(),
-        );
-
-        pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let pings = connection.keep_pinging(self.settings.clone(), Arc::clone(&self.channel));
 
         Ok(RedisSubscription {
-            connection,
             pushes,
-            pings,
-            settings: self.settings.clone(),
-            channel: Arc::clone(&self.channel),
+            pings: tokio::spawn(pings),
         })
     }
 }
 
-/// One subscribed connection. It is pinged while waiting, so a connection that stops delivering
-/// without closing ends the subscription too.
+/// One subscribed connection. A task of its own pings it, so a connection that stops delivering
+/// without closing ends the subscription too, however often the worker stops waiting for a
+/// message.
 pub(crate) struct RedisSubscription {
-    connection: Connection,
     /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
     pushes: Receiver<PushInfo>,
-    pings: Interval,
-    settings: RedisBackplaneSettings,
-    channel: Arc<str>,
+    /// The task that owns the connection and pings it, until a ping fails.
+    pings: JoinHandle<RedisCacheError>,
+}
+
+impl Drop for RedisSubscription {
+    fn drop(&mut self) {
+        self.pings.abort();
+    }
 }
 
 #[allow(
@@ -316,6 +314,31 @@ async fn message(pushes: &mut Receiver<PushInfo>) -> Result<Vec<u8>> {
 }
 
 impl Connection {
+    /// Pings the connection every `ping_interval_ms` until a ping fails or takes longer than
+    /// `ping_timeout_ms`, and returns why.
+    async fn keep_pinging(
+        mut self,
+        settings: RedisBackplaneSettings,
+        channel: Arc<str>,
+    ) -> RedisCacheError {
+        let mut pings = tokio::time::interval_at(
+            Instant::now() + settings.ping_interval(),
+            settings.ping_interval(),
+        );
+
+        pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            pings.tick().await;
+
+            match tokio::time::timeout(settings.ping_timeout(), self.ping(&channel)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return error,
+                Err(_) => return io_error(ErrorKind::TimedOut, "ping timed out"),
+            }
+        }
+    }
+
     /// Pings the connection, and fails once the subscription is on the wrong node: behind
     /// Sentinel, once the primary has moved (the shared Sentinel connection moves too, so the
     /// store stops reading from the demoted primary); on a cluster, once the slot has moved.
@@ -392,15 +415,13 @@ impl RedisSubscription {
     /// been lost and this subscription is done; open a new one. Dropping an unfinished call loses
     /// no message.
     pub(crate) async fn next(&mut self) -> Result<Vec<u8>> {
-        loop {
-            tokio::select! {
-                message = message(&mut self.pushes) => return message,
-                _ = self.pings.tick() => {
-                    tokio::time::timeout(self.settings.ping_timeout(), self.connection.ping(&self.channel))
-                        .await
-                        .map_err(|_| io_error(ErrorKind::TimedOut, "ping timed out"))??;
-                }
+        tokio::select! {
+            // A failed ping closes the connection too: its error says why.
+            biased;
+            failed = &mut self.pings => {
+                Err(failed.unwrap_or_else(|_| io_error(ErrorKind::Other, "pinging stopped")))
             }
+            message = message(&mut self.pushes) => message,
         }
     }
 }
@@ -527,6 +548,33 @@ mod tests {
 
         redis.unpause().await;
         assert!(attempt.expect("the ping timeout ends the attempt").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_ping_times_out_even_when_each_wait_for_a_message_is_cut_short() {
+        let redis = Redis::start().await;
+        let backplane = connect(&redis, quick_pings()).await;
+        let mut subscription = backplane.subscribe().await.unwrap();
+
+        redis.pause().await;
+
+        // Each wait ends before a ping could time out, as when the worker's checks come first.
+        let ended = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let wait = Duration::from_millis(30);
+
+                if let Ok(next) = tokio::time::timeout(wait, subscription.next()).await {
+                    return next;
+                }
+            }
+        })
+        .await;
+
+        redis.unpause().await;
+
+        let error = ended.expect("the subscription ends").unwrap_err();
+
+        assert!(error.to_string().contains("ping timed out"), "{error}");
     }
 
     #[tokio::test]
