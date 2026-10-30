@@ -390,21 +390,25 @@ impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
 
         let entry = match self.state.read::<CV>(key).await {
             Some(entry) => Some(entry),
+            // On the heap, as it holds the distributed read: a local hit never builds or moves it.
             None => {
-                // Taken before the distributed read, so an invalidation that comes in during it
-                // keeps the value out of the local layer.
-                let generation = self.state.generation(key);
-                let entry = self
-                    .distributed_store
-                    .get_entry::<CV>(key)
-                    .await
-                    .map_err(HybridCacheError::distributed)?;
+                Box::pin(async {
+                    // Taken before the distributed read, so an invalidation that comes in during it
+                    // keeps the value out of the local layer.
+                    let generation = self.state.generation(key);
+                    let entry = self
+                        .distributed_store
+                        .get_entry::<CV>(key)
+                        .await
+                        .map_err(HybridCacheError::distributed)?;
 
-                if let Some(entry) = &entry {
-                    self.state.promote(key, generation, entry.clone()).await;
-                }
+                    if let Some(entry) = &entry {
+                        self.state.promote(key, generation, entry.clone()).await;
+                    }
 
-                entry
+                    Ok::<_, HybridCacheError>(entry)
+                })
+                .await?
             }
         };
         self.reads.record(entry.is_some());
