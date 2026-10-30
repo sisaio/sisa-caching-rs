@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn a_default_ttl_or_lock_wait_over_365_days_is_rejected() {
+    fn out_of_range_settings_are_rejected() {
         let ttl = |ttl_secs| CacheSettings {
             ttl_secs: Some(ttl_secs),
             ..CacheSettings::default()
@@ -123,68 +123,28 @@ mod tests {
             lock_timeout_ms: Some(lock_timeout_ms),
             ..CacheSettings::default()
         };
+        let refresh = |threshold| CacheSettings {
+            refresh_threshold: Some(threshold),
+            ..CacheSettings::default()
+        };
+        let year_ms = MAX_TTL_SECS * 1_000;
 
-        assert!(ttl(MAX_TTL_SECS).validate().is_ok());
-        assert!(wait(MAX_TTL_SECS * 1_000).validate().is_ok());
-        assert!(matches!(
-            ttl(MAX_TTL_SECS + 1).validate(),
-            Err(CacheError::InvalidSettings {
-                field: "ttl_secs",
-                ..
-            })
-        ));
-        assert!(matches!(
-            wait(MAX_TTL_SECS * 1_000 + 1).validate(),
-            Err(CacheError::InvalidSettings {
-                field: "lock_timeout_ms",
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn a_zero_ttl_or_lock_wait_is_rejected() {
+        for settings in [ttl(MAX_TTL_SECS), wait(year_ms), refresh(0.8)] {
+            assert!(settings.validate().is_ok(), "{settings:?}");
+        }
         for (field, settings) in [
-            (
-                "ttl_secs",
-                CacheSettings {
-                    ttl_secs: Some(0),
-                    ..CacheSettings::default()
-                },
-            ),
-            (
-                "lock_timeout_ms",
-                CacheSettings {
-                    lock_timeout_ms: Some(0),
-                    ..CacheSettings::default()
-                },
-            ),
+            ("ttl_secs", ttl(0)),
+            ("ttl_secs", ttl(MAX_TTL_SECS + 1)),
+            ("lock_timeout_ms", wait(0)),
+            ("lock_timeout_ms", wait(year_ms + 1)),
+            ("refresh_threshold", refresh(0.0)),
+            ("refresh_threshold", refresh(1.0)),
+            ("refresh_threshold", refresh(80.0)),
+            ("refresh_threshold", refresh(f64::NAN)),
         ] {
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{field}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_refresh_threshold_outside_zero_and_one_is_rejected() {
-        let settings = |share| CacheSettings {
-            refresh_threshold: Some(share),
-            ..CacheSettings::default()
-        };
-
-        assert!(settings(0.8).validate().is_ok());
-        for share in [0.0, 1.0, 80.0, f64::NAN] {
-            assert!(
-                matches!(
-                    settings(share).validate(),
-                    Err(CacheError::InvalidSettings {
-                        field: "refresh_threshold",
-                        ..
-                    })
-                ),
-                "{share}"
+                "{settings:?}"
             );
         }
     }

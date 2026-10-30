@@ -61,15 +61,25 @@ async fn subscribers_on(sentinel: &RedisSentinel, port: u16) -> usize {
 }
 
 #[tokio::test]
-async fn a_write_after_a_failover_evicts_the_copy_on_another_node() {
+async fn nodes_follow_a_failover() {
     let Some(sentinel) = RedisSentinel::start().await else {
         return;
     };
     let writer = node(&sentinel).await;
     let reader = node(&sentinel).await;
+    // A third node's connection opens before the failover, and the node starts after it.
+    let late = connect(&sentinel).await;
 
     sentinel.failover().await;
     sentinel.demote_old_primary().await;
+    let _late_node = node_on(late.clone()).await;
+
+    // Nothing failed on the old primary, so only subscribing moved the late node's connection.
+    let role: Vec<redis::Value> = redis::cmd("ROLE")
+        .query_async(&mut late.clone())
+        .await
+        .unwrap();
+    assert_eq!(role[0], redis::Value::BulkString(b"master".to_vec()));
 
     // The demoted primary refuses this write, so the writer's connection moves to the new one.
     writer
@@ -79,8 +89,8 @@ async fn a_write_after_a_failover_evicts_the_copy_on_another_node() {
         .unwrap();
     // Demoting by hand closes no connection, like a failover on Dragonfly, which refuses the
     // command Sentinel closes them with. The subscriptions' pings find the primary moved.
-    eventually("both subscriptions move to the new primary", || async {
-        subscribers_on(&sentinel, 6379).await == 0 && subscribers_on(&sentinel, 6380).await == 2
+    eventually("every subscription moves to the new primary", || async {
+        subscribers_on(&sentinel, 6379).await == 0 && subscribers_on(&sentinel, 6380).await == 3
     })
     .await;
 
@@ -100,24 +110,4 @@ async fn a_write_after_a_failover_evicts_the_copy_on_another_node() {
         reader.get::<String>(&key(1)).await.unwrap().as_deref(),
         Some("new")
     );
-}
-
-#[tokio::test]
-async fn a_node_started_after_a_failover_reads_from_the_primary_it_subscribed_to() {
-    let Some(sentinel) = RedisSentinel::start().await else {
-        return;
-    };
-    let conn = connect(&sentinel).await;
-
-    sentinel.failover().await;
-    sentinel.demote_old_primary().await;
-    let _node = node_on(conn.clone()).await;
-
-    // Nothing failed on the old primary, so only subscribing moved the shared connection.
-    let role: Vec<redis::Value> = redis::cmd("ROLE")
-        .query_async(&mut conn.clone())
-        .await
-        .unwrap();
-    assert_eq!(role[0], redis::Value::BulkString(b"master".to_vec()));
-    assert_eq!(subscribers_on(&sentinel, 6380).await, 1);
 }

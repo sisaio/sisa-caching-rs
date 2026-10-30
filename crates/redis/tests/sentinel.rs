@@ -31,40 +31,31 @@ async fn value_on(sentinel: &RedisSentinel, port: u16, redis_key: &str) -> Optio
 }
 
 #[tokio::test]
-async fn a_write_the_old_primary_refuses_moves_to_the_new_one() {
+async fn a_call_the_old_primary_refuses_moves_to_the_new_one() {
     let Some(sentinel) = RedisSentinel::start().await else {
         return;
     };
-    let store = RedisCacheStore::new("app", connect(&sentinel).await).unwrap();
+    // Each store has a connection of its own, so each sends its first call after the failover to
+    // the old primary: a write, which is a transaction, and a removal, which is one command.
+    let writer = RedisCacheStore::new("app", connect(&sentinel).await).unwrap();
+    let remover = RedisCacheStore::new("app", connect(&sentinel).await).unwrap();
 
-    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
+    writer.set(&key(1), "ada".to_owned(), None).await.unwrap();
+    writer.set(&key(3), "bob".to_owned(), None).await.unwrap();
     sentinel.failover().await;
     sentinel.demote_old_primary().await;
-    store.set(&key(2), "grace".to_owned(), None).await.unwrap();
+    writer.set(&key(2), "grace".to_owned(), None).await.unwrap();
+    remover.remove(&key(3)).await.unwrap();
 
     assert_eq!(
         value_on(&sentinel, 6380, "app::user:2").await.as_deref(),
         Some(r#""grace""#)
     );
+    assert_eq!(value_on(&sentinel, 6380, "app::user:3").await, None);
     assert_eq!(
-        store.get::<String>(&key(1)).await.unwrap().as_deref(),
+        writer.get::<String>(&key(1)).await.unwrap().as_deref(),
         Some("ada")
     );
-}
-
-#[tokio::test]
-async fn a_remove_the_old_primary_refuses_moves_to_the_new_one() {
-    let Some(sentinel) = RedisSentinel::start().await else {
-        return;
-    };
-    let store = RedisCacheStore::new("app", connect(&sentinel).await).unwrap();
-
-    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
-    sentinel.failover().await;
-    sentinel.demote_old_primary().await;
-    store.remove(&key(1)).await.unwrap();
-
-    assert_eq!(value_on(&sentinel, 6380, "app::user:1").await, None);
 }
 
 #[tokio::test]

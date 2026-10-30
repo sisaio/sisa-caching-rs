@@ -263,138 +263,64 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_local_cap_is_rejected() {
-        let settings: HybridCacheSettings =
-            serde_json::from_str(r#"{ "local": { "max_ttl_secs": 0 } }"#).unwrap();
-
-        assert!(matches!(
-            settings.validate(),
-            Err(CacheError::InvalidSettings {
-                field: "max_ttl_secs",
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn local_common_settings_are_rejected() {
-        let settings: HybridCacheSettings =
-            serde_json::from_str(r#"{ "local": { "common": { "ttl_secs": 60 } } }"#).unwrap();
-
-        assert!(matches!(
-            settings.validate(),
-            Err(CacheError::InvalidSettings {
-                field: "local.common",
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn a_zero_ping_interval_or_timeout_is_rejected() {
-        assert!(HybridCacheSettings::default().validate().is_ok());
-
-        for (field, backplane) in [
-            (
-                "ping_interval_ms",
-                RedisBackplaneSettings {
-                    ping_interval_ms: 0,
-                    ..RedisBackplaneSettings::default()
-                },
-            ),
-            (
-                "ping_timeout_ms",
-                RedisBackplaneSettings {
-                    ping_timeout_ms: 0,
-                    ..RedisBackplaneSettings::default()
-                },
-            ),
-        ] {
-            let settings = HybridCacheSettings {
-                backplane,
-                ..HybridCacheSettings::default()
-            };
-
-            assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{field}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_backplane_or_worker_wait_over_365_days_is_rejected() {
+    fn out_of_range_settings_are_rejected() {
         let year_ms = sisa_caching_core::settings::MAX_TTL_SECS * 1_000;
-        let worker = |ms| BackplaneWorkerSettings {
-            max_reconnect_delay_ms: ms,
-            heartbeat_timeout_ms: ms,
-            ..BackplaneWorkerSettings::default()
+        let from_json = |json| serde_json::from_str::<HybridCacheSettings>(json).unwrap();
+        let ping = |ping_interval_ms, ping_timeout_ms| HybridCacheSettings {
+            backplane: RedisBackplaneSettings {
+                ping_interval_ms,
+                ping_timeout_ms,
+            },
+            ..HybridCacheSettings::default()
+        };
+        let worker = |worker| HybridCacheSettings {
+            worker,
+            ..HybridCacheSettings::default()
+        };
+        let reconnect = |reconnect_delay_ms, max_reconnect_delay_ms| {
+            worker(BackplaneWorkerSettings {
+                reconnect_delay_ms,
+                max_reconnect_delay_ms,
+                ..BackplaneWorkerSettings::default()
+            })
+        };
+        let heartbeat = |heartbeat_interval_ms, heartbeat_timeout_ms| {
+            worker(BackplaneWorkerSettings {
+                heartbeat_interval_ms,
+                heartbeat_timeout_ms,
+                ..BackplaneWorkerSettings::default()
+            })
         };
 
-        assert!(worker(year_ms).validate().is_ok());
-        assert!(matches!(
-            worker(year_ms + 1).validate(),
-            Err(CacheError::InvalidSettings {
-                field: "max_reconnect_delay_ms",
-                ..
-            })
-        ));
-        assert!(matches!(
-            RedisBackplaneSettings {
-                ping_interval_ms: year_ms + 1,
-                ..RedisBackplaneSettings::default()
-            }
-            .validate(),
-            Err(CacheError::InvalidSettings {
-                field: "ping_interval_ms",
-                ..
-            })
-        ));
-    }
+        assert!(HybridCacheSettings::default().validate().is_ok());
+        assert!(reconnect(100, year_ms).validate().is_ok());
+        assert!(heartbeat(1_000, year_ms).validate().is_ok());
+        assert!(ping(year_ms, year_ms).validate().is_ok());
 
-    #[test]
-    fn a_zero_reconnect_delay_or_a_longest_wait_below_it_is_rejected() {
-        for (field, first, longest) in [
-            ("reconnect_delay_ms", 0, 5_000),
-            ("max_reconnect_delay_ms", 100, 99),
-            ("max_reconnect_delay_ms", 100, 0),
+        for (field, settings) in [
+            (
+                "max_ttl_secs",
+                from_json(r#"{ "local": { "max_ttl_secs": 0 } }"#),
+            ),
+            (
+                "local.common",
+                from_json(r#"{ "local": { "common": { "ttl_secs": 60 } } }"#),
+            ),
+            ("ping_interval_ms", ping(0, 1_000)),
+            ("ping_interval_ms", ping(year_ms + 1, 1_000)),
+            ("ping_timeout_ms", ping(5_000, 0)),
+            ("reconnect_delay_ms", reconnect(0, 5_000)),
+            ("max_reconnect_delay_ms", reconnect(100, 99)),
+            ("max_reconnect_delay_ms", reconnect(100, 0)),
+            ("max_reconnect_delay_ms", reconnect(100, year_ms + 1)),
+            ("heartbeat_interval_ms", heartbeat(0, 5_000)),
+            ("heartbeat_timeout_ms", heartbeat(1_000, 1_000)),
+            ("heartbeat_timeout_ms", heartbeat(1_000, 500)),
+            ("heartbeat_timeout_ms", heartbeat(1_000, 0)),
         ] {
-            let settings = HybridCacheSettings {
-                worker: BackplaneWorkerSettings {
-                    reconnect_delay_ms: first,
-                    max_reconnect_delay_ms: longest,
-                    ..BackplaneWorkerSettings::default()
-                },
-                ..HybridCacheSettings::default()
-            };
-
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{first} and {longest}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_zero_heartbeat_interval_or_a_timeout_no_longer_than_it_is_rejected() {
-        for (field, interval, timeout) in [
-            ("heartbeat_interval_ms", 0, 5_000),
-            ("heartbeat_timeout_ms", 1_000, 1_000),
-            ("heartbeat_timeout_ms", 1_000, 500),
-            ("heartbeat_timeout_ms", 1_000, 0),
-        ] {
-            let settings = HybridCacheSettings {
-                worker: BackplaneWorkerSettings {
-                    heartbeat_interval_ms: interval,
-                    heartbeat_timeout_ms: timeout,
-                    ..BackplaneWorkerSettings::default()
-                },
-                ..HybridCacheSettings::default()
-            };
-
-            assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{interval} and {timeout}"
+                "{field}: {settings:?}"
             );
         }
     }

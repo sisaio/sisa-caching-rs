@@ -327,7 +327,9 @@ async fn a_node_that_stops_hearing_its_own_heartbeats_subscribes_again() {
 }
 
 #[tokio::test]
-async fn an_unreadable_message_clears_the_local_layer_and_keeps_the_subscription() {
+async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
+    let logs = Logs::default();
+    let _logging = tracing::subscriber::set_default(logs.clone());
     let redis = Redis::start().await;
     // A lost subscription would read through for a minute.
     let node = start_with(
@@ -343,6 +345,8 @@ async fn an_unreadable_message_clears_the_local_layer_and_keeps_the_subscription
     for payload in [
         "not json",
         r#"{"v":2,"source":"elsewhere","store":"users","kind":"clear"}"#,
+        // The prefix has an empty level, and the error for that quotes it.
+        r#"{"v":1,"source":"elsewhere","store":"users","kind":"prefix","target":"user::42"}"#,
     ] {
         node.local_store()
             .set(&key(1), "ada".to_owned(), None)
@@ -356,30 +360,6 @@ async fn an_unreadable_message_clears_the_local_layer_and_keeps_the_subscription
         .await;
         assert!(node.local_reads_enabled(), "{payload}");
     }
-}
-
-#[tokio::test]
-async fn the_warning_about_an_unreadable_message_quotes_none_of_it() {
-    let logs = Logs::default();
-    let _logging = tracing::subscriber::set_default(logs.clone());
-    let redis = Redis::start().await;
-    let node = node(&memory("users"), &redis).await;
-
-    node.local_store()
-        .set(&key(1), "ada".to_owned(), None)
-        .await
-        .unwrap();
-    // The prefix has an empty level, and the error for that quotes it.
-    publish(
-        &redis,
-        "users",
-        r#"{"v":1,"source":"elsewhere","store":"users","kind":"prefix","target":"user::42"}"#,
-    )
-    .await;
-    eventually("the node clears", || async {
-        local_value(&node, &key(1)).await.is_none()
-    })
-    .await;
 
     let logged = logs.lines().join(" ");
 
@@ -391,37 +371,27 @@ async fn the_warning_about_an_unreadable_message_quotes_none_of_it() {
 }
 
 #[tokio::test]
-async fn the_first_read_starts_the_worker() {
+async fn the_first_read_or_write_starts_the_worker() {
     let redis = Redis::start().await;
-    let store =
+    let reader =
+        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
+    let writer =
         HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
 
-    assert!(!store.local_reads_enabled(), "no worker yet");
+    assert!(!reader.local_reads_enabled(), "no worker yet");
+    assert!(!writer.local_reads_enabled(), "no worker yet");
 
-    store.get::<String>(&key(1)).await.unwrap();
+    reader.get::<String>(&key(1)).await.unwrap();
+    writer.set(&key(1), "ada".to_owned(), None).await.unwrap();
 
-    eventually("the worker subscribes", || async {
-        store.local_reads_enabled()
+    eventually("both workers subscribe", || async {
+        reader.local_reads_enabled() && writer.local_reads_enabled()
     })
     .await;
 }
 
 #[tokio::test]
-async fn the_first_write_starts_the_worker_too() {
-    let redis = Redis::start().await;
-    let store =
-        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
-
-    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
-
-    eventually("the worker subscribes", || async {
-        store.local_reads_enabled()
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn a_store_and_its_clones_run_one_worker() {
+async fn clones_share_one_worker_until_the_last_drops() {
     let redis = Redis::start().await;
     let store = node(&memory("users"), &redis).await;
     let clone = store.clone();
@@ -433,13 +403,6 @@ async fn a_store_and_its_clones_run_one_worker() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     assert_eq!(redis.subscriptions().await, 1);
-}
-
-#[tokio::test]
-async fn the_worker_runs_until_the_last_clone_drops() {
-    let redis = Redis::start().await;
-    let store = node(&memory("users"), &redis).await;
-    let clone = store.clone();
 
     drop(store);
     // Lets a worker that was told to stop run its stop.

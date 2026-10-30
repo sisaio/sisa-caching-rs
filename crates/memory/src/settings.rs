@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn durations_over_365_days_are_rejected() {
+    fn out_of_range_settings_are_rejected() {
         let too_long = Some(MAX_TTL_SECS + 1);
 
         for (field, settings) in [
@@ -145,16 +145,51 @@ mod tests {
                 },
             ),
             (
+                "purge_interval_secs",
+                InMemoryCacheSettings {
+                    purge_interval_secs: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
                 "max_ttl_secs",
                 InMemoryCacheSettings {
                     max_ttl_secs: too_long,
                     ..InMemoryCacheSettings::default()
                 },
             ),
+            (
+                "max_ttl_secs",
+                InMemoryCacheSettings {
+                    max_ttl_secs: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "max_entries",
+                InMemoryCacheSettings {
+                    max_entries: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "shards",
+                InMemoryCacheSettings {
+                    shards: Some(0),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
+            (
+                "shards",
+                InMemoryCacheSettings {
+                    shards: Some(MAX_SHARDS + 1),
+                    ..InMemoryCacheSettings::default()
+                },
+            ),
         ] {
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{field}"
+                "{settings:?}"
             );
         }
 
@@ -166,10 +201,14 @@ mod tests {
             },
             purge_interval_secs: year,
             max_ttl_secs: year,
+            shards: Some(MAX_SHARDS),
             ..InMemoryCacheSettings::default()
         };
 
-        assert!(settings.validate().is_ok(), "exactly 365 days is allowed");
+        assert!(
+            settings.validate().is_ok(),
+            "exactly 365 days and 1,024 maps are allowed"
+        );
     }
 
     #[test]
@@ -197,61 +236,5 @@ mod tests {
         assert_eq!(settings.max_entries, None);
         assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 1);
-    }
-
-    #[test]
-    fn zero_is_rejected() {
-        for (field, settings) in [
-            (
-                "purge_interval_secs",
-                InMemoryCacheSettings {
-                    purge_interval_secs: Some(0),
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-            (
-                "max_entries",
-                InMemoryCacheSettings {
-                    max_entries: Some(0),
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-            (
-                "max_ttl_secs",
-                InMemoryCacheSettings {
-                    max_ttl_secs: Some(0),
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-            (
-                "shards",
-                InMemoryCacheSettings {
-                    shards: Some(0),
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-        ] {
-            assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
-                "{field}"
-            );
-        }
-    }
-
-    #[test]
-    fn more_than_1024_shards_are_rejected() {
-        let shards = |shards| InMemoryCacheSettings {
-            shards: Some(shards),
-            ..InMemoryCacheSettings::default()
-        };
-
-        assert!(shards(MAX_SHARDS).validate().is_ok());
-        assert!(matches!(
-            shards(MAX_SHARDS + 1).validate(),
-            Err(CacheError::InvalidSettings {
-                field: "shards",
-                ..
-            })
-        ));
     }
 }

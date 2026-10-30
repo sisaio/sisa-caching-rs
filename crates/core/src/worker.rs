@@ -157,34 +157,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stopped_task_ends_and_never_starts_again() {
-        let worker = Worker::new();
-        let clone = worker.clone();
+    async fn a_stopped_worker_ends_its_task_and_never_starts_one() {
+        let running = Worker::new();
         let (stopped, done) = oneshot::channel::<()>();
 
-        worker.start("waiting", &store(), || async move {
+        running.start("waiting", &store(), || async move {
             let _stopped = stopped;
 
             pending::<()>().await;
         });
-        clone.stop();
+        running.clone().stop();
 
         let stopped = tokio::time::timeout(Duration::from_secs(1), done).await;
 
         assert!(stopped.unwrap().is_err(), "the task's future was dropped");
-        worker.start("waiting", &store(), || async {
-            unreachable!("it never starts again")
-        });
-    }
 
-    #[tokio::test]
-    async fn a_task_stopped_before_it_starts_never_does() {
-        let worker = Worker::new();
+        let unstarted = Worker::new();
+        let starts = AtomicUsize::new(0);
+        let task = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            async {}
+        };
 
-        worker.stop();
-        worker.start("waiting", &store(), || async {
-            unreachable!("it never starts")
-        });
+        unstarted.stop();
+        for worker in [&running, &unstarted] {
+            worker.start("counting", &store(), task);
+        }
+        assert_eq!(starts.load(Ordering::SeqCst), 0, "neither starts a task");
     }
 
     #[test]
@@ -230,8 +229,13 @@ mod tests {
         });
 
         assert!(panicked.await.is_err(), "the task panicked");
-        worker.start("panicking", &store(), || async {
-            unreachable!("it started once")
+
+        let starts = AtomicUsize::new(0);
+
+        worker.start("counting", &store(), || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            async {}
         });
+        assert_eq!(starts.load(Ordering::SeqCst), 0, "it started once");
     }
 }
