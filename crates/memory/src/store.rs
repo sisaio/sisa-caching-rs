@@ -815,22 +815,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_purge_stops_when_the_last_clone_drops() {
-        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let clone = store.clone();
-        let entries = Arc::downgrade(&store.entries);
-
-        store.set(&key(1), 1_u32, None).await.unwrap();
-        drop(store);
-        drop(clone);
-
-        eventually("the worker drops its copy", || async {
-            entries.upgrade().is_none()
-        })
-        .await;
-    }
-
-    #[tokio::test]
     async fn without_a_purge_interval_a_write_starts_no_worker() {
         let store = store(
             &ManualClock::new(),
@@ -1096,75 +1080,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warnings_name_the_store_but_never_the_key() {
-        let logs = Logs::default();
-        let _logging = tracing::subscriber::set_default(logs.clone());
-        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let email = key("ada@example.com");
-
-        // Another type is there, so `get_or_set` warns that it won't cache what it loaded.
-        store.set(&email, 42_u64, None).await.unwrap();
-        store
-            .get_or_set(
-                &email,
-                || async { Ok::<_, Infallible>("ada".to_owned()) },
-                None,
-            )
-            .await
-            .unwrap();
-
-        let logged = logs.lines().join(" ");
-
-        assert!(logged.contains("store=app"), "{logged}");
-        assert!(!logged.contains("ada@example.com"), "{logged}");
-    }
-
-    #[tokio::test]
-    async fn get_or_set_logs_a_run_of_failed_reads_once_and_the_read_that_ends_it() {
+    async fn get_or_set_logs_a_run_of_failed_reads_once_and_never_the_key() {
         let logs = Logs::default();
         let _logging = tracing::subscriber::set_default(logs.clone());
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
         let load = || async { Ok::<_, Infallible>("ada".to_owned()) };
+        let email = |id| key(format!("ada{id}@example.com"));
 
         // Each key holds another type, so both reads of each call fail.
         for id in 0..3 {
-            store.set(&key(id), 42_u64, None).await.unwrap();
-            store.get_or_set(&key(id), load, None).await.unwrap();
+            store.set(&email(id), 42_u64, None).await.unwrap();
+            store.get_or_set(&email(id), load, None).await.unwrap();
         }
         // What the last call stored over its key reads.
-        store.get_or_set(&key(2), load, None).await.unwrap();
+        store.get_or_set(&email(2), load, None).await.unwrap();
 
-        let lines: Vec<String> = logs
-            .lines()
-            .into_iter()
+        let logged = logs.lines();
+        let lines: Vec<&String> = logged
+            .iter()
             .filter(|line| line.contains("operation="))
             .collect();
 
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines[0].starts_with("WARN"), "{lines:?}");
         assert!(lines[0].contains(r#"operation="get""#), "{lines:?}");
+        assert!(lines[0].contains("store=app"), "{lines:?}");
         assert!(lines[1].starts_with("INFO"), "{lines:?}");
         assert!(lines[1].contains("store calls work again"), "{lines:?}");
+        assert!(!logged.join(" ").contains("@example.com"), "{logged:?}");
     }
 
     #[tokio::test]
-    async fn the_purge_worker_logs_its_start_and_stop_with_the_store() {
+    async fn the_purge_worker_logs_its_start_and_stops_with_the_last_clone() {
         let logs = Logs::default();
         let _logging = tracing::subscriber::set_default(logs.clone());
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let clone = store.clone();
+        let entries = Arc::downgrade(&store.entries);
+        let logged = |message: &str| logs.lines().iter().any(|line| line.contains(message));
 
         store.set(&key(1), 1_u32, None).await.unwrap();
-        eventually("the worker starts", || async {
-            logs.lines()
-                .iter()
-                .any(|line| line.contains("worker started"))
-        })
-        .await;
+        eventually("the worker starts", || async { logged("worker started") }).await;
         drop(store);
-        eventually("the worker stops", || async {
-            logs.lines()
-                .iter()
-                .any(|line| line.contains("worker stopped"))
+        drop(clone);
+        eventually("the worker stops and drops its copy", || async {
+            logged("worker stopped") && entries.upgrade().is_none()
         })
         .await;
 
@@ -1224,40 +1184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_refresh_that_outlasts_the_ttl_returns_the_error() {
-        let clock = ManualClock::new();
-        let store = store(
-            &clock,
-            InMemoryCacheSettings {
-                common: CacheSettings {
-                    ttl_secs: Some(10),
-                    refresh_threshold: Some(0.8),
-                    ..CacheSettings::default()
-                },
-                ..InMemoryCacheSettings::default()
-            },
-        );
-
-        store.set(&key(1), "old".to_owned(), None).await.unwrap();
-        clock.advance(secs(9));
-
-        // The loader runs past second 10, when the cached value expires.
-        let loaded = store
-            .get_or_set(
-                &key(1),
-                || async {
-                    clock.advance(secs(4));
-                    Err::<String, _>("down")
-                },
-                None,
-            )
-            .await;
-
-        assert_eq!(loaded, Err("down"));
-    }
-
-    #[tokio::test]
-    async fn a_failed_refresh_serves_only_what_the_store_still_holds() {
+    async fn a_failed_refresh_serves_the_cached_value_only_while_the_store_holds_it() {
         let clock = ManualClock::new();
         let store = store(
             &clock,
@@ -1292,32 +1219,22 @@ mod tests {
 
         // The store's 8-second cap passes during the load, though the entry's TTL is 10 seconds.
         assert_eq!(refresh(3).await, Err("down"));
-        assert_eq!(store.get::<String>(&key(1)).await.unwrap(), None);
-    }
+        assert_eq!(store.get::<String>(&user).await.unwrap(), None);
 
-    #[tokio::test]
-    async fn a_failed_refresh_does_not_serve_a_value_removed_meanwhile() {
-        let clock = ManualClock::new();
-        let store = store(
-            &clock,
-            InMemoryCacheSettings {
-                common: CacheSettings {
-                    ttl_secs: Some(10),
-                    refresh_threshold: Some(0.5),
-                    ..CacheSettings::default()
-                },
-                ..InMemoryCacheSettings::default()
-            },
-        );
+        // The entry's own TTL passes during the load.
+        store.set(&user, "old".to_owned(), ttl(4)).await.unwrap();
+        clock.advance(secs(3));
+        assert_eq!(refresh(2).await, Err("down"));
 
-        store.set(&key(1), "old".to_owned(), None).await.unwrap();
+        // A write removes it during the load.
+        store.set(&user, "old".to_owned(), None).await.unwrap();
         clock.advance(secs(6));
 
         let loaded = store
             .get_or_set(
-                &key(1),
+                &user,
                 || async {
-                    store.remove(&key(1)).await.unwrap();
+                    store.remove(&user).await.unwrap();
                     Err::<String, _>("down")
                 },
                 None,

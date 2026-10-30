@@ -38,27 +38,44 @@ async fn pttl(redis: &Redis, redis_key: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn the_key_expires_with_the_entry() {
+async fn the_key_expires_when_the_entry_does() {
     let redis = Redis::start().await;
     let store = store(&redis).await;
+    let now = SystemClock.now();
+    let ten_secs = Duration::from_secs(10);
+    let entry = |ttl| CacheEntry::new("ada".to_owned(), now, ttl);
+    let until = |deadline| entry(None).with_expires_at(Some(deadline));
 
+    // Each entry, the TTL it reads back with, and its key's PTTL: -1 is no expiry.
+    for (id, written, read_ttl, expiry) in [
+        (1, entry(Some(ten_secs)), Some(ten_secs), 9_000..=10_000),
+        (2, entry(None), None, -1..=-1),
+        // Too long for Redis, so it is stored without one.
+        (3, entry(Some(Duration::MAX)), None, -1..=-1),
+        // A deadline but no TTL: the key expires at the deadline.
+        (4, until(now + ten_secs), None, 9_000..=10_000),
+    ] {
+        store.set_entry(&key(id), written).await.unwrap();
+
+        let stored = store.get_entry::<String>(&key(id)).await.unwrap().unwrap();
+        let left = pttl(&redis, &format!("app::user:{id}")).await;
+
+        assert_eq!(stored.value, "ada", "{id}");
+        assert_eq!(stored.ttl(), read_ttl, "{id}");
+        assert!(expiry.contains(&left), "{id}: PTTL {left}");
+    }
+
+    store.set(&key(5), "old".to_owned(), None).await.unwrap();
     store
-        .set(&key(1), "ada".to_owned(), ttl(Duration::from_secs(10)))
+        .set_entry(&key(5), until(now - Duration::from_secs(1)))
         .await
         .unwrap();
-    store.set(&key(2), "grace".to_owned(), None).await.unwrap();
 
-    let entry = store.get_entry::<String>(&key(1)).await.unwrap().unwrap();
-    let expiry = pttl(&redis, "app::user:1").await;
-
-    assert_eq!(entry.value, "ada");
-    assert_eq!(entry.ttl(), Some(Duration::from_secs(10)));
-    assert!((9_000..=10_000).contains(&expiry), "PTTL {expiry}");
-
-    let forever = store.get_entry::<String>(&key(2)).await.unwrap().unwrap();
-
-    assert_eq!(forever.ttl(), None);
-    assert_eq!(pttl(&redis, "app::user:2").await, -1, "no expiry");
+    assert_eq!(
+        pttl(&redis, "app::user:5").await,
+        -2,
+        "already expired, so removed"
+    );
 }
 
 #[tokio::test]
@@ -76,49 +93,6 @@ async fn debug_shows_the_store_but_never_its_connection_or_a_value() {
 }
 
 #[tokio::test]
-async fn a_ttl_too_long_for_redis_is_stored_as_none() {
-    let redis = Redis::start().await;
-    let store = store(&redis).await;
-    let entry = CacheEntry::new("ada".to_owned(), SystemClock.now(), Some(Duration::MAX));
-
-    store.set_entry(&key(1), entry).await.unwrap();
-
-    let stored = store.get_entry::<String>(&key(1)).await.unwrap().unwrap();
-
-    assert_eq!(stored.value, "ada");
-    assert_eq!(stored.ttl(), None);
-    assert_eq!(pttl(&redis, "app::user:1").await, -1, "no expiry");
-}
-
-#[tokio::test]
-async fn an_entry_with_a_deadline_but_no_ttl_expires_at_its_deadline() {
-    let redis = Redis::start().await;
-    let store = store(&redis).await;
-    let now = SystemClock.now();
-    let until =
-        |deadline| CacheEntry::new("ada".to_owned(), now, None).with_expires_at(Some(deadline));
-
-    store
-        .set_entry(&key(1), until(now + Duration::from_secs(10)))
-        .await
-        .unwrap();
-    store.set(&key(2), "old".to_owned(), None).await.unwrap();
-    store
-        .set_entry(&key(2), until(now - Duration::from_secs(1)))
-        .await
-        .unwrap();
-
-    let expiry = pttl(&redis, "app::user:1").await;
-
-    assert!((9_000..=10_000).contains(&expiry), "PTTL {expiry}");
-    assert_eq!(
-        pttl(&redis, "app::user:2").await,
-        -2,
-        "already expired, so removed"
-    );
-}
-
-#[tokio::test]
 async fn compatible_json_reads_as_another_type_and_incompatible_json_is_an_error() {
     let redis = Redis::start().await;
     let store = store(&redis).await;
@@ -133,7 +107,7 @@ async fn compatible_json_reads_as_another_type_and_incompatible_json_is_an_error
 }
 
 #[tokio::test]
-async fn remove_prefix_walks_every_scan_page_and_keeps_other_prefixes() {
+async fn remove_prefix_removes_whole_levels_on_every_scan_page() {
     let redis = Redis::start().await;
     // A small batch, so SCAN needs many pages.
     let store = store(&redis)
@@ -143,11 +117,14 @@ async fn remove_prefix_walks_every_scan_page_and_keeps_other_prefixes() {
             ..RedisCacheSettings::default()
         })
         .unwrap();
+    let v1 = |id| CacheKey::new("user:v1", id).unwrap();
+    let v2 = CacheKey::new("user:v2", 1).unwrap();
     let username = CacheKey::new("username", 1).unwrap();
 
     for id in 0..50 {
-        store.set(&key(id), id, None).await.unwrap();
+        store.set(&v1(id), id, None).await.unwrap();
     }
+    store.set(&v2, 2_u32, None).await.unwrap();
     store.set(&username, 1_u32, None).await.unwrap();
 
     assert_eq!(
@@ -155,32 +132,17 @@ async fn remove_prefix_walks_every_scan_page_and_keeps_other_prefixes() {
         0,
         "`*` in a prefix is a plain character"
     );
-    assert_eq!(store.remove_prefix("user").await.unwrap(), 50);
+    assert_eq!(store.remove_prefix("user:v1").await.unwrap(), 50);
+    assert_eq!(store.get::<u32>(&v2).await.unwrap(), Some(2));
+    assert_eq!(
+        store.remove_prefix("user").await.unwrap(),
+        1,
+        "the name drops the other version too"
+    );
     assert_eq!(
         store.get::<u32>(&username).await.unwrap(),
         Some(1),
         "`user` does not match `username`"
-    );
-}
-
-#[tokio::test]
-async fn a_versioned_prefix_drops_only_its_version() {
-    let redis = Redis::start().await;
-    let store = store(&redis).await;
-    let v1 = CacheKey::new("user:v1", 1).unwrap();
-    let v2 = CacheKey::new("user:v2", 1).unwrap();
-
-    store.set(&v1, 1_u32, None).await.unwrap();
-    store.set(&v2, 2_u32, None).await.unwrap();
-
-    assert_eq!(store.remove_prefix("user:v1").await.unwrap(), 1);
-    assert_eq!(store.get::<u32>(&v2).await.unwrap(), Some(2));
-
-    store.set(&v1, 1_u32, None).await.unwrap();
-    assert_eq!(
-        store.remove_prefix("user").await.unwrap(),
-        2,
-        "the name drops every version"
     );
 }
 

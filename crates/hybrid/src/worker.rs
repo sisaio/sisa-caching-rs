@@ -531,27 +531,20 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_forgets_the_node_without_a_clear() {
-        let mut peers = Peers::new();
+    fn a_stop_forgets_the_node_and_clears_only_for_a_missing_number() {
+        // Before it stopped at number 2, the node sent 1 and 2, or 2 only.
+        for (sent, gap) in [(&[1, 2][..], None), (&[2][..], Some(Gap::Missing))] {
+            let mut peers = Peers::new();
 
-        peers.receive(&heartbeat(0));
-        peers.receive(&key(1));
-        peers.receive(&key(2));
+            peers.receive(&heartbeat(0));
+            for &seq in sent {
+                peers.receive(&key(seq));
+            }
 
-        assert_eq!(peers.receive(&stopping(2)), None);
-        assert!(peers.nodes.is_empty(), "nothing is left to time out");
-        assert!(peers.expire(Duration::ZERO).is_empty());
-    }
-
-    #[test]
-    fn a_stop_still_shows_a_missing_number() {
-        let mut peers = Peers::new();
-
-        peers.receive(&heartbeat(0));
-        peers.receive(&key(2));
-
-        assert_eq!(peers.receive(&stopping(2)), Some(Gap::Missing));
-        assert!(peers.nodes.is_empty());
+            assert_eq!(peers.receive(&stopping(2)), gap, "sent {sent:?}");
+            assert!(peers.nodes.is_empty(), "nothing is left to time out");
+            assert!(peers.expire(Duration::ZERO).is_empty());
+        }
     }
 
     #[test]
