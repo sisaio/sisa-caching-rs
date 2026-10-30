@@ -243,8 +243,11 @@ where
             // A deadline past what the platform's clock can hold never comes.
             ms => requested_at.checked_add(Duration::from_millis(ms as u64)),
         };
-        let created_at =
-            SystemTime::UNIX_EPOCH + Duration::from_millis(created_at_ms.unwrap_or_default());
+        // A creation time past what the platform's clock can hold, which only another writer can
+        // store, reads as the epoch, as a missing one does.
+        let created_at = created_at_ms
+            .and_then(|ms| SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
         let value = JsonCodec.decode(&encoded_value);
 
         // Data that doesn't decode is a miss too: the caller gets no value.
