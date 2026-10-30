@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::common::{backplane, key, local_value, memory, name, node, start};
+use futures_util::FutureExt;
 use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
     settings::CacheSettings,
@@ -121,21 +122,25 @@ async fn calls_use_the_distributed_stores_settings() {
     clock.advance(secs(1));
     assert!(node.get::<String>(&key(1)).await.unwrap().is_none());
 
-    // The distributed store's 20 ms lock timeout. The first load never finishes, so it holds the
-    // key's lock for good.
+    // The distributed store's 20 ms lock timeout, not the default 30 s. The first load never
+    // finishes, so once polled it holds the key's lock for good.
     let user = key(3);
-    let stuck = node.get_or_set(&user, pending::<Result<String, Infallible>>, None);
+    let mut stuck = Box::pin(node.get_or_set(&user, pending::<Result<String, Infallible>>, None));
 
-    let loaded = tokio::select! {
-        _ = stuck => unreachable!(),
-        loaded = node.get_or_set(&user, || async { Ok::<_, Infallible>("ada".to_owned()) }, None) => loaded,
-    };
+    assert!((&mut stuck).now_or_never().is_none());
 
-    assert_eq!(
-        loaded.as_deref(),
-        Ok("ada"),
-        "the 20 ms lock timeout ended the wait"
-    );
+    let loaded = tokio::time::timeout(
+        secs(1),
+        node.get_or_set(
+            &user,
+            || async { Ok::<_, Infallible>("ada".to_owned()) },
+            None,
+        ),
+    )
+    .await
+    .expect("the 20 ms lock timeout ends the wait");
+
+    assert_eq!(loaded.as_deref(), Ok("ada"));
 }
 
 #[tokio::test]
