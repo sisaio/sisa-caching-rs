@@ -25,17 +25,16 @@ use crate::settings::RedisBackplaneSettings;
 
 use super::BackplaneMessage;
 
-/// How many unread messages a subscription holds. The connection keeps reading, so Redis's limit
-/// on slow subscribers never applies. A worker that falls further behind loses its subscription
-/// instead, so it clears its local layer and subscribes again, rather than the messages queueing
-/// without a bound or getting lost without a sign.
+/// How many unread messages a subscription holds, as [`RedisBackplane`] says.
 const QUEUE_LIMIT: usize = 8192;
 
 /// A backplane over Redis pub/sub. Each hybrid store has its own channel, `<store>:backplane`, such
 /// as `catalog:backplane`, so a node gets only its own stores' messages. Publishing shares one
 /// connection. Each subscription opens its own connection, on RESP3, and holds up to 8,192
-/// messages its worker hasn't read: a worker that falls further behind loses its subscription, so
-/// the node clears its local layer and subscribes again.
+/// messages its worker hasn't read. The connection keeps reading, so Redis's limit on slow
+/// subscribers never applies: a worker that falls further behind loses its subscription instead,
+/// so the node clears its local layer and subscribes again, rather than messages piling up or
+/// getting lost without a sign.
 ///
 /// Redis delivers a message to subscribers on every database, so two deployments that share a
 /// server need different store names, such as `prod:catalog` and `staging:catalog`, even on
