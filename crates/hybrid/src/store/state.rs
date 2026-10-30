@@ -127,13 +127,17 @@ impl State {
 
     /// Applies an invalidation, this node's own or another's. A prefix's copies are removed on the
     /// blocking pool, as that walks every local entry, so neither the write nor the worker waits
-    /// for it. Its keys read as misses until the walk is done, the bump keeps a stale copy from
-    /// landing after it, and the walk removes the ones from before. With `REMOVING_LIMIT` walks
+    /// for it. The bump keeps a stale copy from landing after it, its keys read as misses until
+    /// the walk is done, and the walk removes the copies from before. With `REMOVING_LIMIT` walks
     /// already queued, the prefix clears the local layer instead, which takes no walk.
     pub(crate) async fn apply(&self, invalidation: &Invalidation) {
         let Invalidation::Prefix(prefix) = invalidation else {
             return self.invalidate(invalidation).await;
         };
+
+        // Bumped before the prefix is listed, as only its walk takes it off the list: a call
+        // dropped while it waits for its turn, such as on a caller's timeout, then lists nothing.
+        self.bump(invalidation).await;
 
         if !self.removing.add(prefix) {
             return self.invalidate(&Invalidation::Clear).await;
@@ -142,7 +146,6 @@ impl State {
         let (local, prefix, span) = (self.local_store.clone(), prefix.clone(), Span::current());
         let (removing, runtime) = (Arc::clone(&self.removing), Handle::current());
 
-        self.bump(invalidation).await;
         // The memory store never waits, so `block_on` returns when the walk does.
         tokio::task::spawn_blocking(move || {
             span.in_scope(|| _ = runtime.block_on(local.remove_prefix(prefix.as_str())));
@@ -449,6 +452,22 @@ mod tests {
 
             drop(release);
         });
+    }
+
+    #[tokio::test]
+    async fn a_prefix_removal_dropped_while_it_waits_for_its_turn_hides_nothing() {
+        let state = state().await;
+
+        promote(&state, "user:1").await;
+
+        // A promotion is copying, so the prefix's bump waits for its turn.
+        let turn = state.turns.read().await;
+        let prefix = Invalidation::Prefix(KeyPrefix::new("user").unwrap());
+
+        assert!(state.apply(&prefix).now_or_never().is_none());
+        drop(turn);
+
+        assert_eq!(local(&state, "user:1").await.as_deref(), Some("user:1"));
     }
 
     #[test]
