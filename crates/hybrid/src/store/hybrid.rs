@@ -20,7 +20,10 @@ use crate::{
     worker::BackplaneWorker,
 };
 
-use super::{RedisHybridCacheStore, state::State};
+use super::{
+    RedisHybridCacheStore,
+    state::{Publishing, State},
+};
 
 /// How many times a write tries to publish its invalidation, waiting 50 ms, then 100 ms, between
 /// tries. A late or repeated invalidation only costs a cache miss, so retrying is always safe.
@@ -264,7 +267,12 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.apply(&message.invalidation).await;
-                tokio::spawn(publish(state, backplane, message).in_current_span());
+
+                // Numbered before the caller hears back, so a `shutdown` after this write waits
+                // for its publish and counts it.
+                let publishing = state.sequence.start();
+
+                tokio::spawn(publish(publishing, backplane, message).in_current_span());
 
                 result
             }
@@ -275,12 +283,14 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     }
 }
 
-/// Publishes one invalidation under the store's next sequence number, retrying with a growing wait.
-/// When every try fails, the other nodes see the number missing at this node's next heartbeat and
-/// clear their local layers.
-async fn publish(state: Arc<State>, backplane: Arc<RedisBackplane>, mut message: BackplaneMessage) {
-    let publishing = state.sequence.start();
-
+/// Publishes one invalidation under its sequence number, retrying with a growing wait. When every
+/// try fails, the other nodes see the number missing at this node's next heartbeat and clear their
+/// local layers.
+async fn publish(
+    publishing: Publishing,
+    backplane: Arc<RedisBackplane>,
+    mut message: BackplaneMessage,
+) {
     message.seq = Some(publishing.seq);
 
     match send(&backplane, &message).await {

@@ -43,7 +43,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 sisa-caching-testing = { workspace = true }
-# `now_or_never` in the store state tests.
+# `now_or_never` in the store state tests, and reading the backplane channel in a Redis test.
 futures-util = { workspace = true }
 # Multi-threaded runtimes for the tests that race tasks.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
