@@ -29,9 +29,15 @@ sequenceDiagram
                 Store-->>App: that value
             else still due, missing, or unreadable
                 Store->>Loader: load()
-                Loader-->>Store: new value, or an error
-                Store->>Store: set(key, new value)
-                Store-->>App: new value, or on an error the cached one if the store still holds it
+                alt loaded
+                    Loader-->>Store: new value
+                    Store->>Store: set(key, new value)
+                    Store-->>App: new value
+                else the load fails
+                    Loader-->>Store: an error
+                    Store->>Store: get_entry(key) again
+                    Store-->>App: the cached value if the store still holds it, else the error
+                end
             end
         end
     else missing
