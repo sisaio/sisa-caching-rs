@@ -55,10 +55,6 @@ impl RedisCacheSettings {
 
         Ok(())
     }
-
-    pub fn scan_batch_size(&self) -> u32 {
-        self.scan_batch_size
-    }
 }
 
 #[cfg(test)]

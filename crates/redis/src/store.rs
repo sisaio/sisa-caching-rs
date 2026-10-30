@@ -105,7 +105,7 @@ where
 
         let mut conn = self.conn.clone();
         let mut removed = 0;
-        let batch_size = self.settings.scan_batch_size();
+        let batch_size = self.settings.scan_batch_size;
 
         // `SCAN` sees one node's keys, so each primary of a cluster is walked on its own.
         for node in conn.primaries().await? {
