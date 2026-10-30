@@ -4,9 +4,7 @@
 
 #![cfg(feature = "tls-rustls")]
 
-mod common;
-
-use common::{assert_a_write_reaches, start};
+use crate::common::{assert_a_write_reaches, start};
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
     store::{HybridCacheStore, RedisHybridCacheStore},

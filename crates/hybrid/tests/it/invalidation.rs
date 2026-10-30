@@ -2,8 +2,6 @@
 //! reaches the local copies on the others, and what happens when the subscription breaks. The
 //! distributed store is a memory store, so a test can break the backplane alone.
 
-mod common;
-
 use std::{
     sync::{
         Arc,
@@ -12,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use common::{
+use crate::common::{
     Node, WRITES, Write, backplane, fast_heartbeats, key, local_value, memory, node, publish,
     publish_removal, removal, start, start_with,
 };
