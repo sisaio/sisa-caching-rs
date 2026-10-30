@@ -338,6 +338,8 @@ impl CacheStore for InMemoryCacheStore {
         &self,
         key: &str,
     ) -> Result<Option<CacheEntry<CV>>, CacheError> {
+        // Read first even when the entry has no deadline: measured, reading it after the lookup,
+        // only when needed, slows hits on entries with a TTL, which most entries have.
         let now = self.clock.instant();
         // An expired entry stays until a purge, a trim or a write replaces it.
         let found = read(self.entries.shard(key))
@@ -385,13 +387,16 @@ impl CacheStore for InMemoryCacheStore {
                 });
         }
 
-        let now = self.clock.instant();
+        let max_ttl = self.settings.max_ttl();
+        // An entry that never expires, in a store that caps nothing, needs no clock. Otherwise the
+        // monotonic clock goes first: measured, the other order slows writes with a TTL.
+        let now = (entry.expires_at().is_some() || max_ttl.is_some()).then(|| self.clock.instant());
         // The store holds an entry for its remaining lifetime, or `max_ttl_secs` if that is
         // shorter.
-        let ttl = match (
-            entry.remaining_ttl(self.clock.now()),
-            self.settings.max_ttl(),
-        ) {
+        let remaining = entry
+            .expires_at()
+            .and_then(|_| entry.remaining_ttl(self.clock.now()));
+        let ttl = match (remaining, max_ttl) {
             (Some(remaining), Some(cap)) => Some(remaining.min(cap)),
             (remaining, cap) => remaining.or(cap),
         };
@@ -401,7 +406,7 @@ impl CacheStore for InMemoryCacheStore {
             key.to_owned(),
             StoredEntry {
                 entry: entry.map(|value| Arc::new(value) as Erased),
-                deadline: ttl.and_then(|ttl| now.checked_add(ttl)),
+                deadline: ttl.zip(now).and_then(|(ttl, now)| now.checked_add(ttl)),
                 last_used: AtomicU64::new(self.entries.next_use()),
             },
         );
@@ -729,13 +734,16 @@ mod tests {
         );
 
         store.set(&key(1), 1_u32, ttl(60)).await.unwrap();
+        // One that never expires is capped too.
+        store.set(&key(2), 2_u32, None).await.unwrap();
 
         let entry = store.get_entry::<u32>(&key(1)).await.unwrap().unwrap();
 
         assert_eq!(entry.ttl(), Some(secs(60)));
+        assert_eq!(held(&store, 1..3).await, [1, 2]);
 
         clock.advance(secs(10));
-        assert!(held(&store, 1..2).await.is_empty());
+        assert!(held(&store, 1..3).await.is_empty());
     }
 
     #[tokio::test]
