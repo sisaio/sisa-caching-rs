@@ -10,8 +10,9 @@ use tokio::task::AbortHandle;
 use crate::cache::KeyPrefix;
 
 /// The background task a store runs for itself, such as its purge, shared by the store's clones.
-/// It starts once, on the store's first call inside a tokio runtime, and stops when the store's
-/// last clone drops, or for good on [`stop`](Self::stop).
+/// It starts once, on the store's first call inside a tokio runtime, and runs on that runtime
+/// until the store's last clone drops, or for good on [`stop`](Self::stop). So that runtime must
+/// outlive the store: a task whose runtime shut down is gone, and doesn't start again.
 ///
 /// A task that holds a copy of its store gives that copy [`none`](Self::none), so the task
 /// doesn't keep itself running.
