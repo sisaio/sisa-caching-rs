@@ -12,6 +12,7 @@ pub const MAX_TTL_SECS: u64 = 365 * 24 * 60 * 60;
 /// Settings every store has.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct CacheSettings {
     /// The TTL of a write that doesn't set one. `None` keeps values until removed or evicted;
     /// `validate` rejects `0`, which would expire every write at once.

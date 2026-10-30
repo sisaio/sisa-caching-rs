@@ -534,9 +534,10 @@ mod tests {
 
     fn with_ttl(ttl_secs: u64) -> InMemoryCacheSettings {
         InMemoryCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(ttl_secs),
-                ..CacheSettings::default()
+            common: {
+                let mut settings = CacheSettings::default();
+                settings.ttl_secs = Some(ttl_secs);
+                settings
             },
             ..InMemoryCacheSettings::default()
         }
@@ -1032,9 +1033,10 @@ mod tests {
         let store = store(
             &ManualClock::new(),
             InMemoryCacheSettings {
-                common: CacheSettings {
-                    lock_timeout_ms: Some(20),
-                    ..CacheSettings::default()
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.lock_timeout_ms = Some(20);
+                    settings
                 },
                 ..InMemoryCacheSettings::default()
             },
@@ -1142,10 +1144,11 @@ mod tests {
         let store = store(
             &clock,
             InMemoryCacheSettings {
-                common: CacheSettings {
-                    ttl_secs: Some(10),
-                    refresh_threshold: Some(0.8),
-                    ..CacheSettings::default()
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.ttl_secs = Some(10);
+                    settings.refresh_threshold = Some(0.8);
+                    settings
                 },
                 ..InMemoryCacheSettings::default()
             },
@@ -1191,10 +1194,11 @@ mod tests {
         let store = store(
             &clock,
             InMemoryCacheSettings {
-                common: CacheSettings {
-                    ttl_secs: Some(10),
-                    refresh_threshold: Some(0.5),
-                    ..CacheSettings::default()
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.ttl_secs = Some(10);
+                    settings.refresh_threshold = Some(0.5);
+                    settings
                 },
                 max_ttl_secs: Some(8),
                 ..InMemoryCacheSettings::default()
@@ -1275,10 +1279,11 @@ mod tests {
             .unwrap()
             .with_clock(clock.clone())
             .with_settings(InMemoryCacheSettings {
-                common: CacheSettings {
-                    ttl_secs: Some(10),
-                    refresh_threshold: Some(0.5),
-                    ..CacheSettings::default()
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.ttl_secs = Some(10);
+                    settings.refresh_threshold = Some(0.5);
+                    settings
                 },
                 ..InMemoryCacheSettings::default()
             })

@@ -304,7 +304,8 @@ stays subscribed.
 | Hybrid | `HybridCacheError` | `Cache`, `StoreNameMismatch` at construction, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked, or the runtime shut down before it finished) |
 
 The error enums and `metrics::Layer` are `#[non_exhaustive]`, so a later release can add a
-variant without breaking a `match`.
+variant without breaking a `match`. So are the settings structs, so it can add a setting: build
+them from `default()` and set fields on it.
 
 Some failures are logged as warnings and not returned, because the caller still gets a correct
 answer:

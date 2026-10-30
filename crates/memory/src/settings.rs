@@ -26,6 +26,7 @@ const MAX_SHARDS: usize = 1_024;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct InMemoryCacheSettings {
     /// The settings every store has: the default TTL, refresh-ahead and the `get_or_set` lock wait.
     pub common: CacheSettings,
@@ -130,9 +131,10 @@ mod tests {
             (
                 "ttl_secs",
                 InMemoryCacheSettings {
-                    common: CacheSettings {
-                        ttl_secs: too_long,
-                        ..CacheSettings::default()
+                    common: {
+                        let mut settings = CacheSettings::default();
+                        settings.ttl_secs = too_long;
+                        settings
                     },
                     ..InMemoryCacheSettings::default()
                 },
@@ -195,9 +197,10 @@ mod tests {
 
         let year = Some(MAX_TTL_SECS);
         let settings = InMemoryCacheSettings {
-            common: CacheSettings {
-                ttl_secs: year,
-                ..CacheSettings::default()
+            common: {
+                let mut settings = CacheSettings::default();
+                settings.ttl_secs = year;
+                settings
             },
             purge_interval_secs: year,
             max_ttl_secs: year,

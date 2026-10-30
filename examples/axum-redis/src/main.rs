@@ -13,7 +13,7 @@
 //!
 //! `REDIS_URL` picks another server and `PORT` another port.
 
-use sisa_caching::{CacheSettings, RedisCacheSettings, RedisCacheStore};
+use sisa_caching::{RedisCacheSettings, RedisCacheStore};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,16 +24,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // while other reads are still served the cached value, so busy keys never expire under load.
     // A loader stuck longer than five seconds stops holding up other requests for its key. The
     // connection reconnects by itself if Redis restarts.
+    let mut settings = RedisCacheSettings::default();
+    settings.common.ttl_secs = Some(600);
+    settings.common.refresh_threshold = Some(0.8);
+    settings.common.lock_timeout_ms = Some(5_000);
     let cache = RedisCacheStore::connect("example", url)
         .await?
-        .with_settings(RedisCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(600),
-                refresh_threshold: Some(0.8),
-                lock_timeout_ms: Some(5_000),
-            },
-            ..Default::default()
-        })?;
+        .with_settings(settings)?;
 
     let served = users_api::serve(users_api::router(cache)).await;
 

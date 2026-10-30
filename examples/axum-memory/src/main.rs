@@ -11,7 +11,7 @@
 //! curl localhost:3000/users/count  # reloaded: 4
 //! ```
 
-use sisa_caching::{CacheSettings, InMemoryCacheSettings, InMemoryCacheStore};
+use sisa_caching::{InMemoryCacheSettings, InMemoryCacheStore};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,16 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Up to 10,000 entries, each for five minutes unless a write says otherwise. The store sweeps
     // out expired entries every minute, from its first write on. A loader stuck longer than five
     // seconds stops holding up other requests for its key.
-    let cache = InMemoryCacheStore::new("example")?.with_settings(InMemoryCacheSettings {
-        common: CacheSettings {
-            ttl_secs: Some(300),
-            lock_timeout_ms: Some(5_000),
-            ..Default::default()
-        },
-        max_entries: Some(10_000),
-        purge_interval_secs: Some(60),
-        ..Default::default()
-    })?;
+    let mut settings = InMemoryCacheSettings::default();
+    settings.common.ttl_secs = Some(300);
+    settings.common.lock_timeout_ms = Some(5_000);
+    settings.max_entries = Some(10_000);
+    settings.purge_interval_secs = Some(60);
+    let cache = InMemoryCacheStore::new("example")?.with_settings(settings)?;
 
     let served = users_api::serve(users_api::router(cache)).await;
 

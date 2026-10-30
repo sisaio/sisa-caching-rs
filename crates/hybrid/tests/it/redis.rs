@@ -8,15 +8,14 @@ use futures_util::StreamExt;
 use sisa_caching_core::{
     cache::{CacheEntry, CacheStore},
     clock::{Clock, SystemClock},
-    settings::CacheSettings,
 };
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
     settings::{HybridCacheSettings, RedisBackplaneSettings},
     store::{HybridCacheStore, RedisHybridCacheStore},
 };
-use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
-use sisa_caching_redis::{settings::RedisCacheSettings, store::RedisCacheStore};
+use sisa_caching_memory::store::InMemoryCacheStore;
+use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Redis, eventually};
 
 async fn connect_backplane(redis: &Redis, settings: RedisBackplaneSettings) -> RedisBackplane {
@@ -48,28 +47,20 @@ async fn node(redis: &Redis) -> RedisHybridCacheStore {
 
 /// Pings every 50 ms and gives up after 100 ms, so a stall shows quickly.
 fn quick_pings() -> RedisBackplaneSettings {
-    RedisBackplaneSettings {
-        ping_interval_ms: 50,
-        ping_timeout_ms: 100,
-    }
+    let mut settings = RedisBackplaneSettings::default();
+    settings.ping_interval_ms = 50;
+    settings.ping_timeout_ms = 100;
+    settings
 }
 
 #[tokio::test]
 async fn connect_builds_every_part_on_one_server_with_its_settings() {
     let redis = Redis::start().await;
-    let settings = HybridCacheSettings {
-        local: InMemoryCacheSettings {
-            max_ttl_secs: Some(60),
-            ..InMemoryCacheSettings::default()
-        },
-        distributed: RedisCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(300),
-                ..CacheSettings::default()
-            },
-            ..RedisCacheSettings::default()
-        },
-        ..HybridCacheSettings::default()
+    let settings = {
+        let mut settings = HybridCacheSettings::default();
+        settings.local.max_ttl_secs = Some(60);
+        settings.distributed.common.ttl_secs = Some(300);
+        settings
     };
     let connect = || HybridCacheStore::connect("users", redis.url(), &settings);
     let writer = connect().await.unwrap();

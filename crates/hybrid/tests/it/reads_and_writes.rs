@@ -10,10 +10,7 @@ use std::{
 
 use crate::common::{backplane, key, local_value, memory, name, node, start};
 use futures_util::FutureExt;
-use sisa_caching_core::{
-    cache::{CacheError, CacheKey, CacheOptions, CacheStore},
-    settings::CacheSettings,
-};
+use sisa_caching_core::cache::{CacheError, CacheKey, CacheOptions, CacheStore};
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
     error::HybridCacheError,
@@ -40,10 +37,9 @@ fn on_clock(clock: &ManualClock, settings: InMemoryCacheSettings) -> InMemoryCac
 }
 
 fn with_max_ttl(max_ttl_secs: u64) -> InMemoryCacheSettings {
-    InMemoryCacheSettings {
-        max_ttl_secs: Some(max_ttl_secs),
-        ..InMemoryCacheSettings::default()
-    }
+    let mut settings = InMemoryCacheSettings::default();
+    settings.max_ttl_secs = Some(max_ttl_secs);
+    settings
 }
 
 #[tokio::test]
@@ -94,17 +90,12 @@ async fn calls_use_the_distributed_stores_settings() {
     let redis = Redis::start().await;
     let clock = ManualClock::new();
     let local = on_clock(&clock, InMemoryCacheSettings::default());
-    let distributed = on_clock(
-        &clock,
-        InMemoryCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(3),
-                lock_timeout_ms: Some(20),
-                ..CacheSettings::default()
-            },
-            ..InMemoryCacheSettings::default()
-        },
-    );
+    let distributed = on_clock(&clock, {
+        let mut settings = InMemoryCacheSettings::default();
+        settings.common.ttl_secs = Some(3);
+        settings.common.lock_timeout_ms = Some(20);
+        settings
+    });
     let node =
         start(HybridCacheStore::new(local, distributed.clone(), backplane(&redis).await).unwrap())
             .await;
@@ -187,17 +178,12 @@ async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
 async fn the_local_cap_does_not_make_get_or_set_refresh_early() {
     let redis = Redis::start().await;
     let clock = ManualClock::new();
-    let distributed = on_clock(
-        &clock,
-        InMemoryCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(100),
-                refresh_threshold: Some(0.8),
-                ..CacheSettings::default()
-            },
-            ..InMemoryCacheSettings::default()
-        },
-    );
+    let distributed = on_clock(&clock, {
+        let mut settings = InMemoryCacheSettings::default();
+        settings.common.ttl_secs = Some(100);
+        settings.common.refresh_threshold = Some(0.8);
+        settings
+    });
     let node = start(
         HybridCacheStore::new(
             on_clock(&clock, with_max_ttl(10)),
@@ -327,12 +313,10 @@ async fn new_rejects_parts_that_do_not_fit() {
     // A local store with `common` settings, which hybrid calls never read.
     let with_common = InMemoryCacheStore::new("users")
         .unwrap()
-        .with_settings(InMemoryCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(60),
-                ..CacheSettings::default()
-            },
-            ..InMemoryCacheSettings::default()
+        .with_settings({
+            let mut settings = InMemoryCacheSettings::default();
+            settings.common.ttl_secs = Some(60);
+            settings
         })
         .unwrap();
 
@@ -345,13 +329,11 @@ async fn new_rejects_parts_that_do_not_fit() {
     ));
 
     // Backplane and worker settings out of range.
-    let unpinged = RedisBackplane::connect(
-        redis.url(),
-        RedisBackplaneSettings {
-            ping_interval_ms: 0,
-            ..RedisBackplaneSettings::default()
-        },
-    )
+    let unpinged = RedisBackplane::connect(redis.url(), {
+        let mut settings = RedisBackplaneSettings::default();
+        settings.ping_interval_ms = 0;
+        settings
+    })
     .await
     .unwrap();
 
@@ -367,9 +349,10 @@ async fn new_rejects_parts_that_do_not_fit() {
         HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
 
     assert!(matches!(
-        store.with_worker_settings(BackplaneWorkerSettings {
-            heartbeat_interval_ms: 0,
-            ..BackplaneWorkerSettings::default()
+        store.with_worker_settings({
+            let mut settings = BackplaneWorkerSettings::default();
+            settings.heartbeat_interval_ms = 0;
+            settings
         }),
         Err(HybridCacheError::Cache(CacheError::InvalidSettings {
             field: "heartbeat_interval_ms",

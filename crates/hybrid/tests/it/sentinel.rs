@@ -28,13 +28,11 @@ async fn node_on(conn: SentinelConnection) -> Node {
         HybridCacheStore::new(
             InMemoryCacheStore::new("users").unwrap(),
             RedisCacheStore::new("users", conn.clone()).unwrap(),
-            RedisBackplane::sentinel(
-                conn,
-                RedisBackplaneSettings {
-                    ping_interval_ms: 100,
-                    ..RedisBackplaneSettings::default()
-                },
-            ),
+            RedisBackplane::sentinel(conn, {
+                let mut settings = RedisBackplaneSettings::default();
+                settings.ping_interval_ms = 100;
+                settings
+            }),
         )
         .unwrap(),
     )
