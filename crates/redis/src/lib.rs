@@ -61,6 +61,8 @@ pub mod settings;
 pub mod store;
 
 /// The redis-rs crate this one is built on, for building connections without depending on it.
+/// Its types are part of this crate's API, so moving to a redis-rs release that breaks its own
+/// API is a breaking release of this crate too.
 pub use redis;
 
 pub use connection::{RedisConnection, SentinelConnection, connection_config};
