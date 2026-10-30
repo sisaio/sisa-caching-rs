@@ -57,7 +57,8 @@ use crate::{
 /// ```
 ///
 /// Only the memory, Redis and hybrid stores implement it, so a later release can add a method
-/// without breaking code that uses a store.
+/// without breaking code that uses a store. The `Sealed` trait it needs is public only so those
+/// crates can reach it; implementing it elsewhere isn't supported and may break in any release.
 pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     /// What the store's calls fail with. Every [`CacheError`] converts into it.
     type Error: From<CacheError> + std::error::Error + Send + Sync + 'static;

@@ -89,18 +89,21 @@ cargo run -p sisa-caching-benches --bin summary
 A change to any of these is breaking: it takes `!` in the commit and the `breaking` label.
 
 - Every public Rust item that isn't `#[doc(hidden)]`. Hidden items, such as `worker`, `locker`,
-  `sealed` and `metrics::METRICS`, are public only for the store crates and their tests.
+  `sealed` and `metrics::METRICS`, aren't part of the supported API: Rust has no visibility
+  between crates, so they are `pub` for the store crates and their tests, and any crate can still
+  reach them, but a release may change them.
 - The settings' field names, which config files use, and what each default is.
 - The metric names and attributes, and the span names and fields, in
   [docs/04-observability.md](docs/04-observability.md): dashboards and alerts match on them.
 - The Redis hash and the backplane message in
   [docs/01-architecture.md](docs/01-architecture.md#data-formats), which other languages write.
-- The redis-rs version: its types reach the API through `sisa_caching_redis::redis`.
+- The redis-rs types that reach the API through `sisa_caching_redis::redis`: moving to a
+  redis-rs release that breaks its own API is breaking here too.
 
-What stays open: `CacheStore` is sealed, so only this workspace's stores implement it, and a
-method added to it isn't breaking. The settings structs and the error enums are
-`#[non_exhaustive]`, so a new setting or variant isn't either. Build settings from `default()`
-and set fields on it.
+What stays open: `CacheStore` is sealed by the hidden `sealed::Sealed`, so only this workspace's
+stores are supported implementations, and a method added to it isn't breaking. The settings
+structs and the error enums are `#[non_exhaustive]`, so a new setting or variant isn't either.
+Build settings from `default()` and set fields on it.
 
 ## Code style
 
