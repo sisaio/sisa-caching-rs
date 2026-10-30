@@ -29,7 +29,7 @@ use super::{
 /// tries. A late or repeated invalidation only costs a cache miss, so retrying is always safe.
 const PUBLISH_ATTEMPTS: u32 = 3;
 
-/// How long `shutdown` waits for the invalidations still being published.
+/// How long `shutdown` waits for the writes still running and their invalidations.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 
 /// An in-memory layer in front of a distributed store, with invalidations carried by a
@@ -182,8 +182,9 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// their local layers once its heartbeats have stopped for `heartbeat_timeout_ms`. Call it
     /// once, as the application shuts down, after its last write.
     ///
-    /// It waits up to two seconds for the invalidations still being published, publishes one
-    /// `stopping` message that counts them, then stops the backplane worker for good, for every
+    /// It waits up to two seconds for the writes still running, even those whose caller gave up,
+    /// to publish their invalidations. Then it publishes one `stopping` message that counts every
+    /// write, so a node that missed one clears, and stops the backplane worker for good, for every
     /// clone, so reads go to the distributed store from then on. A later call does nothing. A write
     /// after it still works, but the other nodes clear once more when they don't hear from this
     /// node again. A node that stops without calling it costs every other node one clear.
@@ -216,7 +217,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         let stopping = BackplaneMessage::accounting(
             self.node_id().clone(),
             store.clone(),
-            sequence.finished(),
+            sequence.last(),
             Invalidation::Stopping,
         );
 
@@ -262,6 +263,10 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 
         let write = operation(Arc::clone(&self.distributed_store));
 
+        // Numbered before the write runs, so a `shutdown` while it runs, even after its caller gave
+        // up, waits for its publish and counts it.
+        let publishing = state.sequence.start();
+
         // Spawned, so a caller that gives up half way can't stop other nodes from hearing of it.
         let task = tokio::spawn(
             async move {
@@ -269,11 +274,6 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.apply(&message.invalidation).await;
-
-                // Numbered before the caller hears back, so a `shutdown` after this write waits
-                // for its publish and counts it.
-                let publishing = state.sequence.start();
-
                 tokio::spawn(publish(publishing, backplane, message).in_current_span());
 
                 result

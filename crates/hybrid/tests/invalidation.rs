@@ -719,3 +719,64 @@ async fn an_invalidation_from_elsewhere_during_a_read_drops_its_copy() {
         Some("new")
     );
 }
+
+#[tokio::test]
+async fn a_shutdown_waits_for_a_write_whose_caller_gave_up() {
+    let redis = Redis::start().await;
+    let (node, distributed) = pausing_node(&redis).await;
+
+    distributed.pause(true);
+
+    let write = tokio::spawn({
+        let node = node.clone();
+        async move { node.set(&key(1), "new".to_owned(), None).await }
+    });
+
+    distributed.write_started.notified().await;
+    write.abort();
+
+    let shutdown = tokio::spawn({
+        let node = node.clone();
+        async move { node.shutdown().await }
+    });
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!shutdown.is_finished(), "it waits for the write");
+
+    distributed.finish_write.notify_one();
+    shutdown.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_shutdown_that_gives_up_on_a_write_makes_the_other_nodes_clear() {
+    let redis = Redis::start().await;
+    let (writer, distributed) = pausing_node(&redis).await;
+    let reader = start(
+        HybridCacheStore::new(
+            memory("users"),
+            distributed.clone(),
+            backplane(&redis).await,
+        )
+        .unwrap(),
+    )
+    .await;
+
+    reader.get::<String>(&key(1)).await.unwrap();
+    distributed.pause(true);
+
+    let write = tokio::spawn({
+        let writer = writer.clone();
+        async move { writer.set(&key(1), "new".to_owned(), None).await }
+    });
+
+    distributed.write_started.notified().await;
+    // Gives up on the write after two seconds, and its stop counts the write.
+    writer.shutdown().await;
+
+    eventually("the reader clears at the stop", || async {
+        local_value(&reader, &key(1)).await.is_none()
+    })
+    .await;
+    distributed.finish_write.notify_one();
+    write.await.unwrap().unwrap();
+}

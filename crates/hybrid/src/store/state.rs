@@ -225,9 +225,9 @@ impl Removing {
     }
 }
 
-/// Hands out this node's sequence numbers and tracks which are still being published, so a
-/// heartbeat only vouches for numbers whose publish is over. Those were sent before the heartbeat,
-/// so every subscriber that gets them gets them before it.
+/// Hands out this node's sequence numbers, one to each write as it starts, and tracks which are
+/// still being written or published, so a heartbeat only vouches for numbers whose publish is
+/// over. Those were sent before the heartbeat, so every subscriber that gets them gets them first.
 #[derive(Default)]
 pub(crate) struct Sequence(Mutex<Numbers>);
 
@@ -272,9 +272,14 @@ impl Sequence {
             .first()
             .map_or(numbers.last, |first| first - 1)
     }
+
+    /// The last number handed out.
+    pub(crate) fn last(&self) -> u64 {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).last
+    }
 }
 
-/// One number being published.
+/// One number being written or published.
 pub(crate) struct Publishing {
     sequence: Arc<Sequence>,
     pub(crate) seq: u64,

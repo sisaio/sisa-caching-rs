@@ -24,10 +24,11 @@ pub(crate) struct BackplaneMessage {
     /// The store whose local copies go.
     pub store: KeyPrefix,
     /// On an invalidation, its number in the writer's sequence, which counts up from 1 with every
-    /// invalidation the writer publishes. On a heartbeat or a stop, the highest number up to which
-    /// the writer has finished publishing every invalidation, whether or not the publish worked. A node that
-    /// received fewer numbers than that missed one. `None` from a writer that doesn't number its
-    /// invalidations, such as a service in another language; nodes apply those without tracking.
+    /// invalidation the writer publishes. On a heartbeat, the highest number up to which the writer
+    /// has finished publishing every invalidation, whether or not the publish worked; on a stop,
+    /// the last number it handed out. A node that received fewer numbers than that missed one.
+    /// `None` from a writer that doesn't number its invalidations, such as a service in another
+    /// language; nodes apply those without tracking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     /// Which local copies go.
