@@ -141,11 +141,12 @@ pub trait CacheStore: Send + Sync {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Returns the value under `key`, or runs `load` when there is none, then stores and returns
-    /// what it gives. One caller per key in this process runs `load`; the others wait for it, up
-    /// to `lock_timeout_ms`, and get what it stored. A write made while `load` runs can be
-    /// overwritten by its result, and other processes load on their own. With `refresh_threshold`
-    /// set, a value past that share of its TTL is loaded again by one caller, while the others
-    /// get the cached value.
+    /// what it gives. Of the callers on this store and its clones, one per key runs `load`; the
+    /// others wait for it and get what it stored, or after `lock_timeout_ms` run `load` too. Other
+    /// stores, such as those in other processes, load on their own, and a write made while `load`
+    /// runs can be overwritten by its result. With `refresh_threshold` set, a value past that
+    /// share of its TTL is loaded again by one caller, while the others get the cached value; if
+    /// that load fails, its caller gets the cached value as long as the store still holds it.
     ///
     /// ```
     /// use std::time::Duration;
@@ -165,7 +166,7 @@ pub trait CacheStore: Send + Sync {
     ///     Ok(User { id, name: "Ada".to_string() })
     /// }
     ///
-    /// // A failed query comes back as it is, and nothing is cached.
+    /// // On a miss, a failed query comes back as it is, and nothing is cached.
     /// async fn user<C: CacheStore>(cache: &C, id: u64) -> Result<User, DbError> {
     ///     let five_minutes = CacheOptions::with_ttl(Duration::from_secs(300));
     ///
