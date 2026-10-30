@@ -522,7 +522,9 @@ mod tests {
         state.resync(true).await;
 
         let seen = state.generation(&key());
-        let old = entry(&state, "old");
+        // One that expires, as the memory store reads the time in `set_entry` only for those.
+        let ttl = Some(Duration::from_secs(60));
+        let old = CacheEntry::new("old".to_owned(), SystemClock.now(), ttl);
         let waiting = Arc::new(Mutex::new(None));
         let (invalidated, started) = (Arc::clone(&state), Arc::clone(&waiting));
 
