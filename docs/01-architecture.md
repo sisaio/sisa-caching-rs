@@ -101,8 +101,8 @@ Rules every store follows:
 - **`set` and `get_or_set`** are default methods of `CacheStore`, written once on top of each
   store's `get_entry` and `set_entry`. `get_or_set` takes a per-key lock, waits up to
   `lock_timeout_ms`, reads again under the lock, and only then loads. Past
-  `refresh_threshold`, the first caller to take the lock reloads while the others get the cached
-  value.
+  `refresh_threshold`, the first caller to take the lock reads again too, and reloads unless
+  another caller has just refreshed the entry; the others get the cached value.
 
 ## Inside each store
 
