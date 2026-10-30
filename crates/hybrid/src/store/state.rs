@@ -43,7 +43,7 @@ pub(crate) struct State {
     /// The prefixes whose copies the blocking pool is still removing.
     removing: Arc<Removing>,
     /// Numbers this node's invalidations for its heartbeats.
-    pub(crate) sequence: Sequence,
+    pub(crate) sequence: Arc<Sequence>,
     /// Whether `shutdown` has sent the stop message. A heartbeat holds it while it publishes, so
     /// none goes out after the stop.
     pub(crate) stopped: tokio::sync::Mutex<bool>,
@@ -61,7 +61,7 @@ impl State {
             hasher: RandomState::new(),
             turns: RwLock::new(()),
             removing: Arc::default(),
-            sequence: Sequence::default(),
+            sequence: Arc::default(),
             stopped: tokio::sync::Mutex::new(false),
         }
     }
@@ -239,7 +239,7 @@ struct Numbers {
 
 impl Sequence {
     /// The next number, counted as publishing until the returned guard drops.
-    pub(crate) fn start(&self) -> Publishing<'_> {
+    pub(crate) fn start(self: &Arc<Self>) -> Publishing {
         let mut numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
 
         numbers.last += 1;
@@ -249,7 +249,7 @@ impl Sequence {
         numbers.publishing.insert(seq);
 
         Publishing {
-            sequence: self,
+            sequence: Arc::clone(self),
             seq,
         }
     }
@@ -275,12 +275,12 @@ impl Sequence {
 }
 
 /// One number being published.
-pub(crate) struct Publishing<'a> {
-    sequence: &'a Sequence,
+pub(crate) struct Publishing {
+    sequence: Arc<Sequence>,
     pub(crate) seq: u64,
 }
 
-impl Drop for Publishing<'_> {
+impl Drop for Publishing {
     fn drop(&mut self) {
         self.sequence
             .0
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn a_number_counts_as_finished_once_its_publish_and_every_earlier_one_is_over() {
-        let sequence = Sequence::default();
+        let sequence = Arc::new(Sequence::default());
 
         assert_eq!(sequence.finished(), 0);
 

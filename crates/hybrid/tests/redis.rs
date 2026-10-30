@@ -6,6 +6,7 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use common::{assert_a_write_reaches, key, local_value, start};
+use futures_util::StreamExt;
 use sisa_caching_core::{
     cache::{CacheEntry, CacheStore},
     clock::{Clock, SystemClock},
@@ -299,4 +300,43 @@ async fn a_closed_subscription_clears_the_copies_and_subscribes_again() {
     .await;
 
     assert_a_write_reaches(&writer, &reader).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stop_message_counts_a_write_that_returned_just_before_it() {
+    let redis = Redis::start().await;
+    let writer = node(&redis).await;
+    let mut pubsub = redis.client().get_async_pubsub().await.unwrap();
+
+    pubsub.subscribe("users:backplane").await.unwrap();
+
+    // In a task, as a request handler runs, which the runtime can go on with as soon as the write
+    // returns, before the write's publish has started.
+    tokio::spawn(async move {
+        writer.remove(&key(1)).await.unwrap();
+        writer.shutdown().await;
+    })
+    .await
+    .unwrap();
+
+    let messages = pubsub.on_message().filter_map(|message| async move {
+        let message: serde_json::Value =
+            serde_json::from_slice(message.get_payload_bytes()).ok()?;
+        let kind = message["kind"].as_str()?.to_owned();
+
+        (kind != "heartbeat").then(|| (kind, message["seq"].as_u64()))
+    });
+    let messages =
+        tokio::time::timeout(Duration::from_secs(5), messages.take(2).collect::<Vec<_>>())
+            .await
+            .expect("both messages arrive");
+
+    // The write's invalidation goes out first, and the stop message counts it.
+    assert_eq!(
+        messages,
+        [
+            ("key".to_owned(), Some(1)),
+            ("stopping".to_owned(), Some(1))
+        ]
+    );
 }
