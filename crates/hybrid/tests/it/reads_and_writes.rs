@@ -1,8 +1,6 @@
 //! One hybrid node: what reads and writes do to its local and distributed layers. The distributed
 //! layer is a memory store; only the backplane is on Redis.
 
-mod common;
-
 use std::{
     convert::Infallible,
     future::pending,
@@ -10,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use common::{backplane, key, local_value, memory, name, node, start};
+use crate::common::{backplane, key, local_value, memory, name, node, start};
 use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
     settings::CacheSettings,

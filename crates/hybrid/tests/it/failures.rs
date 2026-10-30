@@ -1,8 +1,6 @@
 //! Writes that fail, panic, or whose caller gives up half way: the other nodes must still hear of
 //! them, since the distributed store may have applied them anyway.
 
-mod common;
-
 use std::{
     sync::{
         Arc,
@@ -11,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use common::{WRITES, Write, backplane, key, local_value, memory, node, start};
+use crate::common::{WRITES, Write, backplane, key, local_value, memory, node, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,

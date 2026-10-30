@@ -1,9 +1,7 @@
 //! Hybrid nodes behind Sentinel, through a failover. Each test starts a primary, a replica and a
 //! Sentinel in Docker.
 
-mod common;
-
-use common::{key, local_value, start};
+use crate::common::{key, local_value, start};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_hybrid::{
     backplane::RedisBackplane, settings::RedisBackplaneSettings, store::HybridCacheStore,

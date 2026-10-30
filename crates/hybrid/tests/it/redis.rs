@@ -1,11 +1,9 @@
 //! Hybrid nodes on a real Redis: memory local layers, the Redis store, and the Redis pub/sub
 //! backplane. Each test starts its own server in Docker.
 
-mod common;
-
 use std::time::{Duration, SystemTime};
 
-use common::{assert_a_write_reaches, key, local_value, start};
+use crate::common::{assert_a_write_reaches, key, local_value, start};
 use futures_util::StreamExt;
 use sisa_caching_core::{
     cache::{CacheEntry, CacheStore},
