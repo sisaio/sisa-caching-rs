@@ -56,7 +56,9 @@ impl BackplaneWorker {
             Err(error) => {
                 METRICS.backplane_unreadable(store);
                 METRICS.local_cleared(store, "unreadable");
-                tracing::warn!(%store, %error, "could not read a backplane message; clearing the local layer");
+                // serde's message can quote the payload, keys among it, so only debug shows it.
+                tracing::debug!(%store, %error, "the unreadable backplane message");
+                tracing::warn!(%store, error = ?error.classify(), "could not read a backplane message; clearing the local layer");
                 return self.state.resync(true).await;
             }
         };

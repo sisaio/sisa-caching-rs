@@ -27,7 +27,7 @@ use sisa_caching_hybrid::{
     store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
-use sisa_caching_testing::{Redis, eventually};
+use sisa_caching_testing::{Logs, Redis, eventually};
 use tokio::sync::Notify;
 
 #[tokio::test]
@@ -356,6 +356,38 @@ async fn an_unreadable_message_clears_the_local_layer_and_keeps_the_subscription
         .await;
         assert!(node.local_reads_enabled(), "{payload}");
     }
+}
+
+#[tokio::test]
+async fn the_warning_about_an_unreadable_message_quotes_none_of_it() {
+    let logs = Logs::default();
+    let _logging = tracing::subscriber::set_default(logs.clone());
+    let redis = Redis::start().await;
+    let node = node(&memory("users"), &redis).await;
+
+    node.local_store()
+        .set(&key(1), "ada".to_owned(), None)
+        .await
+        .unwrap();
+    // The prefix has an empty level, and the error for that quotes it.
+    publish(
+        &redis,
+        "users",
+        r#"{"v":1,"source":"elsewhere","store":"users","kind":"prefix","target":"user::42"}"#,
+    )
+    .await;
+    eventually("the node clears", || async {
+        local_value(&node, &key(1)).await.is_none()
+    })
+    .await;
+
+    let logged = logs.lines().join(" ");
+
+    assert!(
+        logged.contains("could not read a backplane message"),
+        "{logged}"
+    );
+    assert!(!logged.contains("user::42"), "{logged}");
 }
 
 #[tokio::test]

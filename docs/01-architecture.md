@@ -352,7 +352,7 @@ Settled; reopen only with new evidence.
   `local`, `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
   misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
   hybrid calls read `distributed.common`.
-- Info spans and warnings carry the store and the invalidation kind, never a key; only debug spans
-  carry keys. Stores warn only about the errors they swallow. Their info lines say that a worker
-  started or stopped, a backplane subscribed, or store calls work again, and a worker's panic logs
-  an error.
+- Info spans and warnings carry the store and the invalidation kind, never a key or a value; only
+  debug spans and events carry keys. Stores warn only about the errors they swallow. Their info
+  lines say that a worker started or stopped, a backplane subscribed, or store calls work again,
+  and a worker's panic logs an error.

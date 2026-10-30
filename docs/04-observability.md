@@ -43,9 +43,9 @@ Worth an alert:
 | `redis remove_prefix`, `redis clear` | debug | `store`, plus `prefix` |
 | `hybrid get` | debug | `key` |
 
-`kind` is `key`, `prefix` or `clear`. Info spans and warnings never carry a key, so they are safe
-to keep in production; only debug spans carry the full key. Failed Redis and hybrid calls mark
-their span as an error.
+`kind` is `key`, `prefix` or `clear`. Info spans and warnings never carry a key or a value, so
+they are safe to keep in production; only debug spans carry the full key. Failed Redis and hybrid
+calls mark their span as an error.
 
 A hybrid write and the `hybrid apply_invalidation` spans it causes on other nodes share one trace.
 This needs a text map propagator, such as `TraceContextPropagator`, installed at startup. It also
@@ -74,9 +74,11 @@ later, so such a rolling deploy logs it once for each node it replaces. The back
 it subscribes. Each store's worker logs starting and stopping at info, and a panic at error, with
 the worker's name in `worker` and the store's in `store`.
 
-Warnings name the store, not the key. A `get_or_set` warning fires inside the `cache get_or_set`
-debug span, so with debug on it shows next to the key. An error's text can still quote part of a
-value, such as a string that no longer decodes into the requested type.
+Warnings name the store, not the key, and quote no value. A `get_or_set` warning fires inside the
+`cache get_or_set` debug span, so with debug on it shows next to the key. A Redis decode error
+says where the stored JSON stops fitting the type; serde's own message, which can quote the data,
+is the error's `source`. A warning about a backplane message that can't be read names the kind of
+problem, and the full message, which can quote keys, logs at debug.
 
 Every target starts with `sisa_caching`, so one filter covers all crates:
 
