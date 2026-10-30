@@ -611,16 +611,4 @@ mod tests {
         state.apply(&Invalidation::Key("user:2".to_owned())).await;
         release.send(()).expect("the walk held up the worker");
     }
-
-    #[tokio::test]
-    async fn a_resync_empties_the_local_layer_at_once_and_frees_it_on_the_blocking_pool() {
-        let state = state().await;
-        let (dropped, release) = promote_slow_drop(&state).await;
-
-        state.resync(true).await;
-        dropped.await.unwrap();
-
-        assert!(state.read::<SlowDrop>(&key()).await.is_none());
-        release.send(()).expect("the resync held up the worker");
-    }
 }

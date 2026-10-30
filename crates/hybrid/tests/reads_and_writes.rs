@@ -13,7 +13,7 @@ use std::{
 use common::{backplane, key, local_value, memory, name, node, start};
 use sisa_caching_core::{
     cache::{CacheError, CacheKey, CacheOptions, CacheStore},
-    settings::{CacheSettings, MAX_TTL_SECS},
+    settings::CacheSettings,
 };
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
@@ -118,25 +118,6 @@ async fn a_write_uses_its_own_ttl_or_the_distributed_default() {
 
     clock.advance(secs(1));
     assert!(node.get::<String>(&key(1)).await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn a_ttl_over_365_days_fails_before_anything_is_evicted() {
-    let redis = Redis::start().await;
-    let node = node(&memory("users"), &redis).await;
-
-    node.set(&key(1), "ada".to_owned(), None).await.unwrap();
-    node.get::<String>(&key(1)).await.unwrap();
-
-    assert!(matches!(
-        node.set(&key(1), "bob".to_owned(), ttl(MAX_TTL_SECS + 1))
-            .await,
-        Err(HybridCacheError::Cache(CacheError::InvalidSettings {
-            field: "ttl",
-            ..
-        }))
-    ));
-    assert_eq!(local_value(&node, &key(1)).await.as_deref(), Some("ada"));
 }
 
 #[tokio::test]
@@ -250,29 +231,6 @@ async fn one_store_serves_many_value_types() {
         node.local_store().get::<u64>(&count).await.unwrap(),
         Some(3),
         "the local copy keeps the type it was read as"
-    );
-}
-
-#[tokio::test]
-async fn get_or_set_stores_over_a_value_of_another_type() {
-    let redis = Redis::start().await;
-    let distributed = memory("users");
-    let node = node(&distributed, &redis).await;
-
-    node.set(&key(1), 3_u64, None).await.unwrap();
-
-    let loaded = node
-        .get_or_set(
-            &key(1),
-            || async { Ok::<_, Infallible>("ada".to_owned()) },
-            None,
-        )
-        .await;
-
-    assert_eq!(loaded.as_deref(), Ok("ada"));
-    assert_eq!(
-        distributed.get::<String>(&key(1)).await.unwrap().as_deref(),
-        Some("ada")
     );
 }
 

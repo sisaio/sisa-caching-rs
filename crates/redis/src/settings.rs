@@ -59,22 +59,30 @@ impl RedisCacheSettings {
 
 #[cfg(test)]
 mod tests {
+    use sisa_caching_core::settings::MAX_TTL_SECS;
+
     use super::*;
 
     #[test]
-    fn a_zero_scan_batch_size_is_rejected() {
-        let settings = |scan_batch_size| RedisCacheSettings {
+    fn out_of_range_settings_are_rejected() {
+        let batch = |scan_batch_size| RedisCacheSettings {
             scan_batch_size,
             ..RedisCacheSettings::default()
         };
+        let ttl = RedisCacheSettings {
+            common: CacheSettings {
+                ttl_secs: Some(MAX_TTL_SECS + 1),
+                ..CacheSettings::default()
+            },
+            ..RedisCacheSettings::default()
+        };
 
-        assert!(settings(1).validate().is_ok());
-        assert!(matches!(
-            settings(0).validate(),
-            Err(CacheError::InvalidSettings {
-                field: "scan_batch_size",
-                ..
-            })
-        ));
+        assert!(batch(1).validate().is_ok());
+        for (field, settings) in [("scan_batch_size", batch(0)), ("ttl_secs", ttl)] {
+            assert!(
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                "{field}"
+            );
+        }
     }
 }
