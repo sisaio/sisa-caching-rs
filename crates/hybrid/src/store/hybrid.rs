@@ -182,9 +182,9 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// their local layers once its heartbeats have stopped for `heartbeat_timeout_ms`. Call it
     /// once, as the application shuts down, after its last write.
     ///
-    /// It stops the backplane worker for good, for every clone, so reads go to the distributed
-    /// store from then on. It waits up to two seconds for the invalidations still being published,
-    /// then publishes one `stopping` message that counts them. A later call does nothing. A write
+    /// It waits up to two seconds for the invalidations still being published, publishes one
+    /// `stopping` message that counts them, then stops the backplane worker for good, for every
+    /// clone, so reads go to the distributed store from then on. A later call does nothing. A write
     /// after it still works, but the other nodes clear once more when they don't hear from this
     /// node again. A node that stops without calling it costs every other node one clear.
     pub async fn shutdown(&self) {
@@ -200,9 +200,6 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
             // heartbeat follows the stop message.
             *stopped = true;
         }
-
-        self.worker.stop();
-        self.state.disable_local_reads();
 
         let sequence = &self.state.sequence;
         let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
@@ -229,6 +226,11 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
             }
         }
+
+        // Only now: until here the worker keeps the local copies current, and on Garnet a
+        // subscription closing while a message is published can lose that message for the others.
+        self.worker.stop();
+        self.state.disable_local_reads();
     }
 
     /// Runs one write or removal on the distributed store. The local copies are evicted before
