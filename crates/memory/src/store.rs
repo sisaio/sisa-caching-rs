@@ -150,13 +150,14 @@ impl InMemoryCacheStore {
     /// [`CacheError::InvalidKey`] when the name is empty or has an empty level.
     pub fn new(name: &str) -> Result<Self, CacheError> {
         let name = KeyPrefix::new(name)?;
+        let settings = InMemoryCacheSettings::default();
 
         Ok(Self {
             reads: METRICS.reads(&name, Layer::Memory),
             name,
             clock: Arc::new(SystemClock),
-            settings: InMemoryCacheSettings::default(),
-            entries: Arc::new(Entries::new(1)),
+            entries: Arc::new(Entries::new(settings.shards())),
+            settings,
             locker: Arc::default(),
             worker: Worker::new(),
         })

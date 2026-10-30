@@ -108,7 +108,7 @@ Rules every store follows:
 
 ### Memory
 
-`InMemoryCacheStore` keeps `shards` hash maps (1 by default), each behind its own lock. An entry
+`InMemoryCacheStore` keeps `shards` hash maps (16 by default), each behind its own lock. An entry
 stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a write starts a trim
 that drops expired entries, then the least recently used ones down to 90% of the limit, so the
 next writes don't trim again. Values are freed after the lock is released. Expired entries read as

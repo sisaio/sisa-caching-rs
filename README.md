@@ -14,7 +14,7 @@ and a hybrid of the two that keeps every node's local copy coherent.
 
 | Feature | Store | Use it when |
 | --- | --- | --- |
-| `memory` | `InMemoryCacheStore` | One process. Fastest; TTLs, an entry limit with LRU eviction, optional shards. |
+| `memory` | `InMemoryCacheStore` | One process. Fastest; TTLs, an entry limit with LRU eviction, sharded maps. |
 | `redis` | `RedisCacheStore` | Several processes share the cache. Redis, Valkey, Dragonfly or Garnet: one primary with or without replicas, a Redis Cluster, or Sentinel. Other languages can read and write the same keys. |
 | `hybrid` | `HybridCacheStore` | Several processes, and reads must be local-fast. A memory layer per node in front of Redis, kept coherent by pub/sub invalidation. |
 
