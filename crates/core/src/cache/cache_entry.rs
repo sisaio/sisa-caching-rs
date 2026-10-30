@@ -58,7 +58,9 @@ impl<CV> CacheEntry<CV> {
         self.created_at
     }
 
-    /// How long after `created_at` the entry expires, or `None` if it never does.
+    /// The TTL the entry was written with, or `None` if it had none. Refresh-ahead counts from it;
+    /// when the entry expires is [`expires_at`](Self::expires_at), which a store's server can set
+    /// without a TTL.
     pub fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
