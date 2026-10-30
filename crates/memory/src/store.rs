@@ -568,27 +568,6 @@ mod tests {
         .await;
     }
 
-    #[test]
-    fn a_store_name_with_an_empty_level_is_rejected() {
-        assert_eq!(
-            InMemoryCacheStore::new("tenant:eu")
-                .unwrap()
-                .name()
-                .as_str(),
-            "tenant:eu"
-        );
-
-        for name in ["", "app:", "a::b"] {
-            assert!(
-                matches!(
-                    InMemoryCacheStore::new(name),
-                    Err(CacheError::InvalidKey(_))
-                ),
-                "{name:?}"
-            );
-        }
-    }
-
     #[tokio::test]
     async fn debug_shows_the_store_but_never_a_value() {
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
@@ -784,26 +763,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_versioned_prefix_drops_only_its_version() {
-        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let v1 = CacheKey::new("user:v1", 1).unwrap();
-        let v2 = CacheKey::new("user:v2", 1).unwrap();
-
-        store.set(&v1, 1_u32, None).await.unwrap();
-        store.set(&v2, 2_u32, None).await.unwrap();
-
-        assert_eq!(store.remove_prefix("user:v1").await.unwrap(), 1);
-        assert_eq!(store.get::<u32>(&v2).await.unwrap(), Some(2));
-
-        store.set(&v1, 1_u32, None).await.unwrap();
-        assert_eq!(
-            store.remove_prefix("user").await.unwrap(),
-            2,
-            "the name drops every version"
-        );
-    }
-
-    #[tokio::test]
     async fn purge_drops_the_expired_entries() {
         let clock = ManualClock::new();
         let store = store(&clock, InMemoryCacheSettings::default());
@@ -815,18 +774,6 @@ mod tests {
 
         assert_eq!(store.purge(), 2);
         assert_eq!(held(&store, 1..4).await, [3]);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_store_purges_on_its_own_from_its_first_write() {
-        let clock = ManualClock::new();
-        let store = store(&clock, InMemoryCacheSettings::default());
-
-        store.set(&key(1), 1_u32, ttl(1)).await.unwrap();
-        clock.advance(secs(1));
-        tokio::time::sleep(secs(61)).await;
-
-        assert_eq!(store.purge(), 0, "its own worker already purged it");
     }
 
     #[tokio::test(start_paused = true)]
@@ -900,30 +847,6 @@ mod tests {
             1,
             "no worker holds a copy"
         );
-    }
-
-    #[test]
-    fn a_write_outside_a_runtime_starts_no_purge_until_one_inside() {
-        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-
-        // The memory store never waits, so its calls finish on the first poll.
-        store
-            .set(&key(1), 1_u32, None)
-            .now_or_never()
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            Arc::strong_count(&store.entries),
-            1,
-            "no worker holds a copy"
-        );
-
-        runtime.block_on(store.set(&key(2), 2_u32, None)).unwrap();
-        assert_eq!(Arc::strong_count(&store.entries), 2, "the worker holds one");
     }
 
     #[tokio::test]

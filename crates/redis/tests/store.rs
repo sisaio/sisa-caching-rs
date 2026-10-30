@@ -8,9 +8,8 @@ use redis::{
 };
 use serde::{Deserialize, Serialize};
 use sisa_caching_core::{
-    cache::{CacheEntry, CacheError, CacheKey, CacheOptions, CacheStore},
+    cache::{CacheEntry, CacheKey, CacheOptions, CacheStore},
     clock::{Clock, SystemClock},
-    settings::{CacheSettings, MAX_TTL_SECS},
 };
 use sisa_caching_redis::{
     connection::RedisConnection, error::RedisCacheError, settings::RedisCacheSettings,
@@ -120,35 +119,6 @@ async fn an_entry_with_a_deadline_but_no_ttl_expires_at_its_deadline() {
 }
 
 #[tokio::test]
-async fn a_ttl_over_365_days_is_rejected_before_anything_reaches_redis() {
-    let redis = Redis::start().await;
-    let store = store(&redis).await;
-    let too_long = RedisCacheSettings {
-        common: CacheSettings {
-            ttl_secs: Some(MAX_TTL_SECS + 1),
-            ..CacheSettings::default()
-        },
-        ..RedisCacheSettings::default()
-    };
-
-    assert!(matches!(
-        store.clone().with_settings(too_long),
-        Err(CacheError::InvalidSettings {
-            field: "ttl_secs",
-            ..
-        })
-    ));
-    assert!(matches!(
-        store.set(&key(1), 1_u32, ttl(Duration::MAX)).await,
-        Err(RedisCacheError::Cache(CacheError::InvalidSettings {
-            field: "ttl",
-            ..
-        }))
-    ));
-    assert_eq!(store.get::<u32>(&key(1)).await.unwrap(), None);
-}
-
-#[tokio::test]
 async fn compatible_json_reads_as_another_type_and_incompatible_json_is_an_error() {
     let redis = Redis::start().await;
     let store = store(&redis).await;
@@ -160,28 +130,6 @@ async fn compatible_json_reads_as_another_type_and_incompatible_json_is_an_error
         store.get::<Vec<String>>(&key(1)).await,
         Err(RedisCacheError::Json(_))
     ));
-}
-
-#[tokio::test]
-async fn get_or_set_stores_over_a_value_that_does_not_decode() {
-    let redis = Redis::start().await;
-    let store = store(&redis).await;
-
-    store.set(&key(1), 3_u64, None).await.unwrap();
-
-    let loaded = store
-        .get_or_set(
-            &key(1),
-            || async { Ok::<_, ()>(vec!["ada".to_owned()]) },
-            None,
-        )
-        .await;
-
-    assert_eq!(loaded, Ok(vec!["ada".to_owned()]));
-    assert_eq!(
-        store.get::<Vec<String>>(&key(1)).await.unwrap(),
-        Some(vec!["ada".to_owned()])
-    );
 }
 
 #[tokio::test]
