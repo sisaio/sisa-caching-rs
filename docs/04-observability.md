@@ -16,7 +16,8 @@ All under the meter `sisa-caching`, each with a `store` attribute naming the sto
 [`metrics` module docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) list
 every metric with its attributes and what it counts.
 
-Worth an alert:
+Worth an alert ([Failures](01-architecture.md#failures) says what causes each and how stale
+reads can get meanwhile):
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every
   `get_or_set` meanwhile runs its loader.
 - `publish.failures` above 0: other nodes clear their local layers at the writer's next heartbeat,
