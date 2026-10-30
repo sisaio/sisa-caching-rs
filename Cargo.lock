@@ -2584,7 +2584,6 @@ version = "0.2.0"
 dependencies = [
  "futures-util",
  "opentelemetry",
- "opentelemetry_sdk",
  "serde",
  "serde_json",
  "sisa-caching-core",
@@ -2598,7 +2597,6 @@ name = "sisa-caching-redis"
 version = "0.2.0"
 dependencies = [
  "opentelemetry",
- "opentelemetry_sdk",
  "redis",
  "rustls",
  "serde",
@@ -2614,8 +2612,11 @@ dependencies = [
 name = "sisa-caching-testing"
 version = "0.2.0"
 dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
  "rcgen",
  "redis",
+ "serde",
  "sisa-caching-core",
  "testcontainers",
  "tokio",

@@ -47,9 +47,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 sisa-caching-testing = { workspace = true }
 
-# Captures metrics in tests.
+# Metric attributes in the metrics test.
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -2,39 +2,10 @@
 //! instruments are created when the first store is built, from the meter provider installed then,
 //! so this test must install its provider before any other test builds a store.
 
-use opentelemetry::{KeyValue, global};
-use opentelemetry_sdk::metrics::{
-    InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
-    data::{AggregatedMetrics, MetricData, ResourceMetrics},
-};
+use opentelemetry::KeyValue;
 use sisa_caching_core::cache::{CacheKey, CacheStore};
 use sisa_caching_redis::store::RedisCacheStore;
-use sisa_caching_testing::{Logs, Redis, eventually};
-
-/// The counter `name` with attributes `store=app` plus `attributes`, or 0 when it was never
-/// recorded.
-fn counter(exported: &[ResourceMetrics], name: &str, attributes: &[KeyValue]) -> u64 {
-    let wanted = [&[KeyValue::new("store", "app")], attributes].concat();
-
-    exported
-        .iter()
-        .flat_map(|resource| resource.scope_metrics())
-        .flat_map(|scope| scope.metrics())
-        .filter(|metric| metric.name() == name)
-        .filter_map(|metric| match metric.data() {
-            AggregatedMetrics::U64(MetricData::Sum(sum)) => Some(sum),
-            _ => None,
-        })
-        .flat_map(|sum| sum.data_points())
-        .filter(|point| {
-            let found: Vec<_> = point.attributes().collect();
-
-            found.len() == wanted.len() && wanted.iter().all(|kv| found.contains(&kv))
-        })
-        .map(|point| point.value())
-        .last()
-        .unwrap_or_default()
-}
+use sisa_caching_testing::{Logs, Metrics, Redis, eventually};
 
 fn key(id: u64) -> CacheKey {
     CacheKey::new("user", id).unwrap()
@@ -42,18 +13,7 @@ fn key(id: u64) -> CacheKey {
 
 #[tokio::test]
 async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
-    let exporter = InMemoryMetricExporter::default();
-    let provider = SdkMeterProvider::builder()
-        .with_reader(PeriodicReader::builder(exporter.clone()).build())
-        .build();
-
-    global::set_meter_provider(provider.clone());
-
-    let metric = |name: &str, attributes: &[KeyValue]| {
-        provider.force_flush().unwrap();
-
-        counter(&exporter.get_finished_metrics().unwrap(), name, attributes)
-    };
+    let metrics = Metrics::install();
     let logs = Logs::default();
     let _logging = tracing::subscriber::set_default(logs.clone());
     let redis = Redis::start_restartable().await;
@@ -64,7 +24,7 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
     store.set(&key(0), "ada".to_owned(), None).await.unwrap();
     assert!(store.get::<u64>(&key(0)).await.is_err());
     assert_eq!(
-        metric("sisa.caching.misses", &[KeyValue::new("layer", "redis")]),
+        metrics.value("sisa.caching.misses", &[KeyValue::new("layer", "redis")]),
         1
     );
 
@@ -78,11 +38,11 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
 
     // Each call read twice, before and after its lock, and stored once.
     assert_eq!(
-        metric("sisa.caching.errors", &[KeyValue::new("operation", "get")]),
+        metrics.value("sisa.caching.errors", &[KeyValue::new("operation", "get")]),
         20
     );
     assert_eq!(
-        metric("sisa.caching.errors", &[KeyValue::new("operation", "set")]),
+        metrics.value("sisa.caching.errors", &[KeyValue::new("operation", "set")]),
         10
     );
 

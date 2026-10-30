@@ -299,6 +299,7 @@ mod tests {
         cache::KeyPrefix,
         clock::{Clock, SystemClock},
     };
+    use sisa_caching_testing::SlowDrop;
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
@@ -549,44 +550,13 @@ mod tests {
         assert!(state.read::<String>(&key()).await.is_none());
     }
 
-    /// A value whose drop says on its oneshot that it started, then waits up to five seconds until
-    /// the test sends on its gate, or drops the gate's sender. A drop that runs on the test's own
-    /// thread holds the test up that long, and the test's send then fails. Its clones drop at once.
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct SlowDrop {
-        #[serde(skip)]
-        gate: Option<(oneshot::Sender<()>, Mutex<std::sync::mpsc::Receiver<()>>)>,
-    }
-
-    impl Clone for SlowDrop {
-        fn clone(&self) -> Self {
-            Self { gate: None }
-        }
-    }
-
-    impl Drop for SlowDrop {
-        fn drop(&mut self) {
-            if let Some((dropping, gate)) = self.gate.take() {
-                _ = dropping.send(());
-                _ = gate
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(std::time::Duration::from_secs(5));
-            }
-        }
-    }
-
     /// Copies a `SlowDrop` into the local layer under `key()`, and returns the receiver that hears
     /// its drop start and the sender that lets it finish.
     async fn promote_slow_drop(
         state: &State,
     ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        let (release, gate) = std::sync::mpsc::channel();
-        let (dropping, dropped) = oneshot::channel();
+        let (slow, dropped, release) = SlowDrop::new();
         let seen = state.generation(&key());
-        let slow = SlowDrop {
-            gate: Some((dropping, Mutex::new(gate))),
-        };
 
         state
             .promote(&key(), seen, CacheEntry::new(slow, SystemClock.now(), None))
