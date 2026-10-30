@@ -42,6 +42,7 @@ impl KeyPrefix {
     }
 
     /// Checks `prefix` as `new` does, without building one.
+    #[doc(hidden)]
     pub fn validate(prefix: &str) -> Result<()> {
         if prefix.split(KEY_SEPARATOR).any(str::is_empty) {
             return Err(CacheError::InvalidKey(format!(
@@ -55,6 +56,7 @@ impl KeyPrefix {
     /// Whether `full_key` is under this prefix: `user` matches `user:42` but not `users:42`.
     // Inlined, as a store's `remove_prefix` calls it for every entry.
     #[inline]
+    #[doc(hidden)]
     pub fn matches(&self, full_key: &str) -> bool {
         full_key
             .strip_prefix(self.as_str())
@@ -62,11 +64,13 @@ impl KeyPrefix {
     }
 
     /// The key the store named `self` writes for `key`: `app::user:42` for `user:42` in `app`.
+    #[doc(hidden)]
     pub fn format_key(&self, key: &str) -> String {
         format!("{self}{NAME_SEPARATOR}{key}")
     }
 
     /// The start of every key the store named `self` writes: `app::` for `app`.
+    #[doc(hidden)]
     pub fn format_scope(&self) -> String {
         format!("{self}{NAME_SEPARATOR}")
     }

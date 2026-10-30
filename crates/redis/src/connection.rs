@@ -39,6 +39,7 @@ pub fn connection_config() -> ConnectionManagerConfig {
 }
 
 /// A node's host and port, as the cluster names it.
+#[doc(hidden)]
 pub type NodeAddress = (String, u16);
 
 /// A connection a [`RedisCacheStore`](crate::store::RedisCacheStore) runs on. Keys go wherever the
@@ -46,11 +47,13 @@ pub type NodeAddress = (String, u16);
 /// node's keys. They scan each node from [`primaries`](Self::primaries).
 pub trait RedisConnection: ConnectionLike + Clone + Send + Sync + 'static {
     /// The nodes that hold keys. `None` is the one server this connection talks to.
+    #[doc(hidden)]
     fn primaries(&mut self) -> impl Future<Output = RedisResult<Vec<Option<NodeAddress>>>> + Send {
         async { Ok(vec![None]) }
     }
 
     /// Sends `cmd` to `node`, or along the connection when `node` is `None`.
+    #[doc(hidden)]
     fn query_node(
         &mut self,
         _node: Option<&NodeAddress>,

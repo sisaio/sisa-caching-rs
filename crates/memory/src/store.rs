@@ -328,6 +328,8 @@ impl Drop for Trimming {
     }
 }
 
+impl sisa_caching_core::sealed::Sealed for InMemoryCacheStore {}
+
 impl CacheStore for InMemoryCacheStore {
     type Error = CacheError;
 

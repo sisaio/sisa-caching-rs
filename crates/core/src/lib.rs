@@ -32,12 +32,22 @@
 
 pub mod cache;
 pub mod clock;
+// The per-key locks under `get_or_set`: public for the store crates, not part of the API.
+#[doc(hidden)]
 pub mod locker;
 pub mod metrics;
 pub mod settings;
 // The task each store runs for itself: public for the store crates, not part of the API.
 #[doc(hidden)]
 pub mod worker;
+
+// Seals `CacheStore`, so it can gain methods without a breaking release: public for the store
+// crates and their tests, not part of the API.
+#[doc(hidden)]
+pub mod sealed {
+    /// Implemented by each store this workspace ships.
+    pub trait Sealed {}
+}
 
 pub use cache::{
     CacheEntry, CacheError, CacheKey, CacheOptions, CacheStore, CacheValue, KeyPrefix,

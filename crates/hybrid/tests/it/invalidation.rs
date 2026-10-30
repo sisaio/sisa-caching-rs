@@ -510,6 +510,8 @@ impl PausingStore {
     }
 }
 
+impl sisa_caching_core::sealed::Sealed for PausingStore {}
+
 impl CacheStore for PausingStore {
     type Error = CacheError;
 
