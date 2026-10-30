@@ -112,9 +112,10 @@ async fn remove_prefix_removes_whole_levels_on_every_scan_page() {
     // A small batch, so SCAN needs many pages.
     let store = store(&redis)
         .await
-        .with_settings(RedisCacheSettings {
-            scan_batch_size: 5,
-            ..RedisCacheSettings::default()
+        .with_settings({
+            let mut settings = RedisCacheSettings::default();
+            settings.scan_batch_size = 5;
+            settings
         })
         .unwrap();
     let v1 = |id| CacheKey::new("user:v1", id).unwrap();

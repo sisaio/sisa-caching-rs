@@ -332,10 +332,11 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
     // A lost subscription would read through for a minute.
     let node = start_with(
         HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap(),
-        BackplaneWorkerSettings {
-            reconnect_delay_ms: 60_000,
-            max_reconnect_delay_ms: 60_000,
-            ..BackplaneWorkerSettings::default()
+        {
+            let mut settings = BackplaneWorkerSettings::default();
+            settings.reconnect_delay_ms = 60_000;
+            settings.max_reconnect_delay_ms = 60_000;
+            settings
         },
     )
     .await;

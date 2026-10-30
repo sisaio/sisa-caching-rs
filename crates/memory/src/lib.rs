@@ -15,12 +15,10 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let cache = InMemoryCacheStore::new("app")?.with_settings(
-//!     InMemoryCacheSettings {
-//!         max_entries: Some(10_000),
-//!         ..Default::default()
-//!     },
-//! )?;
+//! // Settings are built from a default, so a later release can add one without breaking this.
+//! let mut settings = InMemoryCacheSettings::default();
+//! settings.max_entries = Some(10_000);
+//! let cache = InMemoryCacheStore::new("app")?.with_settings(settings)?;
 //!
 //! cache.set("user:v1:42", "Ada".to_string(), CacheOptions::with_ttl(Duration::from_secs(60))).await?;
 //!
@@ -36,10 +34,9 @@
 //! ```
 //! use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
 //!
-//! let cache = InMemoryCacheStore::new("app")?.with_settings(InMemoryCacheSettings {
-//!     purge_interval_secs: None,
-//!     ..Default::default()
-//! })?;
+//! let mut settings = InMemoryCacheSettings::default();
+//! settings.purge_interval_secs = None;
+//! let cache = InMemoryCacheStore::new("app")?.with_settings(settings)?;
 //!
 //! // From your own scheduler:
 //! let removed = cache.purge();

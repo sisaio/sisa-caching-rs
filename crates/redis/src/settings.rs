@@ -21,6 +21,7 @@ pub const DEFAULT_SCAN_BATCH_SIZE: u32 = 1000;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct RedisCacheSettings {
     /// The settings every store has: the default TTL, refresh-ahead and the `get_or_set` lock wait.
     pub common: CacheSettings,
@@ -70,9 +71,10 @@ mod tests {
             ..RedisCacheSettings::default()
         };
         let ttl = RedisCacheSettings {
-            common: CacheSettings {
-                ttl_secs: Some(MAX_TTL_SECS + 1),
-                ..CacheSettings::default()
+            common: {
+                let mut settings = CacheSettings::default();
+                settings.ttl_secs = Some(MAX_TTL_SECS + 1);
+                settings
             },
             ..RedisCacheSettings::default()
         };

@@ -33,6 +33,7 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct HybridCacheSettings {
     /// The in-memory layer on each node. Its `max_ttl_secs` bounds how long a node can serve a
     /// stale copy when a lost invalidation goes unnoticed. It is [`DEFAULT_LOCAL_MAX_TTL_SECS`]
@@ -54,11 +55,11 @@ pub struct HybridCacheSettings {
 
 impl Default for HybridCacheSettings {
     fn default() -> Self {
+        let mut local = InMemoryCacheSettings::default();
+        local.max_ttl_secs = Some(DEFAULT_LOCAL_MAX_TTL_SECS);
+
         Self {
-            local: InMemoryCacheSettings {
-                max_ttl_secs: Some(DEFAULT_LOCAL_MAX_TTL_SECS),
-                ..InMemoryCacheSettings::default()
-            },
+            local,
             distributed: RedisCacheSettings::default(),
             backplane: RedisBackplaneSettings::default(),
             worker: BackplaneWorkerSettings::default(),
@@ -106,6 +107,7 @@ pub(crate) fn check_local_common(local: &InMemoryCacheSettings) -> Result<(), Ca
 /// the store's name, as [`RedisBackplane`](crate::backplane::RedisBackplane) says.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct RedisBackplaneSettings {
     /// How often a subscription is pinged to detect a silently lost connection: 5 seconds by
     /// default. `validate` rejects `0`.
@@ -155,6 +157,7 @@ impl RedisBackplaneSettings {
 /// [`with_worker_settings`](crate::store::HybridCacheStore::with_worker_settings).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
 pub struct BackplaneWorkerSettings {
     /// The first wait before subscribing again after a lost subscription: 100 ms by default. It
     /// doubles after each failure. `validate` rejects `0`.

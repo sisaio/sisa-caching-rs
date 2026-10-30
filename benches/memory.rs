@@ -18,9 +18,10 @@ use tokio::runtime::Runtime;
 fn store(shards: usize) -> InMemoryCacheStore {
     InMemoryCacheStore::new("app")
         .unwrap()
-        .with_settings(InMemoryCacheSettings {
-            shards: Some(shards),
-            ..InMemoryCacheSettings::default()
+        .with_settings({
+            let mut settings = InMemoryCacheSettings::default();
+            settings.shards = Some(shards);
+            settings
         })
         .unwrap()
 }
@@ -171,9 +172,10 @@ fn large(c: &mut Criterion) {
     // the blocking pool and the write doesn't wait for it.
     let full = InMemoryCacheStore::new("app")
         .unwrap()
-        .with_settings(InMemoryCacheSettings {
-            max_entries: Some(ENTRIES as usize),
-            ..InMemoryCacheSettings::default()
+        .with_settings({
+            let mut settings = InMemoryCacheSettings::default();
+            settings.max_entries = Some(ENTRIES as usize);
+            settings
         })
         .unwrap();
     let mut next = ENTRIES - ENTRIES / 10;

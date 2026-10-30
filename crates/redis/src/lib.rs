@@ -19,19 +19,15 @@
 //! client certificate, use [`RedisCacheStore::from_client`].
 //!
 //! ```no_run
-//! use sisa_caching_core::{CacheSettings, CacheStore};
+//! use sisa_caching_core::CacheStore;
 //! use sisa_caching_redis::{RedisCacheSettings, RedisCacheStore};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut settings = RedisCacheSettings::default();
+//! settings.common.ttl_secs = Some(300);
 //! let cache = RedisCacheStore::connect("app", "redis://127.0.0.1:6379")
 //!     .await?
-//!     .with_settings(RedisCacheSettings {
-//!         common: CacheSettings {
-//!             ttl_secs: Some(300),
-//!             ..Default::default()
-//!         },
-//!         ..Default::default()
-//!     })?;
+//!     .with_settings(settings)?;
 //!
 //! let user = cache
 //!     .get_or_set("user:v1:42", || async { Ok::<_, std::io::Error>("Ada".to_string()) }, None)

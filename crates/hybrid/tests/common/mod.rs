@@ -34,21 +34,19 @@ pub fn memory(store: &str) -> InMemoryCacheStore {
 
 /// Retries quickly, so tests that break the subscription recover fast.
 pub fn fast_retries() -> BackplaneWorkerSettings {
-    BackplaneWorkerSettings {
-        reconnect_delay_ms: 1,
-        max_reconnect_delay_ms: 10,
-        ..BackplaneWorkerSettings::default()
-    }
+    let mut settings = BackplaneWorkerSettings::default();
+    settings.reconnect_delay_ms = 1;
+    settings.max_reconnect_delay_ms = 10;
+    settings
 }
 
 /// Fast retries, and a heartbeat every 20 ms that is missed after 1 s, so a slow CI runner doesn't
 /// miss one that is on time.
 pub fn fast_heartbeats() -> BackplaneWorkerSettings {
-    BackplaneWorkerSettings {
-        heartbeat_interval_ms: 20,
-        heartbeat_timeout_ms: 1_000,
-        ..fast_retries()
-    }
+    let mut settings = fast_retries();
+    settings.heartbeat_interval_ms = 20;
+    settings.heartbeat_timeout_ms = 1_000;
+    settings
 }
 
 /// Starts the store's backplane worker with fast retries, unless it already runs, and waits until
