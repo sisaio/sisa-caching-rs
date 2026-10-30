@@ -3,7 +3,6 @@
 use std::{
     any::{Any, type_name},
     collections::HashMap,
-    hash::{BuildHasher, RandomState},
     mem,
     sync::{
         Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -32,7 +31,6 @@ type EntryMap = HashMap<String, StoredEntry>;
 /// at a time.
 struct Entries {
     shards: Box<[RwLock<EntryMap>]>,
-    hasher: RandomState,
     len: AtomicUsize,
     uses: AtomicU64,
     trimming: AtomicBool,
@@ -42,7 +40,6 @@ impl Entries {
     fn new(shards: usize) -> Self {
         Self {
             shards: (0..shards).map(|_| RwLock::default()).collect(),
-            hasher: RandomState::new(),
             len: AtomicUsize::new(0),
             uses: AtomicU64::new(0),
             trimming: AtomicBool::new(false),
@@ -55,12 +52,27 @@ impl Entries {
         self.uses.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// The map that holds `key`. One map needs no hash.
+    /// The map that holds `key`. One map needs no hash. Each map hashes its keys with SipHash,
+    /// which hostile keys can't make collide, so picking the map only has to spread keys, and a
+    /// multiply per eight bytes does that for far less than a second SipHash. At worst, keys made
+    /// to land on one map crowd it, like every key in a store with one map.
     fn shard(&self, key: &str) -> &RwLock<EntryMap> {
-        match self.shards.len() {
-            1 => &self.shards[0],
-            count => &self.shards[self.hasher.hash_one(key) as usize % count],
+        let count = self.shards.len();
+
+        if count == 1 {
+            return &self.shards[0];
         }
+
+        // FxHash's step, as in rustc-hash 1.
+        let hash = key.as_bytes().chunks(8).fold(0_u64, |hash, chunk| {
+            let mut word = [0; 8];
+
+            word[..chunk.len()].copy_from_slice(chunk);
+            (hash.rotate_left(5) ^ u64::from_le_bytes(word)).wrapping_mul(0x517c_c1b7_2722_0a95)
+        });
+
+        // The multiply mixes the high bits best, so they pick the map.
+        &self.shards[((u128::from(hash) * count as u128) >> 64) as usize]
     }
 }
 
@@ -484,6 +496,7 @@ mod tests {
         fmt::Display,
         future::pending,
         ops::Range,
+        ptr,
         sync::{Mutex, atomic::AtomicUsize, mpsc},
         time::Duration,
     };
@@ -1028,6 +1041,25 @@ mod tests {
         // The test runtime has one thread, so 0 is being freed on another while this runs.
         release.send(()).expect("the trim held up the write");
         assert_eq!(held(&store, 0..2).await, [1]);
+    }
+
+    #[test]
+    fn keys_spread_over_every_map() {
+        let entries = Entries::new(16);
+        let mut counts = [0; 16];
+
+        for id in 0..1_600 {
+            let shard = entries.shard(&key(id));
+            let index = entries.shards.iter().position(|it| ptr::eq(it, shard));
+
+            counts[index.unwrap()] += 1;
+        }
+
+        // 100 on average.
+        assert!(
+            counts.iter().all(|count| (75..=125).contains(count)),
+            "{counts:?}"
+        );
     }
 
     #[tokio::test]
