@@ -7,8 +7,9 @@ use serde::{Serialize, de::DeserializeOwned};
 ///
 /// `Any` lets an in-memory layer hand a value back as the type it was stored as, and the serde
 /// bounds let a distributed layer carry it as bytes. Every read clones the value, so keep large
-/// values cheap to clone. A value's `Drop` must not wait on a hybrid store call: a hybrid store can
-/// free a value while an invalidation waits behind it.
+/// values cheap to clone: an `Arc<T>`, with serde's `rc` feature on, clones a pointer and is stored
+/// as the same JSON as `T`. A value's `Drop` must not wait on a hybrid store call: a hybrid store
+/// can free a value while an invalidation waits behind it.
 pub trait CacheValue: Any + Serialize + DeserializeOwned + Clone + Send + Sync + 'static {}
 
 impl<T> CacheValue for T where T: Any + Serialize + DeserializeOwned + Clone + Send + Sync + 'static {}
