@@ -37,3 +37,5 @@ tokio = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true
+# Marks each item a feature turns on, through `doc_cfg` in the crate root.
+rustdoc-args = ["--cfg", "docsrs"]

@@ -40,8 +40,8 @@ const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 /// Reads try the local layer, then the distributed one, and copy a distributed hit into the local
 /// layer with its original creation time and TTL. Writes and removals evict the local copy, update
 /// the distributed store, evict it again, and publish an invalidation so other nodes evict theirs.
-/// A local Rust type mismatch reads through to the distributed store, whose decoding rules decide
-/// compatibility, so different Rust types can read the same shared JSON when their schemas fit.
+/// Reading a local copy as another Rust type goes to the distributed store instead, so two types
+/// that fit the same JSON can both read it.
 ///
 /// The store applies other nodes' invalidations on a backplane worker it starts on its first call
 /// inside a tokio runtime, or in `connect`, and stops when its last clone drops. Until that worker
@@ -83,26 +83,47 @@ impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
 }
 
 impl<D: CacheStore + 'static> HybridCacheStore<D> {
-    /// Composes the configured layers without changing their settings. Names must match, the
-    /// local store's `common` settings must stay unset, since hybrid calls use the distributed
-    /// store's, and the backplane's settings must pass
+    /// Builds the store from its three parts, keeping their settings. The two stores' names must
+    /// match, the local store's `common` settings must stay unset, since hybrid calls use the
+    /// distributed store's, and the backplane's settings must pass
     /// [`RedisBackplaneSettings::validate`](crate::settings::RedisBackplaneSettings::validate).
     ///
     /// The local store's `max_ttl_secs` is the longest a node serves a copy whose invalidation
     /// never arrived. `InMemoryCacheStore::new` leaves it off, so build the local store with the
-    /// hybrid default of 60 seconds:
+    /// hybrid default of 60 seconds, as `settings.local` does below. The backplane worker runs with
+    /// the default [`BackplaneWorkerSettings`] unless
+    /// [`with_worker_settings`](Self::with_worker_settings) gives others.
     ///
-    /// ```
-    /// # use sisa_caching_hybrid::HybridCacheSettings;
-    /// # use sisa_caching_memory::InMemoryCacheStore;
-    /// let local =
-    ///     InMemoryCacheStore::new("app")?.with_settings(HybridCacheSettings::default().local)?;
-    /// # Ok::<(), sisa_caching_core::CacheError>(())
+    /// On a Redis Cluster, the store takes a cluster connection and the backplane the cluster
+    /// client, on RESP3 for its sharded pub/sub:
+    ///
+    /// ```no_run
+    /// use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore, RedisBackplane};
+    /// use sisa_caching_memory::InMemoryCacheStore;
+    /// use sisa_caching_redis::{
+    ///     RedisCacheStore,
+    ///     redis::{ProtocolVersion, cluster::ClusterClientBuilder},
+    /// };
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let settings = HybridCacheSettings::default();
+    /// let client = ClusterClientBuilder::new(vec!["redis://10.0.0.1:6379"])
+    ///     .use_protocol(ProtocolVersion::RESP3)
+    ///     .build()?;
+    ///
+    /// let cache = HybridCacheStore::new(
+    ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
+    ///     RedisCacheStore::new("app", client.get_async_connection().await?)?
+    ///         .with_settings(settings.distributed)?,
+    ///     RedisBackplane::cluster(client, settings.backplane).await?,
+    /// )?
+    /// .with_worker_settings(settings.worker)?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
-    /// Its backplane worker runs with the default [`BackplaneWorkerSettings`] unless
-    /// [`with_worker_settings`](Self::with_worker_settings) gives others. The
-    /// [crate docs](crate) show the whole setup.
+    /// Behind Sentinel, [`RedisBackplane::sentinel`] shows the setup. On one server,
+    /// [`connect`](Self::connect) builds every part from a URL.
     pub fn new(
         local_store: InMemoryCacheStore,
         distributed_store: D,
@@ -131,10 +152,10 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         })
     }
 
-    /// How the backplane worker waits before subscribing again and tells that invalidations were
-    /// lost; `connect` takes it from `settings.worker`. Fails when a setting is out of range, as
-    /// [`BackplaneWorkerSettings::validate`] says. Set it before the store's first call: the
-    /// worker reads it once, when it starts.
+    /// Sets how the backplane worker waits before subscribing again, and how it tells that
+    /// invalidations were lost; `connect` takes these from `settings.worker`. Fails when a setting
+    /// is out of range, as [`BackplaneWorkerSettings::validate`] says. Set it before the store's
+    /// first call: the worker reads it once, when it starts.
     pub fn with_worker_settings(mut self, settings: BackplaneWorkerSettings) -> Result<Self> {
         settings.validate()?;
         self.worker_settings = settings;

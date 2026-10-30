@@ -56,6 +56,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
 
 mod codec;
 pub mod connection;

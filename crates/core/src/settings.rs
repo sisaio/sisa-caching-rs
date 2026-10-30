@@ -50,27 +50,33 @@ impl CacheSettings {
         )?;
 
         match self.refresh_threshold {
-            Some(share) if !(share > 0.0 && share < 1.0) => Err(CacheError::InvalidSettings {
-                field: "refresh_threshold",
-                reason: format!(
-                    "is {share}; it is a share of the TTL between 0 and 1, such as 0.8"
-                ),
-            }),
+            Some(threshold) if !(threshold > 0.0 && threshold < 1.0) => {
+                Err(CacheError::InvalidSettings {
+                    field: "refresh_threshold",
+                    reason: format!(
+                        "is {threshold}; it is a share of the TTL between 0 and 1, such as 0.8"
+                    ),
+                })
+            }
             _ => Ok(()),
         }
     }
 
+    /// `ttl_secs` as a `Duration`, or `None` when a write without a TTL never expires.
     pub fn default_ttl(&self) -> Option<Duration> {
         self.ttl_secs.map(Duration::from_secs)
     }
 
+    /// `lock_timeout_ms` as a `Duration`, or `None` to wait as long as the other load takes.
     pub fn lock_timeout(&self) -> Option<Duration> {
         self.lock_timeout_ms.map(Duration::from_millis)
     }
 
+    /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off. A value outside
+    /// `(0, 1)`, which `validate` rejects, reads as off.
     pub fn refresh_threshold(&self) -> Option<f64> {
         self.refresh_threshold
-            .filter(|share| *share > 0.0 && *share < 1.0)
+            .filter(|threshold| *threshold > 0.0 && *threshold < 1.0)
     }
 }
 

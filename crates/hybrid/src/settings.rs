@@ -48,7 +48,7 @@ pub struct HybridCacheSettings {
     /// The Redis backplane that carries invalidations between nodes.
     pub backplane: RedisBackplaneSettings,
 
-    /// For the backplane worker the store starts.
+    /// The backplane worker's settings: how it subscribes again and checks heartbeats.
     pub worker: BackplaneWorkerSettings,
 }
 
@@ -138,10 +138,12 @@ impl RedisBackplaneSettings {
         Ok(())
     }
 
+    /// `ping_interval_ms` as a `Duration`.
     pub fn ping_interval(&self) -> Duration {
         Duration::from_millis(self.ping_interval_ms)
     }
 
+    /// `ping_timeout_ms` as a `Duration`.
     pub fn ping_timeout(&self) -> Duration {
         Duration::from_millis(self.ping_timeout_ms)
     }
@@ -215,18 +217,22 @@ impl BackplaneWorkerSettings {
         Ok(())
     }
 
+    /// `heartbeat_interval_ms` as a `Duration`.
     pub fn heartbeat_interval(&self) -> Duration {
         Duration::from_millis(self.heartbeat_interval_ms)
     }
 
+    /// `heartbeat_timeout_ms` as a `Duration`.
     pub fn heartbeat_timeout(&self) -> Duration {
         Duration::from_millis(self.heartbeat_timeout_ms)
     }
 
+    /// `reconnect_delay_ms` as a `Duration`.
     pub fn reconnect_delay(&self) -> Duration {
         Duration::from_millis(self.reconnect_delay_ms)
     }
 
+    /// `max_reconnect_delay_ms` as a `Duration`.
     pub fn max_reconnect_delay(&self) -> Duration {
         Duration::from_millis(self.max_reconnect_delay_ms)
     }

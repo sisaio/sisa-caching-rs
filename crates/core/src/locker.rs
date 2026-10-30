@@ -46,6 +46,7 @@ struct Claim<'a> {
 }
 
 impl Locker {
+    /// An empty locker, the same as `Locker::default()`.
     pub fn new() -> Self {
         Self::default()
     }

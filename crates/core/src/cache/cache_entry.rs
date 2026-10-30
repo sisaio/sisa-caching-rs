@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 /// A value with its creation time and TTL. Every store, memory, Redis and hybrid, reads and writes
 /// this one type, so `get_entry` from one store and `set_entry` into another copies an entry as it
-/// is. Freshness metadata is read-only; construct a new entry to change its creation time or TTL.
+/// is. Its creation time and TTL can't be changed; build a new entry instead.
 ///
 /// ```
 /// use std::time::{Duration, SystemTime};
@@ -26,6 +26,7 @@ use std::time::{Duration, SystemTime};
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct CacheEntry<CV> {
+    /// The cached value. Unlike the creation time and TTL, it can be taken out or changed in place.
     pub value: CV,
     created_at: SystemTime,
     ttl: Option<Duration>,
@@ -52,14 +53,18 @@ impl<CV> CacheEntry<CV> {
         self
     }
 
+    /// When the value was written. Copying the entry to another store keeps it.
     pub fn created_at(&self) -> SystemTime {
         self.created_at
     }
 
+    /// How long after `created_at` the entry expires, or `None` if it never does.
     pub fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
 
+    /// When the entry expires: `created_at + ttl`, or the deadline a store's server keeps, as
+    /// [`with_expires_at`](Self::with_expires_at) sets. `None` if it never expires.
     pub fn expires_at(&self) -> Option<SystemTime> {
         self.expires_at
     }
@@ -70,15 +75,17 @@ impl<CV> CacheEntry<CV> {
             .map(|expires_at| expires_at.duration_since(now).unwrap_or_default())
     }
 
+    /// Whether `now` is at or past [`expires_at`](Self::expires_at). An entry without one never
+    /// expires.
     pub fn is_expired(&self, now: SystemTime) -> bool {
         self.expires_at.is_some_and(|expires_at| now >= expires_at)
     }
 
-    /// Whether `share` of the TTL has passed since creation, such as `0.8`. An entry without a TTL
-    /// is never due.
-    pub fn is_refresh_due(&self, now: SystemTime, share: f64) -> bool {
+    /// Whether `threshold` of the TTL, such as `0.8`, has passed since creation. An entry without a
+    /// TTL is never due.
+    pub fn is_refresh_due(&self, now: SystemTime, threshold: f64) -> bool {
         self.ttl
-            .and_then(|ttl| Duration::try_from_secs_f64(ttl.as_secs_f64() * share).ok())
+            .and_then(|ttl| Duration::try_from_secs_f64(ttl.as_secs_f64() * threshold).ok())
             .and_then(|due| self.created_at.checked_add(due))
             .is_some_and(|due| now >= due)
     }
