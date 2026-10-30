@@ -1,10 +1,10 @@
-//! A soak test: several hybrid nodes, each on a runtime of its own as in a process of its own,
+//! A chaos test: several hybrid nodes, each on a runtime of its own as in a process of its own,
 //! write and read shared keys for minutes while the server restarts and freezes, a node is cut off,
 //! a node crashes and a new one takes its place, and subscriptions drop. A checker fails the test
 //! when any read returns a value that was replaced longer ago than the docs allow.
 //!
 //! Ignored by `cargo test`. Run it with
-//! `cargo test -p sisa-caching-hybrid --test soak -- --ignored --nocapture`; `SOAK_SECS` sets how
+//! `cargo test -p sisa-caching-hybrid --test chaos -- --ignored --nocapture`; `CHAOS_SECS` sets how
 //! long the faults go on (90 s by default).
 
 use std::{
@@ -38,7 +38,7 @@ const BOUND: Duration = Duration::from_secs(10);
 const PERIOD: Duration = Duration::from_secs(15);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "runs for minutes; the nightly soak job runs it"]
+#[ignore = "runs for minutes; the nightly chaos job runs it"]
 async fn nodes_stay_coherent_through_faults() {
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder()
@@ -47,8 +47,8 @@ async fn nodes_stay_coherent_through_faults() {
 
     global::set_meter_provider(provider.clone());
 
-    let soak = Duration::from_secs(
-        std::env::var("SOAK_SECS")
+    let chaos = Duration::from_secs(
+        std::env::var("CHAOS_SECS")
             .ok()
             .and_then(|secs| secs.parse().ok())
             .unwrap_or(90),
@@ -64,7 +64,7 @@ async fn nodes_stay_coherent_through_faults() {
     let started = Instant::now();
     let mut faults = FAULTS.iter().cycle();
 
-    while started.elapsed() < soak {
+    while started.elapsed() < chaos {
         let fault = faults.next().unwrap();
         let begun = Instant::now();
         let victim = history.random(NODES);
@@ -159,7 +159,7 @@ impl Node {
         let url = proxy.url().to_owned();
         let store = runtime
             .spawn(async move {
-                RedisHybridCacheStore::connect("soak", url, &HybridCacheSettings::default()).await
+                RedisHybridCacheStore::connect("chaos", url, &HybridCacheSettings::default()).await
             })
             .await
             .unwrap()
