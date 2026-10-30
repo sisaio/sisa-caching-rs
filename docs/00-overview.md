@@ -30,8 +30,8 @@ crate with the store's feature; none is on by default.
 
 ## Reading order
 
-1. [Architecture](01-architecture.md): the crates, the store contract, the Redis and
-   invalidation formats other languages share, and the rules the design depends on.
+1. [Architecture](01-architecture.md): the crates, the store contract, what each failure does,
+   the Redis and invalidation formats other languages share, and the rules the design depends on.
 2. [Flows](02-flows.md): diagrams of `get_or_set`, each store's reads and writes, and the
    workers.
 3. [Compatibility](03-compatibility.md): Rust and runtime, what works on Redis, Valkey,
