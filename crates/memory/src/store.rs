@@ -504,8 +504,7 @@ mod tests {
     use futures_util::{FutureExt, future::join_all};
     use serde::{Deserialize, Serialize};
     use sisa_caching_core::{CacheKey, CacheOptions, settings::MAX_TTL_SECS};
-    use sisa_caching_testing::{Logs, ManualClock, eventually};
-    use tokio::sync::oneshot;
+    use sisa_caching_testing::{Logs, ManualClock, SlowDrop, eventually};
 
     use super::*;
 
@@ -565,41 +564,6 @@ mod tests {
             !store.entries.trimming.load(Ordering::Acquire)
         })
         .await;
-    }
-
-    /// A value whose drop says on its oneshot that it started, then waits up to five seconds for
-    /// the test to send on its gate. A store that frees it on the test's own thread holds the test
-    /// up that long, and the test's send then fails. Its clones, made by reads, drop at once.
-    #[derive(Serialize, Deserialize)]
-    struct SlowDrop {
-        #[serde(skip)]
-        gate: Option<(oneshot::Sender<()>, Mutex<mpsc::Receiver<()>>)>,
-    }
-
-    impl Clone for SlowDrop {
-        fn clone(&self) -> Self {
-            Self { gate: None }
-        }
-    }
-
-    impl Drop for SlowDrop {
-        fn drop(&mut self) {
-            if let Some((dropping, gate)) = self.gate.take() {
-                _ = dropping.send(());
-                _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(5));
-            }
-        }
-    }
-
-    /// A `SlowDrop`, the receiver that hears its drop start, and the sender that lets it finish.
-    fn slow_drop() -> (SlowDrop, oneshot::Receiver<()>, mpsc::Sender<()>) {
-        let (dropping, dropped) = oneshot::channel();
-        let (release, gate) = mpsc::channel();
-        let value = SlowDrop {
-            gate: Some((dropping, Mutex::new(gate))),
-        };
-
-        (value, dropped, release)
     }
 
     #[test]
@@ -867,7 +831,7 @@ mod tests {
     async fn the_purge_worker_purges_on_the_blocking_pool() {
         let clock = ManualClock::new();
         let store = store(&clock, InMemoryCacheSettings::default());
-        let (slow, dropped, release) = slow_drop();
+        let (slow, dropped, release) = SlowDrop::new();
 
         store.set(&key(1), slow, ttl(1)).await.unwrap();
         clock.advance(secs(1));
@@ -880,7 +844,7 @@ mod tests {
     #[tokio::test]
     async fn clear_empties_the_store_at_once_and_frees_the_values_on_the_blocking_pool() {
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let (slow, dropped, release) = slow_drop();
+        let (slow, dropped, release) = SlowDrop::new();
 
         store.set(&key(1), slow, None).await.unwrap();
         store.clear().await.unwrap();
@@ -1031,7 +995,7 @@ mod tests {
     #[tokio::test]
     async fn a_trim_runs_on_the_blocking_pool_while_the_write_goes_on() {
         let store = store(&ManualClock::new(), with_limit(1));
-        let (slow, dropped, release) = slow_drop();
+        let (slow, dropped, release) = SlowDrop::new();
 
         store.set(&key(0), slow, None).await.unwrap();
         // Past the limit: the trim drops 0, the least recently used.

@@ -31,6 +31,5 @@ futures-util = { workspace = true }
 # The settings docs parse a config.
 serde_json = { workspace = true }
 
-# Captures metrics in tests.
+# Metric attributes in the metrics test.
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["testing"] }

@@ -48,7 +48,7 @@ futures-util = { workspace = true }
 # Multi-threaded runtimes for the tests that race tasks.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
-# The W3C propagator for the trace context test, and an in-memory exporter for the metrics test.
+# The W3C propagator for the trace context test, and an in-memory exporter for the chaos test.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
 [package.metadata.docs.rs]
