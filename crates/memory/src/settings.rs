@@ -45,10 +45,11 @@ pub struct InMemoryCacheSettings {
     /// rejects `0`.
     pub max_ttl_secs: Option<u64>,
 
-    /// How many maps the entries are split over, each with its own lock. More maps let threads
-    /// using different keys run side by side, and a `remove_prefix`, purge or trim holds up one
-    /// map at a time instead of the whole store; each call then hashes its key once more.
-    /// `None` means one map; `validate` rejects `0` and more than 1,024.
+    /// How many maps the entries are split over, each with its own lock: 16 by default. More maps
+    /// let threads using different keys run side by side, and a `remove_prefix`, purge or trim
+    /// holds up one map at a time instead of the whole store; each call then hashes its key once
+    /// more. `None` means one map, a little faster for a store used from one thread; `validate`
+    /// rejects `0` and more than 1,024.
     pub shards: Option<usize>,
 }
 
@@ -59,7 +60,7 @@ impl Default for InMemoryCacheSettings {
             purge_interval_secs: Some(60),
             max_entries: None,
             max_ttl_secs: None,
-            shards: None,
+            shards: Some(16),
         }
     }
 }
@@ -173,12 +174,13 @@ mod tests {
     }
 
     #[test]
-    fn by_default_purging_runs_every_minute_and_nothing_is_capped() {
+    fn by_default_purging_runs_every_minute_nothing_is_capped_and_there_are_16_maps() {
         let settings = InMemoryCacheSettings::default();
 
         assert_eq!(settings.purge_interval(), Some(Duration::from_secs(60)));
         assert_eq!(settings.max_entries(), None);
         assert_eq!(settings.max_ttl(), None);
+        assert_eq!(settings.shards(), 16);
     }
 
     #[test]
