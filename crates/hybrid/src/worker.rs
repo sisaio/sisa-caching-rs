@@ -47,8 +47,8 @@ impl BackplaneWorker {
     }
 
     /// Handles one payload from this store's channel: applies another node's invalidation and
-    /// tracks that node's sequence numbers, and clears the local layer when the payload can't be read or a
-    /// number went missing.
+    /// tracks that node's sequence numbers, and clears the local layer when the payload can't be
+    /// read or a number went missing.
     async fn receive(&self, payload: &[u8], peers: &mut Peers) {
         let store = self.state.local_store.name();
         let message: BackplaneMessage = match serde_json::from_slice(payload) {
