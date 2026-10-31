@@ -259,33 +259,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum-hybrid"
-version = "0.0.0"
-dependencies = [
- "sisa-caching",
- "tokio",
- "users-api",
-]
-
-[[package]]
-name = "axum-memory"
-version = "0.0.0"
-dependencies = [
- "sisa-caching",
- "tokio",
- "users-api",
-]
-
-[[package]]
-name = "axum-redis"
-version = "0.0.0"
-dependencies = [
- "sisa-caching",
- "tokio",
- "users-api",
-]
-
-[[package]]
 name = "backon"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

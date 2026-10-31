@@ -1,5 +1,5 @@
-//! The user routes the axum examples share. They are written against [`CacheStore`], so the
-//! examples differ only in which store they build.
+//! The user routes of the axum example. They are written against [`CacheStore`], so they run
+//! the same on every store.
 //!
 //! - `GET /users/count` caches a scalar: how many users there are.
 //! - `GET /users/{id}` caches a single object: one user.
