@@ -12,10 +12,7 @@ use crate::common::{backplane, key, local_value, memory, name, node, start};
 use futures_util::FutureExt;
 use sisa_caching_core::cache::{CacheError, CacheKey, CacheOptions, CacheStore};
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane,
-    error::HybridCacheError,
-    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
-    store::HybridCacheStore,
+    error::HybridCacheError, settings::BackplaneWorkerSettings, store::HybridCacheStore,
 };
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::{ManualClock, Redis};
@@ -328,23 +325,7 @@ async fn new_rejects_parts_that_do_not_fit() {
         }))
     ));
 
-    // Backplane and worker settings out of range.
-    let unpinged = RedisBackplane::connect(redis.url(), {
-        let mut settings = RedisBackplaneSettings::default();
-        settings.ping_interval_ms = 0;
-        settings
-    })
-    .await
-    .unwrap();
-
-    assert!(matches!(
-        HybridCacheStore::new(memory("users"), memory("users"), unpinged),
-        Err(HybridCacheError::Cache(CacheError::InvalidSettings {
-            field: "ping_interval_ms",
-            ..
-        }))
-    ));
-
+    // Worker settings out of range.
     let store =
         HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
 

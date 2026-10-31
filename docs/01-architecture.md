@@ -282,7 +282,7 @@ stays subscribed.
 | --- | --- |
 | **Guaranteed** | After a write returns, this node's local copy is gone, and every node that receives the message drops its copy. |
 | **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `None`, or a local store built without those settings, the bound is the entry's own TTL. |
-| **Guaranteed** | Once the worker notices the backplane is down (a failed read or ping, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
+| **Guaranteed** | Once the worker notices the backplane is down (a closed subscription, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
 | **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer at its `stopping` message, or once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default) when it sent none. They also clear when a process stops without calling `shutdown`, so a rolling deploy that skips it clears every node's local layer once for each node it replaces. |
 | **Not guaranteed** | Delivery is at most once: pub/sub drops messages to a node that is reconnecting. The clear on resubscribe covers the gap. |
@@ -324,7 +324,7 @@ A local-layer type mismatch in the hybrid store reads through to the distributed
 
 What each failure does to the calls, how long a read can stay stale, and where it shows. The
 times are the defaults: heartbeats every 1 s (`heartbeat_interval_ms`), a node counted gone after
-5 s without one (`heartbeat_timeout_ms`), a ping every 5 s with a 2 s timeout, and a 60 s cap on
+5 s without one (`heartbeat_timeout_ms`), which also bounds subscribing, and a 60 s cap on
 local copies (`max_ttl_secs`), which bounds every row of the hybrid store whatever else goes
 wrong. The memory store has no outside failures: it fails only on an invalid key or setting, and
 on a read as another type.
@@ -332,9 +332,9 @@ on a read as another type.
 | Failure | Store | What the calls do | Stale reads | Where it shows |
 | --- | --- | --- | --- | --- |
 | Server down or unreachable | Redis | Fail at once with `RedisCacheError::Redis` (with `connection_config()`); the next call connects again. `get_or_set` loads on every call, one caller per key at a time, and returns the value without storing it | None | The error on each direct call and its span; `errors` counts the failures inside `get_or_set`, which warns once per outage and logs an info line once a call works |
-| Server down or unreachable | Hybrid | Local hits go on until the worker notices, within 7 s; then every call goes to the server and fails as above, with `HybridCacheError::Distributed`. A write evicts the local copy either way | None: no node can write either | As above, plus `backplane.connected` at 0, then `local.clears` with `resubscribed` when it is back |
+| Server down or unreachable | Hybrid | Local hits go on until the worker notices, within 6 s; then every call goes to the server and fails as above, with `HybridCacheError::Distributed`. A write evicts the local copy either way | None: no node can write either | As above, plus `backplane.connected` at 0, then `local.clears` with `resubscribed` when it is back |
 | Server slow | Redis, hybrid | A command without a reply after 500 ms fails as above, though the server may still apply it. A cluster connection retries first, up to 16 times | Redis: none. Hybrid: a write that lands after its invalidation can leave a copy another node read in between, for up to 60 s | As above |
-| One node cut off from the server while others write | Hybrid | The node serves its local copies until the worker notices: its own heartbeats stop arriving (5 to 6 s) or a ping fails (up to 7 s). Then it reads through, and clears once it resubscribes | 7 s | `backplane.connected` at 0 on that node, `local.clears` with `resubscribed` |
+| One node cut off from the server while others write | Hybrid | The node serves its local copies until the worker notices its own heartbeats stop arriving (5 to 6 s). Then it reads through, and clears once it resubscribes | 6 s | `backplane.connected` at 0 on that node, `local.clears` with `resubscribed` |
 | Subscription lost, server up | Hybrid | Local reads go off and calls read from the server until the worker resubscribes and clears the local layer | None | `backplane.connected` at 0, `local.clears` with `resubscribed` |
 | Every publish of a write fails | Hybrid | The write returns `Ok`. Other nodes see the missing number at the writer's next heartbeat and clear their local layers | About 1 s | `publish.failures` on the writer, `local.clears` with `gap` on the others |
 | A writer can't publish for over 5 s | Hybrid | Other nodes clear when its heartbeats stop, and again at its first heartbeat after | Up to the writer's first heartbeat after | `local.clears` with `peer_lost`, then `gap` |

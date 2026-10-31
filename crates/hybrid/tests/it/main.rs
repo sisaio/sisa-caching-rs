@@ -5,6 +5,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod cluster;
 mod failures;
 mod invalidation;
 mod reads_and_writes;

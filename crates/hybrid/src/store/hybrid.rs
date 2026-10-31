@@ -84,9 +84,8 @@ impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
 
 impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// Builds the store from its three parts, keeping their settings. The two stores' names must
-    /// match, the local store's `common` settings must stay unset, since hybrid calls use the
-    /// distributed store's, and the backplane's settings must pass
-    /// [`RedisBackplaneSettings::validate`](crate::settings::RedisBackplaneSettings::validate).
+    /// match, and the local store's `common` settings must stay unset, since hybrid calls use the
+    /// distributed store's.
     ///
     /// The local store's `max_ttl_secs` is the longest a node serves a copy whose invalidation
     /// never arrived. `InMemoryCacheStore::new` leaves it off, so build the local store with the
@@ -115,7 +114,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
     ///     RedisCacheStore::new("app", client.get_async_connection().await?)?
     ///         .with_settings(settings.distributed)?,
-    ///     RedisBackplane::cluster(client, settings.backplane).await?,
+    ///     RedisBackplane::cluster(client).await?,
     /// )?
     /// .with_worker_settings(settings.worker)?;
     /// # Ok(())
@@ -130,7 +129,6 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         backplane: RedisBackplane,
     ) -> Result<Self> {
         check_local_common(local_store.settings())?;
-        backplane.settings.validate()?;
 
         if local_store.name() != distributed_store.name() {
             return Err(HybridCacheError::StoreNameMismatch {
@@ -377,7 +375,7 @@ impl RedisHybridCacheStore {
             .await
             .map_err(HybridCacheError::distributed)?
             .with_settings(settings.distributed.clone())?;
-        let backplane = RedisBackplane::connect(info, settings.backplane.clone())
+        let backplane = RedisBackplane::connect(info)
             .await
             .map_err(HybridCacheError::distributed)?;
         let store = Self::new(local, distributed, backplane)?

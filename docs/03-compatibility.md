@@ -41,8 +41,10 @@ Give the backplane the cluster client with `RedisBackplane::cluster`. Build the 
 `ProtocolVersion::RESP3`: a subscription gets its messages as RESP3 pushes. It uses sharded
 pub/sub (`SPUBLISH`, `SSUBSCRIBE`), which Redis, Valkey, Garnet and Dragonfly all have: the channel
 lives on the node that owns its slot, so a message goes to one node instead of all of them. When
-the slot moves, each node notices within one ping interval (5 s by default), then subscribes again
-on the new owner after the reconnect backoff (100 ms, doubling up to 5 s while it keeps failing).
+the slot moves, Redis and Valkey end each subscription on it at once; on Garnet, which keeps it on
+the old node, a node notices once its own heartbeats stop coming back (`heartbeat_timeout_ms`, 5 s
+by default). Either way the node then subscribes again on the new owner after the reconnect
+backoff (100 ms, doubling up to 5 s while it keeps failing).
 
 Dragonfly's cluster mode answers `PUBLISH` and `SUBSCRIBE` with an error, so it needs this.
 `RedisBackplane::connect` to any one node of a Redis, Valkey or Garnet cluster still works, with
@@ -60,9 +62,11 @@ Connect through a `SentinelConnection` and share it between the store and the ba
   names the same one, the connection stays and reconnects by itself. A command refused with either
   didn't run, so it is sent once more; one cut off by a broken connection may have run, so it
   returns its error.
-- A hybrid node notices a new primary within one ping interval (5 s by default): each backplane
-  ping asks Sentinel for the primary and moves the shared connection there. The subscription then
-  ends, the node clears its local layer, and it subscribes on the new primary after the reconnect
+- A hybrid node notices a new primary within `heartbeat_timeout_ms` (5 s by default): each
+  subscription asks Sentinel for the primary that often and moves the shared connection there. Its
+  own heartbeats can't show the move, since a demoted primary still delivers what is published on
+  it. The subscription then ends, the node clears its local layer, and it subscribes on the new
+  primary after the reconnect
   backoff (100 ms, doubling up to 5 s while it keeps failing). On a failover Sentinel also
   closes the old primary's client connections with `CLIENT KILL TYPE`, which moves Redis and
   Valkey nodes at once, but Dragonfly refuses that command. Until the node moves, it can miss

@@ -23,9 +23,7 @@ fn hybrid(c: &mut Criterion) {
     let _runtime = runtime.enter();
     let redis = runtime.block_on(Redis::start());
     let store = runtime.block_on(async {
-        let backplane = RedisBackplane::connect(redis.url(), Default::default())
-            .await
-            .unwrap();
+        let backplane = RedisBackplane::connect(redis.url()).await.unwrap();
         let store = HybridCacheStore::new(
             InMemoryCacheStore::new("app").unwrap(),
             RedisCacheStore::new("app", redis.connection().await).unwrap(),

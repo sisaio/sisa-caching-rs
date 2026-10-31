@@ -20,9 +20,7 @@ use sisa_caching_core::{
     settings::CacheSettings,
 };
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane,
-    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
-    store::HybridCacheStore,
+    backplane::RedisBackplane, settings::BackplaneWorkerSettings, store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::{Logs, Redis, eventually};
@@ -113,9 +111,7 @@ async fn a_node_skips_its_own_invalidations_and_other_stores() {
 
 /// A node over `distributed` that sends fast heartbeats, with its backplane on `url`.
 async fn heartbeating_node(distributed: &InMemoryCacheStore, url: &str) -> Node {
-    let backplane = RedisBackplane::connect(url, RedisBackplaneSettings::default())
-        .await
-        .unwrap();
+    let backplane = RedisBackplane::connect(url).await.unwrap();
     let store = HybridCacheStore::new(memory("users"), distributed.clone(), backplane).unwrap();
 
     start_with(store, fast_heartbeats()).await

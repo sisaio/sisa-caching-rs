@@ -1,4 +1,4 @@
-//! Settings for a hybrid deployment: its two layers, the backplane and the worker.
+//! Settings for a hybrid deployment: its two layers and the backplane worker.
 
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 ///     r#"{
 ///         "local": { "max_entries": 100000, "max_ttl_secs": 60, "purge_interval_secs": 60 },
 ///         "distributed": { "common": { "ttl_secs": 300, "lock_timeout_ms": 5000 } },
-///         "backplane": { "ping_interval_ms": 2000 }
+///         "worker": { "heartbeat_timeout_ms": 3000 }
 ///     }"#,
 /// )?;
 ///
@@ -46,9 +46,6 @@ pub struct HybridCacheSettings {
     /// The shared Redis store. Its `common` settings also apply to calls through the hybrid.
     pub distributed: RedisCacheSettings,
 
-    /// The Redis backplane that carries invalidations between nodes.
-    pub backplane: RedisBackplaneSettings,
-
     /// The backplane worker's settings: how it subscribes again and checks heartbeats.
     pub worker: BackplaneWorkerSettings,
 }
@@ -61,7 +58,6 @@ impl Default for HybridCacheSettings {
         Self {
             local,
             distributed: RedisCacheSettings::default(),
-            backplane: RedisBackplaneSettings::default(),
             worker: BackplaneWorkerSettings::default(),
         }
     }
@@ -78,14 +74,13 @@ fn local_settings<'de, D: Deserializer<'de>>(
 }
 
 impl HybridCacheSettings {
-    /// Fails when a setting in `local`, `distributed`, `backplane` or `worker` is out of range,
-    /// such as a TTL over 365 days or a ping interval of 0, or when `local.common` is set, since
-    /// nothing would read it.
+    /// Fails when a setting in `local`, `distributed` or `worker` is out of range, such as a TTL
+    /// over 365 days or a heartbeat interval of 0, or when `local.common` is set, since nothing
+    /// would read it.
     pub fn validate(&self) -> Result<(), CacheError> {
         check_local_common(&self.local)?;
         self.local.validate()?;
         self.distributed.validate()?;
-        self.backplane.validate()?;
         self.worker.validate()
     }
 }
@@ -101,54 +96,6 @@ pub(crate) fn check_local_common(local: &InMemoryCacheSettings) -> Result<(), Ca
         "is ignored: hybrid calls use distributed.common; cap local copies with \
          local.max_ttl_secs",
     ))
-}
-
-/// Settings for a [`RedisBackplane`](crate::backplane::RedisBackplane). Its channel comes from
-/// the store's name, as [`RedisBackplane`](crate::backplane::RedisBackplane) says.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-#[non_exhaustive]
-pub struct RedisBackplaneSettings {
-    /// How often a subscription is pinged to detect a silently lost connection: 5 seconds by
-    /// default. `validate` rejects `0`.
-    pub ping_interval_ms: u64,
-
-    /// How long subscribing or a ping may take before the subscription fails: 2 seconds by
-    /// default. `validate` rejects `0`.
-    pub ping_timeout_ms: u64,
-}
-
-impl Default for RedisBackplaneSettings {
-    fn default() -> Self {
-        Self {
-            ping_interval_ms: 5_000,
-            ping_timeout_ms: 2_000,
-        }
-    }
-}
-
-impl RedisBackplaneSettings {
-    /// Fails when `ping_interval_ms` or `ping_timeout_ms` is 0 or over 365 days.
-    pub fn validate(&self) -> Result<(), CacheError> {
-        for (field, duration) in [
-            ("ping_interval_ms", self.ping_interval()),
-            ("ping_timeout_ms", self.ping_timeout()),
-        ] {
-            check_duration(field, duration, "it must be at least 1 ms")?;
-        }
-
-        Ok(())
-    }
-
-    /// `ping_interval_ms` as a `Duration`.
-    pub fn ping_interval(&self) -> Duration {
-        Duration::from_millis(self.ping_interval_ms)
-    }
-
-    /// `ping_timeout_ms` as a `Duration`.
-    pub fn ping_timeout(&self) -> Duration {
-        Duration::from_millis(self.ping_timeout_ms)
-    }
 }
 
 /// How a hybrid store's backplane worker waits before subscribing again, and how it tells that
@@ -175,8 +122,9 @@ pub struct BackplaneWorkerSettings {
 
     /// How long without a heartbeat from another node before this node clears its local layer, as
     /// that node may have stopped between a write and its publish: 5 seconds by default. Without
-    /// its own heartbeat for this long, the worker treats its subscription as lost. It must be
-    /// longer than `heartbeat_interval_ms`.
+    /// its own heartbeat for this long, the worker treats its subscription as lost. Subscribing
+    /// must also finish within it, and behind Sentinel the worker asks for the primary this often.
+    /// It must be longer than `heartbeat_interval_ms`.
     pub heartbeat_timeout_ms: u64,
 }
 
@@ -269,13 +217,6 @@ mod tests {
     fn out_of_range_settings_are_rejected() {
         let year_ms = sisa_caching_core::settings::MAX_TTL_SECS * 1_000;
         let from_json = |json| serde_json::from_str::<HybridCacheSettings>(json).unwrap();
-        let ping = |ping_interval_ms, ping_timeout_ms| HybridCacheSettings {
-            backplane: RedisBackplaneSettings {
-                ping_interval_ms,
-                ping_timeout_ms,
-            },
-            ..HybridCacheSettings::default()
-        };
         let worker = |worker| HybridCacheSettings {
             worker,
             ..HybridCacheSettings::default()
@@ -298,7 +239,6 @@ mod tests {
         assert!(HybridCacheSettings::default().validate().is_ok());
         assert!(reconnect(100, year_ms).validate().is_ok());
         assert!(heartbeat(1_000, year_ms).validate().is_ok());
-        assert!(ping(year_ms, year_ms).validate().is_ok());
 
         for (field, settings) in [
             (
@@ -309,9 +249,7 @@ mod tests {
                 "local.common",
                 from_json(r#"{ "local": { "common": { "ttl_secs": 60 } } }"#),
             ),
-            ("ping_interval_ms", ping(0, 1_000)),
-            ("ping_interval_ms", ping(year_ms + 1, 1_000)),
-            ("ping_timeout_ms", ping(5_000, 0)),
+            ("heartbeat_interval_ms", heartbeat(year_ms + 1, year_ms + 2)),
             ("reconnect_delay_ms", reconnect(0, 5_000)),
             ("max_reconnect_delay_ms", reconnect(100, 99)),
             ("max_reconnect_delay_ms", reconnect(100, 0)),

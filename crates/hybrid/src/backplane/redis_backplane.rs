@@ -1,13 +1,11 @@
-use std::{io::ErrorKind, sync::Arc};
+use std::{io::ErrorKind, sync::Arc, time::Duration};
 
 use ::redis::{
     AsyncConnectionConfig, Client, ConnectionAddr, IntoConnectionInfo, ProtocolVersion, PushInfo,
-    PushKind, RedisError, RedisResult, Value,
-    aio::{ConnectionManager, MultiplexedConnection},
+    PushKind, RedisError, Value,
+    aio::ConnectionManager,
     cluster::{ClusterClient, ClusterConfig},
     cluster_async::ClusterConnection,
-    cluster_routing::{Route, RoutingInfo, SingleNodeRoutingInfo, SlotAddr},
-    from_redis_value,
 };
 use tokio::{
     sync::broadcast::{self, Receiver, error::RecvError},
@@ -20,8 +18,6 @@ use sisa_caching_redis::{
     connection::{SentinelConnection, connection_config},
     error::{RedisCacheError, Result},
 };
-
-use crate::settings::RedisBackplaneSettings;
 
 use super::BackplaneMessage;
 
@@ -46,7 +42,6 @@ const QUEUE_LIMIT: usize = 8192;
 #[derive(Clone)]
 pub struct RedisBackplane {
     server: Server,
-    pub(crate) settings: RedisBackplaneSettings,
     /// The store's channel. [`for_store`](Self::for_store) sets it when the store is built.
     channel: Arc<str>,
 }
@@ -84,7 +79,6 @@ impl std::fmt::Debug for RedisBackplane {
             .debug_struct("RedisBackplane")
             .field("server", &server)
             .field("channel", &self.channel)
-            .field("settings", &self.settings)
             .finish_non_exhaustive()
     }
 }
@@ -93,31 +87,28 @@ impl RedisBackplane {
     /// Opens the publish connection to one server or any node of a cluster, built with
     /// [`connection_config`]. `info` is a URL, such as `redis://127.0.0.1:6379`, or a
     /// `redis::ConnectionInfo`. Each subscription opens its own connection later.
-    pub async fn connect(
-        info: impl IntoConnectionInfo,
-        settings: RedisBackplaneSettings,
-    ) -> Result<Self> {
-        Self::from_client(Client::open(info)?, settings).await
+    pub async fn connect(info: impl IntoConnectionInfo) -> Result<Self> {
+        Self::from_client(Client::open(info)?).await
     }
 
     /// Like [`connect`](Self::connect), on a client built by hand, such as one from
     /// `redis::Client::build_with_tls` that trusts a private CA or shows a client certificate.
-    pub async fn from_client(client: Client, settings: RedisBackplaneSettings) -> Result<Self> {
+    pub async fn from_client(client: Client) -> Result<Self> {
         let conn = ConnectionManager::new_with_config(client.clone(), connection_config()).await?;
 
         Ok(Self {
             server: Server::Standalone { client, conn },
-            settings,
             channel: Arc::from(""),
         })
     }
 
     /// Publishes and subscribes on the primary Sentinel names. Publishing shares the store's
-    /// connection, which moves after a failover. Each ping also asks Sentinel for the primary and
-    /// moves the shared connection there ([`SentinelConnection::primary_client`]). A subscription
-    /// on a server that is no longer the primary ends, so the node subscribes again on the new
-    /// one. Redis Sentinel closes client connections on a failover itself, but Dragonfly refuses
-    /// the command it uses (`CLIENT KILL TYPE`).
+    /// connection, which moves after a failover. Every `heartbeat_timeout_ms`, each subscription
+    /// also asks Sentinel for the primary, which moves the shared connection there
+    /// ([`SentinelConnection::primary_client`]), and ends once the primary is another server, so
+    /// the node subscribes again on the new one. Its own heartbeats can't show this: a demoted
+    /// primary still delivers what is published on it. Redis Sentinel closes client connections on
+    /// a failover itself, but Dragonfly refuses the command it uses (`CLIENT KILL TYPE`).
     ///
     /// Give the store and the backplane one connection, so a write that finds the old primary
     /// demoted moves both:
@@ -143,16 +134,15 @@ impl RedisBackplane {
     /// let cache = HybridCacheStore::new(
     ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
     ///     RedisCacheStore::new("app", conn.clone())?.with_settings(settings.distributed)?,
-    ///     RedisBackplane::sentinel(conn, settings.backplane),
+    ///     RedisBackplane::sentinel(conn),
     /// )?
     /// .with_worker_settings(settings.worker)?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn sentinel(sentinel: SentinelConnection, settings: RedisBackplaneSettings) -> Self {
+    pub fn sentinel(sentinel: SentinelConnection) -> Self {
         Self {
             server: Server::Sentinel(sentinel),
-            settings,
             channel: Arc::from(""),
         }
     }
@@ -161,17 +151,16 @@ impl RedisBackplane {
     /// `SSUBSCRIBE`). Build `client` with `ProtocolVersion::RESP3`: a subscription on a cluster
     /// connection gets its messages as RESP3 pushes.
     ///
-    /// The channel lives on the node that owns its slot. Each ping also asks the cluster who owns
-    /// it, and a subscription ends once the slot has moved, so the node subscribes again on the
-    /// new owner and clears its local layer. Redis and Valkey end it
-    /// themselves; Garnet keeps it on the old node, where it gets nothing. Dragonfly's cluster
+    /// The channel lives on the node that owns its slot. When the slot moves, Redis and Valkey end
+    /// the subscription, so the node subscribes again on the new owner and clears its local
+    /// layer. Garnet keeps it on the old node, where it gets nothing, so the node's own heartbeats
+    /// stop coming back and it does the same within `heartbeat_timeout_ms`. Dragonfly's cluster
     /// mode needs sharded pub/sub: it has no classic pub/sub.
-    pub async fn cluster(client: ClusterClient, settings: RedisBackplaneSettings) -> Result<Self> {
+    pub async fn cluster(client: ClusterClient) -> Result<Self> {
         let conn = client.get_async_connection().await?;
 
         Ok(Self {
             server: Server::Cluster { client, conn },
-            settings,
             channel: Arc::from(""),
         })
     }
@@ -210,12 +199,12 @@ impl RedisBackplane {
     }
 
     /// Opens a subscription that receives the messages published from now on. It connects and
-    /// subscribes within the ping timeout.
-    pub(crate) async fn subscribe(&self) -> Result<RedisSubscription> {
+    /// subscribes within `timeout`, and behind Sentinel asks for the primary every `timeout`.
+    pub(crate) async fn subscribe(&self, timeout: Duration) -> Result<RedisSubscription> {
         // Messages arrive as RESP3 pushes. A broadcast channel takes them without making the
         // connection wait, keeps the last `QUEUE_LIMIT`, and tells the reader it fell behind.
         let (sender, pushes) = broadcast::channel(QUEUE_LIMIT);
-        let connection = tokio::time::timeout(self.settings.ping_timeout(), async move {
+        let (connection, sentinel) = tokio::time::timeout(timeout, async move {
             let (client, sentinel) = match &self.server {
                 Server::Standalone { client, .. } => (client.clone(), None),
                 Server::Sentinel(sentinel) => {
@@ -231,21 +220,9 @@ impl RedisBackplane {
                         )
                         .await?;
 
-                    let channel = &*self.channel;
-                    let slot = ::redis::cmd("CLUSTER")
-                        .arg("KEYSLOT")
-                        .arg(channel)
-                        .query_async(&mut connection)
-                        .await?;
-                    let owner = slot_owner(&mut connection, slot).await?;
+                    connection.ssubscribe(&*self.channel).await?;
 
-                    connection.ssubscribe(channel).await?;
-
-                    return Ok(Connection::Cluster {
-                        connection,
-                        slot,
-                        owner,
-                    });
+                    return Ok((Box::new(connection) as Box<dyn Send>, None));
                 }
             };
             let info = client.get_connection_info().clone();
@@ -253,7 +230,7 @@ impl RedisBackplane {
                 .redis_settings()
                 .clone()
                 .set_protocol(ProtocolVersion::RESP3);
-            // The ping timeout bounds subscribing and each ping.
+            // `timeout` bounds subscribing, and nothing is sent after it.
             let config = AsyncConnectionConfig::new()
                 .set_connection_timeout(None)
                 .set_response_timeout(None)
@@ -264,57 +241,39 @@ impl RedisBackplane {
 
             connection.subscribe(&*self.channel).await?;
 
-            Ok::<_, RedisError>(Connection::Server {
-                connection,
-                sentinel,
-            })
+            Ok::<_, RedisError>((Box::new(connection) as Box<dyn Send>, sentinel))
         })
         .await
         .map_err(|_| io_error(ErrorKind::TimedOut, "subscribing timed out"))??;
 
-        let pings = connection.keep_pinging(self.settings.clone(), Arc::clone(&self.channel));
-
         Ok(RedisSubscription {
             pushes,
-            pings: tokio::spawn(pings),
+            _connection: connection,
+            primary: sentinel
+                .map(|(sentinel, primary)| tokio::spawn(watch_primary(sentinel, primary, timeout))),
         })
     }
 }
 
-/// One subscribed connection. A task of its own pings it, so a connection that stops delivering
-/// without closing ends the subscription too, however often the worker stops waiting for a
-/// message.
+/// One subscribed connection. One that stops delivering without closing shows as the node's own
+/// heartbeats no longer coming back, which the worker checks. Behind Sentinel, a task of its own
+/// watches the primary, so a failover ends the subscription however often the worker stops
+/// waiting for a message.
 pub(crate) struct RedisSubscription {
     /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
     pushes: Receiver<PushInfo>,
-    /// The task that owns the connection and pings it, until a ping fails.
-    pings: JoinHandle<RedisCacheError>,
+    /// The subscribed connection, open as long as this is.
+    _connection: Box<dyn Send>,
+    /// Behind Sentinel, the task that ends the subscription once the primary moves.
+    primary: Option<JoinHandle<RedisCacheError>>,
 }
 
 impl Drop for RedisSubscription {
     fn drop(&mut self) {
-        self.pings.abort();
+        if let Some(primary) = &self.primary {
+            primary.abort();
+        }
     }
-}
-
-#[allow(
-    clippy::large_enum_variant,
-    reason = "one per subscription, and which variant is larger depends on redis-rs's features"
-)]
-enum Connection {
-    /// A connection to one server.
-    Server {
-        connection: MultiplexedConnection,
-        /// Behind Sentinel: where to ask for the primary, and the primary this subscribed on.
-        sentinel: Option<(SentinelConnection, ConnectionAddr)>,
-    },
-    /// A cluster connection.
-    Cluster {
-        connection: ClusterConnection,
-        /// The channel's slot, and the node that owned it when subscribing.
-        slot: u16,
-        owner: Option<Value>,
-    },
 }
 
 /// The next message's payload.
@@ -343,101 +302,28 @@ async fn message(pushes: &mut Receiver<PushInfo>) -> Result<Vec<u8>> {
     }
 }
 
-impl Connection {
-    /// Pings the connection every `ping_interval_ms` until a ping fails or takes longer than
-    /// `ping_timeout_ms`, and returns why.
-    async fn keep_pinging(
-        mut self,
-        settings: RedisBackplaneSettings,
-        channel: Arc<str>,
-    ) -> RedisCacheError {
-        let mut pings = tokio::time::interval_at(
-            Instant::now() + settings.ping_interval(),
-            settings.ping_interval(),
-        );
+/// Asks Sentinel for the primary every `interval`, which also moves the shared connection there,
+/// so the store stops writing to a demoted primary. Returns once the primary is no longer
+/// `subscribed`, or asking fails or takes longer than `interval`.
+async fn watch_primary(
+    sentinel: SentinelConnection,
+    subscribed: ConnectionAddr,
+    interval: Duration,
+) -> RedisCacheError {
+    let mut checks = tokio::time::interval_at(Instant::now() + interval, interval);
 
-        pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    checks.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        loop {
-            pings.tick().await;
+    loop {
+        checks.tick().await;
 
-            match tokio::time::timeout(settings.ping_timeout(), self.ping(&channel)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => return error,
-                Err(_) => return io_error(ErrorKind::TimedOut, "ping timed out"),
-            }
+        match tokio::time::timeout(interval, sentinel.primary_client()).await {
+            Ok(Ok(primary)) if *primary.get_connection_info().addr() == subscribed => {}
+            Ok(Ok(_)) => return io_error(ErrorKind::ConnectionReset, "the primary moved"),
+            Ok(Err(error)) => return error.into(),
+            Err(_) => return io_error(ErrorKind::TimedOut, "asking Sentinel timed out"),
         }
     }
-
-    /// Pings the connection, and fails once the subscription is on the wrong node: behind
-    /// Sentinel, once the primary has moved (the shared Sentinel connection moves too, so the
-    /// store stops reading from the demoted primary); on a cluster, once the slot has moved.
-    async fn ping(&mut self, channel: &str) -> Result<()> {
-        match self {
-            Self::Server {
-                connection,
-                sentinel,
-            } => {
-                ::redis::cmd("PING")
-                    .query_async::<Value>(connection)
-                    .await?;
-
-                if let Some((sentinel, subscribed)) = sentinel
-                    && sentinel
-                        .primary_client()
-                        .await?
-                        .get_connection_info()
-                        .addr()
-                        != subscribed
-                {
-                    return Err(io_error(ErrorKind::ConnectionReset, "the primary moved"));
-                }
-            }
-            // The node holding the subscription is the one that owns the channel's slot.
-            Self::Cluster {
-                connection,
-                slot,
-                owner,
-                ..
-            } => {
-                let node = Route::with_key(channel, SlotAddr::Master);
-                connection
-                    .route_command(
-                        ::redis::cmd("PING"),
-                        RoutingInfo::SingleNode(SingleNodeRoutingInfo::SpecificNode(node)),
-                    )
-                    .await?;
-
-                // Garnet keeps a sharded subscription on the old node after its slot moves,
-                // where it gets nothing, so the subscription ends instead.
-                if slot_owner(connection, *slot).await? != *owner {
-                    return Err(io_error(ErrorKind::ConnectionReset, "the slot moved"));
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// The primary that owns `slot`, as `CLUSTER SLOTS` names it.
-async fn slot_owner(connection: &mut ClusterConnection, slot: u16) -> RedisResult<Option<Value>> {
-    // One row per slot range: [start, end, primary, replicas...].
-    let ranges: Vec<Vec<Value>> = ::redis::cmd("CLUSTER")
-        .arg("SLOTS")
-        .query_async(connection)
-        .await?;
-
-    Ok(ranges.into_iter().find_map(|range| {
-        let mut range = range.into_iter();
-        let first: u16 = from_redis_value(range.next()?).ok()?;
-        let last: u16 = from_redis_value(range.next()?).ok()?;
-
-        (first..=last)
-            .contains(&slot)
-            .then(|| range.next())
-            .flatten()
-    }))
 }
 
 impl RedisSubscription {
@@ -445,11 +331,14 @@ impl RedisSubscription {
     /// been lost and this subscription is done; open a new one. Dropping an unfinished call loses
     /// no message.
     pub(crate) async fn next(&mut self) -> Result<Vec<u8>> {
+        let Some(primary) = &mut self.primary else {
+            return message(&mut self.pushes).await;
+        };
+
         tokio::select! {
-            // A failed ping closes the connection too: its error says why.
             biased;
-            failed = &mut self.pings => {
-                Err(failed.unwrap_or_else(|_| io_error(ErrorKind::Other, "pinging stopped")))
+            moved = primary => {
+                Err(moved.unwrap_or_else(|_| io_error(ErrorKind::Other, "watching the primary stopped")))
             }
             message = message(&mut self.pushes) => message,
         }
@@ -477,19 +366,14 @@ mod tests {
         KeyPrefix::new("users").unwrap()
     }
 
-    async fn connect(redis: &Redis, settings: RedisBackplaneSettings) -> RedisBackplane {
-        RedisBackplane::connect(redis.url(), settings)
+    /// How long subscribing may take.
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    async fn connect(redis: &Redis) -> RedisBackplane {
+        RedisBackplane::connect(redis.url())
             .await
             .unwrap()
             .for_store(&users())
-    }
-
-    /// Pings every 50 ms and gives up after 100 ms, so a stall shows quickly.
-    fn quick_pings() -> RedisBackplaneSettings {
-        RedisBackplaneSettings {
-            ping_interval_ms: 50,
-            ping_timeout_ms: 100,
-        }
     }
 
     fn message(invalidation: Invalidation) -> BackplaneMessage {
@@ -508,12 +392,12 @@ mod tests {
     #[tokio::test]
     async fn every_subscription_receives_the_messages_of_its_store() {
         let redis = Redis::start().await;
-        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
-        let elsewhere = connect(&redis, RedisBackplaneSettings::default())
+        let backplane = connect(&redis).await;
+        let elsewhere = connect(&redis)
             .await
             .for_store(&KeyPrefix::new("orders").unwrap());
-        let mut first = backplane.subscribe().await.unwrap();
-        let mut second = backplane.subscribe().await.unwrap();
+        let mut first = backplane.subscribe(TIMEOUT).await.unwrap();
+        let mut second = backplane.subscribe(TIMEOUT).await.unwrap();
         let sent = [
             message(Invalidation::Key("user:1".to_owned())),
             message(Invalidation::Prefix(KeyPrefix::new("user").unwrap())),
@@ -538,8 +422,8 @@ mod tests {
     #[tokio::test]
     async fn a_subscription_that_falls_too_far_behind_ends() {
         let redis = Redis::start().await;
-        let backplane = connect(&redis, RedisBackplaneSettings::default()).await;
-        let mut subscription = backplane.subscribe().await.unwrap();
+        let backplane = connect(&redis).await;
+        let mut subscription = backplane.subscribe(TIMEOUT).await.unwrap();
         let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
         let mut connection = redis.connection().await;
         let mut publish = redis::pipe();
@@ -570,97 +454,28 @@ mod tests {
     #[tokio::test]
     async fn subscribing_to_a_server_that_does_not_answer_times_out() {
         let redis = Redis::start().await;
-        let backplane = connect(&redis, quick_pings()).await;
+        let backplane = connect(&redis).await;
 
         redis.pause().await;
 
-        let attempt = tokio::time::timeout(Duration::from_secs(2), backplane.subscribe()).await;
-
-        redis.unpause().await;
-        assert!(attempt.expect("the ping timeout ends the attempt").is_err());
-    }
-
-    #[tokio::test]
-    async fn a_ping_times_out_even_when_each_wait_for_a_message_is_cut_short() {
-        let redis = Redis::start().await;
-        let backplane = connect(&redis, quick_pings()).await;
-        let mut subscription = backplane.subscribe().await.unwrap();
-
-        redis.pause().await;
-
-        // Each wait ends before a ping could time out, as when the worker's checks come first.
-        let ended = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let wait = Duration::from_millis(30);
-
-                if let Ok(next) = tokio::time::timeout(wait, subscription.next()).await {
-                    return next;
-                }
-            }
-        })
+        let attempt = tokio::time::timeout(
+            Duration::from_secs(2),
+            backplane.subscribe(Duration::from_millis(100)),
+        )
         .await;
 
         redis.unpause().await;
-
-        let error = ended.expect("the subscription ends").unwrap_err();
-
-        assert!(error.to_string().contains("ping timed out"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn a_sharded_subscription_ends_only_when_its_channel_slot_moves() {
-        let cluster = RedisCluster::start().await;
-        let backplane = RedisBackplane::cluster(
-            cluster.client(),
-            RedisBackplaneSettings {
-                ping_interval_ms: 100,
-                ..RedisBackplaneSettings::default()
-            },
-        )
-        .await
-        .unwrap()
-        .for_store(&users());
-        let message = message(Invalidation::Clear);
-        let mut subscription = backplane.subscribe().await.unwrap();
-
-        // Waiting through a few pings while the slot stays put, the subscription still delivers.
-        let (_, next) = tokio::join!(
-            async {
-                tokio::time::sleep(Duration::from_millis(350)).await;
-                backplane.publish(&message).await.unwrap();
-            },
-            tokio::time::timeout(Duration::from_secs(5), subscription.next()),
-        );
-
-        next.expect("the message arrives").unwrap();
-
-        cluster.move_slot(USERS_CHANNEL).await;
-        backplane.publish(&message).await.unwrap();
-
-        // Delivering the message is fine too; waiting on a node that no longer gets it is not.
-        let next = tokio::time::timeout(Duration::from_secs(5), subscription.next())
-            .await
-            .expect("the subscription delivers the message or ends");
-        if next.is_err() {
-            let mut subscription = backplane.subscribe().await.unwrap();
-
-            backplane.publish(&message).await.unwrap();
-            tokio::time::timeout(Duration::from_secs(5), subscription.next())
-                .await
-                .expect("a new subscription gets the message")
-                .unwrap();
-        }
+        assert!(attempt.expect("the timeout ends the attempt").is_err());
     }
 
     #[tokio::test]
     async fn a_sharded_subscription_that_falls_too_far_behind_ends() {
         let cluster = RedisCluster::start().await;
-        let backplane =
-            RedisBackplane::cluster(cluster.client(), RedisBackplaneSettings::default())
-                .await
-                .unwrap()
-                .for_store(&users());
-        let mut subscription = backplane.subscribe().await.unwrap();
+        let backplane = RedisBackplane::cluster(cluster.client())
+            .await
+            .unwrap()
+            .for_store(&users());
+        let mut subscription = backplane.subscribe(TIMEOUT).await.unwrap();
         let payload = serde_json::to_vec(&message(Invalidation::Clear)).unwrap();
         let mut publish = redis::pipe();
 

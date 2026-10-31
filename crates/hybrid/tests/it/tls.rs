@@ -14,9 +14,7 @@ use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::RedisTls;
 
 async fn node(tls: &RedisTls) -> RedisHybridCacheStore {
-    let backplane = RedisBackplane::from_client(tls.client(), Default::default())
-        .await
-        .unwrap();
+    let backplane = RedisBackplane::from_client(tls.client()).await.unwrap();
 
     start(
         HybridCacheStore::new(

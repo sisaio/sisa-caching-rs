@@ -5,9 +5,7 @@
 mod common;
 
 use common::{assert_a_write_reaches, start};
-use sisa_caching_hybrid::{
-    backplane::RedisBackplane, settings::RedisBackplaneSettings, store::HybridCacheStore,
-};
+use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Metrics, RedisCluster, eventually};
@@ -19,9 +17,7 @@ async fn node(
         HybridCacheStore::new(
             InMemoryCacheStore::new("app").unwrap(),
             RedisCacheStore::new("app", cluster.connection().await).unwrap(),
-            RedisBackplane::cluster(cluster.client(), RedisBackplaneSettings::default())
-                .await
-                .unwrap(),
+            RedisBackplane::cluster(cluster.client()).await.unwrap(),
         )
         .unwrap(),
     )

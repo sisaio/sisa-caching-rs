@@ -31,8 +31,8 @@ const NODES: usize = 4;
 /// Keys per slot.
 const KEYS: usize = 20;
 /// How long a replaced value may still be read with the default settings: a node notices a
-/// split within `heartbeat_timeout_ms` plus one `heartbeat_interval_ms` (6 s) or a ping (7 s),
-/// and a peer that stopped within 6 s. The rest is slack for a busy runner.
+/// split within `heartbeat_timeout_ms` plus one `heartbeat_interval_ms` (6 s), and a peer that
+/// stopped within 6 s too. The rest is slack for a busy runner.
 const BOUND: Duration = Duration::from_secs(10);
 /// The time between the start of one fault and the next.
 const PERIOD: Duration = Duration::from_secs(15);

@@ -1,11 +1,9 @@
 //! Hybrid nodes behind Sentinel, through a failover. Each test starts a primary, a replica and a
 //! Sentinel in Docker.
 
-use crate::common::{key, local_value, start};
+use crate::common::{fast_heartbeats, key, local_value, start_with};
 use sisa_caching_core::cache::CacheStore;
-use sisa_caching_hybrid::{
-    backplane::RedisBackplane, settings::RedisBackplaneSettings, store::HybridCacheStore,
-};
+use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::{connection::SentinelConnection, store::RedisCacheStore};
 use sisa_caching_testing::{RedisSentinel, eventually};
@@ -18,23 +16,21 @@ async fn connect(sentinel: &RedisSentinel) -> SentinelConnection {
         .unwrap()
 }
 
-/// A node whose store and backplane share one Sentinel connection.
+/// A node whose store and backplane share one Sentinel connection. Its heartbeat timeout of 1 s
+/// is also how often it asks Sentinel for the primary.
 async fn node(sentinel: &RedisSentinel) -> Node {
     node_on(connect(sentinel).await).await
 }
 
 async fn node_on(conn: SentinelConnection) -> Node {
-    start(
+    start_with(
         HybridCacheStore::new(
             InMemoryCacheStore::new("users").unwrap(),
             RedisCacheStore::new("users", conn.clone()).unwrap(),
-            RedisBackplane::sentinel(conn, {
-                let mut settings = RedisBackplaneSettings::default();
-                settings.ping_interval_ms = 100;
-                settings
-            }),
+            RedisBackplane::sentinel(conn),
         )
         .unwrap(),
+        fast_heartbeats(),
     )
     .await
 }
@@ -84,7 +80,8 @@ async fn nodes_follow_a_failover() {
         .await
         .unwrap();
     // Demoting by hand closes no connection, like a failover on Dragonfly, which refuses the
-    // command Sentinel closes them with. The subscriptions' pings find the primary moved.
+    // command Sentinel closes them with. Each subscription asks Sentinel and finds the new
+    // primary.
     eventually("every subscription moves to the new primary", || async {
         subscribers_on(&sentinel, 6379).await == 0 && subscribers_on(&sentinel, 6380).await == 3
     })
