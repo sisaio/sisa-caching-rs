@@ -67,7 +67,7 @@ use. `examples` use it; `benches` use every store crate directly.
 | `sisa-caching-redis` | Yes | `RedisCacheStore` | One hash per key with JSON in `value`, over any `RedisConnection`: one server, a cluster or Sentinel |
 | `sisa-caching-hybrid` | Yes | `HybridCacheStore`, `RedisBackplane` | A local memory store in front of a distributed `CacheStore`, kept coherent over Redis pub/sub (`RedisBackplane`) by a worker each store runs |
 | `sisa-caching-testing` | No | `ManualClock`, `Redis`, `eventually` | A test clock, a Redis container per test (one server, a cluster, Sentinel or TLS), and a wait-until helper |
-| `examples` | No | | Axum services over a shared users API: one per store, and one that picks its store from configuration |
+| `examples` | No | | An Axum service over a shared users API that picks its store from configuration |
 | `benches` | No | | Criterion benchmarks for every store and the `summary` table printer |
 
 `memory` and `redis` don't depend on OpenTelemetry directly; they count through `core::metrics`.
@@ -164,7 +164,9 @@ Each store has its own local layer, generations, worker, subscription connection
 the stores don't affect each other: a burst of writes to one never fills another's subscription
 queue, and a lost subscription clears only its own store's local layer. Each store also sends its
 own heartbeats, one per `heartbeat_interval_ms` per node. Create each store once at startup and
-share it through clones; building one per request would open a subscription each time.
+share it through clones; building one per request would open a subscription each time. Keep store
+names a fixed set, with tenants or other variable parts in the keys: each name keeps its hit and
+miss counters for the life of the process.
 
 Store names must differ, since the name prefixes every key and names the channel. Redis delivers
 a message to subscribers on every database, so two deployments that share a server, such as
@@ -290,6 +292,7 @@ stays subscribed.
 | **Not guaranteed** | An invalidation lost just before its writer stops for good is bounded only by `max_ttl_secs` on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. |
 | **Not guaranteed** | While a writer can't publish for longer than `heartbeat_timeout_ms`, other nodes clear when its heartbeats stop and again at its first heartbeat after, so a copy read in between can be stale until then. |
 | **Not guaranteed** | A read that overlaps a write on another node may copy the old value; the write's invalidation then evicts it. |
+| **Not guaranteed** | A read returns the entry as it was when the store looked the key up. A value whose `Clone` takes longer than the entry has left comes back already expired, as a Redis read can expire on its way back. |
 | **Not guaranteed** | A write the primary acknowledged just before a failover; see [Compatibility](03-compatibility.md). |
 | **Not guaranteed** | A Redis write held up on its way to the server (queued behind other commands, waiting for a reconnect, or resent after a failover) gives its entry that much longer: Redis counts down the time left from when it runs the write. |
 | **Not guaranteed** | Adding or removing a field of a cached type needs nothing: `get_or_set` stores over an entry it can't read, and serde skips fields a type doesn't have (unless it sets `deny_unknown_fields`). A renamed field or a changed field type makes the old and new versions of a rolling deploy replace each other's entries, so that key loads on most calls until the old version is gone, and a value that keeps its shape but changes meaning is misread unnoticed. Bump the key's version for such a change; see [Keys](#keys). |

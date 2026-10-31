@@ -16,6 +16,11 @@ All under the meter `sisa-caching`, each with a `store` attribute naming the sto
 [`metrics` module docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) list
 every metric with its attributes and what it counts.
 
+Each store name and layer keeps its hit and miss counters, about 4 KB, for the life of the process,
+so a store built again under the same name counts on instead of starting over. Keep store names a
+fixed set and put tenants or other variable parts in the keys: a store per tenant would keep one
+set of counters, and one series in the SDK, for every tenant it ever saw.
+
 Worth an alert ([Failures](01-architecture.md#failures) says what causes each and how stale
 reads can get meanwhile):
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every

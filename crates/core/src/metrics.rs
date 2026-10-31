@@ -21,7 +21,8 @@
 //! Every metric has a `store` attribute with the store's name. Hits and misses also have a
 //! `layer` attribute: `memory`, `redis`, or `hybrid` for the hybrid store as a whole. A hybrid
 //! store records all three, so its local hit rate is the `memory` series and its overall one the
-//! `hybrid` series.
+//! `hybrid` series. Each name and layer keeps its counters, about 4 KB, for the life of the
+//! process, so keep store names a fixed set and put tenants in the keys.
 //!
 //! A `get_or_set` that has to load reads before and after taking its lock, so it counts two
 //! misses. Count loads with the load histogram's count instead.
