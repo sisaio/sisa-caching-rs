@@ -44,9 +44,11 @@ pub(crate) struct State {
     removing: Arc<Removing>,
     /// Numbers this node's invalidations for its heartbeats.
     pub(crate) sequence: Arc<Sequence>,
-    /// Whether `shutdown` has sent the stop message. A heartbeat holds it while it publishes, so
-    /// none goes out after the stop.
+    /// Whether `shutdown` has started. A heartbeat holds it while it publishes, so none goes out
+    /// after the stop message.
     pub(crate) stopped: tokio::sync::Mutex<bool>,
+    /// Set once `shutdown` has sent the stop message and stopped the worker.
+    pub(crate) shut_down: tokio::sync::SetOnce<()>,
 }
 
 impl State {
@@ -63,6 +65,7 @@ impl State {
             removing: Arc::default(),
             sequence: Arc::default(),
             stopped: tokio::sync::Mutex::new(false),
+            shut_down: tokio::sync::SetOnce::new(),
         }
     }
 
