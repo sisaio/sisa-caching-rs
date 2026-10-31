@@ -370,7 +370,7 @@ Settled; reopen only with new evidence.
   or in `connect`. That worker holds the store's entries or state but never its `Worker`, so the
   store's last clone dropping stops it.
 - One `CacheEntry<CV>` type for every store; the value type parameter is `CV` everywhere.
-- Keep a trait even with one implementation when it marks a seam: `CacheCodec` and `JsonCodec`.
+- No trait with one implementation: values are JSON, through `serde_json` directly.
 - The Redis hash and the backplane message are formats other languages write, so they change only
   with a version bump.
 - Durations in settings are `u64` seconds or milliseconds. A setting that can be off is an `Option`,
