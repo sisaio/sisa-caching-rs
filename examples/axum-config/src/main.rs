@@ -14,7 +14,8 @@
 //!
 //! The Redis and hybrid stores need a server (`docker run -p 6379:6379 redis:8-alpine`). With
 //! Redis, every instance shares the same entries. With hybrid, each instance also keeps hot
-//! entries in memory and drops its copy when another instance writes:
+//! entries in memory and drops its copy a moment after another instance writes. Run each instance
+//! in a terminal of its own, and the requests in a third:
 //!
 //! ```sh
 //! CACHE=hybrid PORT=3000 cargo run -p axum-config
@@ -22,7 +23,7 @@
 //!
 //! curl localhost:3001/users/1      # loads, then keeps a local copy
 //! curl -X PUT localhost:3000/users/1 -H 'content-type: application/json' -d '{"name":"Ada L."}'
-//! curl localhost:3001/users/1      # the new name: 3001 dropped its copy
+//! curl localhost:3001/users/1      # the new name once 3001 has dropped its copy
 //! redis-cli hgetall example::user:v1:1
 //! ```
 //!
