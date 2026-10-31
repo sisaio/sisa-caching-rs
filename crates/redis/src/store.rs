@@ -16,7 +16,6 @@ use sisa_caching_core::{
 };
 
 use crate::{
-    codec::{CacheCodec, JsonCodec},
     connection::{RedisConnection, connection_config},
     error::RedisCacheError,
     settings::RedisCacheSettings,
@@ -264,7 +263,7 @@ where
         let created_at = created_at_ms
             .and_then(|ms| SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let value = JsonCodec.decode(&encoded_value);
+        let value = serde_json::from_slice(&encoded_value);
 
         // Data that doesn't decode is a miss too: the caller gets no value.
         if value.is_err() {
@@ -287,7 +286,7 @@ where
         entry: CacheEntry<CV>,
     ) -> crate::error::Result<()> {
         let redis_key = self.name.format_key(key);
-        let encoded_value = JsonCodec.encode(&entry.value)?;
+        let encoded_value = serde_json::to_vec(&entry.value)?;
         let created_at = entry
             .created_at()
             .duration_since(SystemTime::UNIX_EPOCH)
