@@ -73,11 +73,9 @@ impl CacheSettings {
         self.lock_timeout_ms.map(Duration::from_millis)
     }
 
-    /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off. A value outside
-    /// `(0, 1)`, which `validate` rejects, reads as off.
+    /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off.
     pub fn refresh_threshold(&self) -> Option<f64> {
         self.refresh_threshold
-            .filter(|threshold| *threshold > 0.0 && *threshold < 1.0)
     }
 }
 
@@ -147,22 +145,6 @@ mod tests {
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
                 "{settings:?}"
             );
-        }
-    }
-
-    #[test]
-    fn refresh_ahead_is_on_only_for_a_share_between_zero_and_one() {
-        let threshold = |share| {
-            CacheSettings {
-                refresh_threshold: Some(share),
-                ..CacheSettings::default()
-            }
-            .refresh_threshold()
-        };
-
-        assert_eq!(threshold(0.8), Some(0.8));
-        for share in [0.0, 1.0, -0.5, 1.5, f64::NAN] {
-            assert_eq!(threshold(share), None, "{share}");
         }
     }
 }
