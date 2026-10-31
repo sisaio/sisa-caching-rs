@@ -218,6 +218,66 @@ impl InMemoryCacheStore {
         removed
     }
 
+    /// Stores `entry` as [`set_entry`](CacheStore::set_entry) does, and hands back the value it
+    /// replaced instead of freeing it, so a caller that holds a lock of its own can free it once
+    /// that lock is released. The hybrid store's promotions do, so a slow `Drop` holds up no
+    /// invalidation.
+    #[doc(hidden)]
+    #[tracing::instrument(level = "debug", name = "memory set", skip_all, fields(key = %self.name.format_key(key)))]
+    pub fn replace_entry<CV: CacheValue>(
+        &self,
+        key: &str,
+        entry: CacheEntry<CV>,
+    ) -> impl Send + use<CV> {
+        // Entries only come in here, so the purge starts with the first one.
+        if let Some(interval) = self.settings.purge_interval() {
+            self.worker
+                .start("in-memory-cache-purge-worker", &self.name, || {
+                    purge_every(self.for_worker(), interval)
+                });
+        }
+
+        let max_ttl = self.settings.max_ttl();
+        // An entry that never expires, in a store that caps nothing, needs no clock. Otherwise the
+        // monotonic clock goes first: measured, the other order slows writes with a TTL.
+        let now = (entry.expires_at().is_some() || max_ttl.is_some()).then(|| self.clock.instant());
+        // The store holds an entry for its remaining lifetime, or `max_ttl_secs` if that is
+        // shorter.
+        let remaining = entry
+            .expires_at()
+            .and_then(|_| entry.remaining_ttl(self.clock.now()));
+        let ttl = match (remaining, max_ttl) {
+            (Some(remaining), Some(cap)) => Some(remaining.min(cap)),
+            (remaining, cap) => remaining.or(cap),
+        };
+
+        let mut entries = write(self.entries.shard(key));
+        let replaced = entries.insert(
+            key.to_owned(),
+            StoredEntry {
+                entry: entry.map(|value| Arc::new(value) as Erased),
+                deadline: ttl.zip(now).and_then(|(ttl, now)| now.checked_add(ttl)),
+                last_used: AtomicU64::new(self.entries.next_use()),
+            },
+        );
+
+        // Counted while the map is locked, so a remove never counts down before this counts up.
+        if replaced.is_none() {
+            self.entries.len.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // Unlock before the caller frees the value that was replaced (see `write`).
+        drop(entries);
+
+        if let Some(max) = self.settings.max_entries
+            && self.entries.len.load(Ordering::Relaxed) > max
+        {
+            self.start_trim(max);
+        }
+
+        replaced
+    }
+
     /// Starts a trim down to about nine tenths of `max` unless one is running. Inside a tokio
     /// runtime it runs on the blocking pool, and the write that starts it goes on, as do the
     /// writes after it.
@@ -389,58 +449,13 @@ impl CacheStore for InMemoryCacheStore {
         Ok(Some(entry.map(|_| value)))
     }
 
-    #[tracing::instrument(level = "debug", name = "memory set", skip_all, fields(key = %self.name.format_key(key)))]
     async fn set_entry<CV: CacheValue>(
         &self,
         key: &str,
         entry: CacheEntry<CV>,
     ) -> Result<(), CacheError> {
-        // Entries only come in here, so the purge starts with the first one.
-        if let Some(interval) = self.settings.purge_interval() {
-            self.worker
-                .start("in-memory-cache-purge-worker", &self.name, || {
-                    purge_every(self.for_worker(), interval)
-                });
-        }
-
-        let max_ttl = self.settings.max_ttl();
-        // An entry that never expires, in a store that caps nothing, needs no clock. Otherwise the
-        // monotonic clock goes first: measured, the other order slows writes with a TTL.
-        let now = (entry.expires_at().is_some() || max_ttl.is_some()).then(|| self.clock.instant());
-        // The store holds an entry for its remaining lifetime, or `max_ttl_secs` if that is
-        // shorter.
-        let remaining = entry
-            .expires_at()
-            .and_then(|_| entry.remaining_ttl(self.clock.now()));
-        let ttl = match (remaining, max_ttl) {
-            (Some(remaining), Some(cap)) => Some(remaining.min(cap)),
-            (remaining, cap) => remaining.or(cap),
-        };
-
-        let mut entries = write(self.entries.shard(key));
-        let replaced = entries.insert(
-            key.to_owned(),
-            StoredEntry {
-                entry: entry.map(|value| Arc::new(value) as Erased),
-                deadline: ttl.zip(now).and_then(|(ttl, now)| now.checked_add(ttl)),
-                last_used: AtomicU64::new(self.entries.next_use()),
-            },
-        );
-
-        // Counted while the map is locked, so a remove never counts down before this counts up.
-        if replaced.is_none() {
-            self.entries.len.fetch_add(1, Ordering::Relaxed);
-        }
-
-        // Unlock, then free the value that was replaced (see `write`).
-        drop(entries);
-        drop(replaced);
-
-        if let Some(max) = self.settings.max_entries
-            && self.entries.len.load(Ordering::Relaxed) > max
-        {
-            self.start_trim(max);
-        }
+        // The value that was replaced is freed here, once the shard is unlocked (see `write`).
+        drop(self.replace_entry(key, entry));
 
         Ok(())
     }
