@@ -1,8 +1,10 @@
 //! The shared parts of Sisa Caching: keys, entries, settings, and the [`CacheStore`] trait every
 //! store implements.
 //!
-//! Applications depend on `sisa-caching`, which re-exports this crate's types; depend on this one
-//! directly to implement a store. Every store has the same calls:
+//! Applications depend on `sisa-caching`, which re-exports this crate's types, or on this crate
+//! and the one store crate they use. `CacheStore` is sealed: the memory, Redis and hybrid stores
+//! are its only implementations, and code generic over it takes any of them. Every store has the
+//! same calls:
 //! `get`, `set`, `get_or_set`, `remove`, `remove_prefix` and `clear`, plus `get_entry` and
 //! `set_entry` for a value with its creation time and TTL.
 //!

@@ -50,7 +50,9 @@
 //!
 //! Each part is also its own crate (`sisa-caching-core`, `-memory`, `-redis`, `-hybrid`), whose
 //! docs cover the details: key and entry formats, Cluster and Sentinel, the backplane, and the
-//! metrics. Depend on one of those directly to implement a store of your own.
+//! metrics. An application that uses one store can depend on the core crate and that store's
+//! crate instead. `CacheStore` is sealed, so these stores are its only implementations; the Redis
+//! store runs on any `RedisConnection`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]

@@ -23,8 +23,9 @@ Everything comes from one crate, `sisa-caching`. No store is on by default, so n
 ([core](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/core),
 [memory](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/memory),
 [redis](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/redis),
-[hybrid](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/hybrid)), for implementing a
-store of your own.
+[hybrid](https://github.com/sisaio/sisa-caching-rs/tree/main/crates/hybrid)), for an application
+that uses one store alone. These three stores are the only ones: `CacheStore` is sealed, so code
+generic over it takes any of them, and the Redis store runs on any `RedisConnection`.
 
 Every store has the same calls: `get`, `set`, `get_or_set`, `remove`, `remove_prefix` and
 `clear`, plus `get_entry` and `set_entry` for a value with its creation time and TTL. One store
