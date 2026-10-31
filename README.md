@@ -107,7 +107,8 @@ at `REDIS_URL` (default `redis://127.0.0.1:6379`).
 ```sh
 cargo run -p axum-config
 
-# Two hybrid instances: a write on one is seen by the other.
+# Two hybrid instances, each in a terminal of its own: a write on one reaches the other a moment
+# later. Then, in a third terminal:
 CACHE=hybrid PORT=3000 cargo run -p axum-config
 CACHE=hybrid PORT=3001 cargo run -p axum-config
 curl localhost:3001/users/1
