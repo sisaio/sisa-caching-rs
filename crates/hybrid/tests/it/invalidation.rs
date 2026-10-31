@@ -707,6 +707,39 @@ async fn a_shutdown_waits_for_a_write_whose_caller_gave_up() {
 }
 
 #[tokio::test]
+async fn a_shutdown_whose_callers_give_up_still_stops_the_store() {
+    let redis = Redis::start().await;
+    let (node, distributed) = pausing_node(&redis).await;
+
+    distributed.pause(true);
+
+    let write = tokio::spawn({
+        let node = node.clone();
+        async move { node.set(&key(1), "new".to_owned(), None).await }
+    });
+
+    distributed.write_started.notified().await;
+
+    // The first call starts the stop and the second finds it started: both wait for the write.
+    for call in ["first", "second"] {
+        let shutdown = tokio::time::timeout(Duration::from_millis(100), node.shutdown()).await;
+
+        assert!(
+            shutdown.is_err(),
+            "the {call} call returned before the stop"
+        );
+    }
+
+    distributed.finish_write.notify_one();
+    write.await.unwrap().unwrap();
+    eventually("the store stops without its callers", || async {
+        !node.local_reads_enabled()
+    })
+    .await;
+    node.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_shutdown_that_gives_up_on_a_write_makes_the_other_nodes_clear() {
     let redis = Redis::start().await;
     let (writer, distributed) = pausing_node(&redis).await;

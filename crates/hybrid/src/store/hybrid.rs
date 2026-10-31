@@ -206,52 +206,34 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// It waits up to two seconds for the writes still running, even those whose caller gave up,
     /// to publish their invalidations. Then it publishes one `stopping` message that counts every
     /// write, so a node that missed one clears, and stops the backplane worker for good, for every
-    /// clone, so reads go to the distributed store from then on. A later call does nothing. A write
-    /// after it still works, but the other nodes clear once more when they don't hear from this
-    /// node again. A node that stops without calling it costs every other node one clear.
+    /// clone, so reads go to the distributed store from then on. The stop runs in a task of its
+    /// own, so a caller that gives up on it doesn't cut it short, and every call, at the same time
+    /// or later, returns once it is done. A write after it still works, but the other nodes clear
+    /// once more when they don't hear from this node again. A node that stops without calling it
+    /// costs every other node one clear.
     pub async fn shutdown(&self) {
-        let store = self.name();
-
         {
             let mut stopped = self.state.stopped.lock().await;
 
-            if *stopped {
-                return;
-            }
-            // Taken while no heartbeat is publishing, and every later one sees it and ends, so no
-            // heartbeat follows the stop message.
-            *stopped = true;
-        }
-
-        let sequence = &self.state.sequence;
-        let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
-            while !sequence.idle() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await;
-
-        if published.is_err() {
-            tracing::warn!(%store, "invalidations were still being published at shutdown; other nodes may clear once");
-        }
-
-        let stopping = BackplaneMessage::accounting(
-            self.node_id().clone(),
-            sequence.last(),
-            Invalidation::Stopping,
-        );
-
-        match send(&self.backplane, store, &stopping).await {
-            Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
-            Err(error) => {
-                tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
+            if !*stopped {
+                // Taken while no heartbeat is publishing, and every later one sees it and ends, so
+                // no heartbeat follows the stop message.
+                *stopped = true;
+                // In a task of its own, so a caller that gives up can't leave the store half
+                // stopped.
+                tokio::spawn(
+                    stop(
+                        Arc::clone(&self.state),
+                        Arc::clone(&self.backplane),
+                        self.worker.clone(),
+                    )
+                    .in_current_span(),
+                );
             }
         }
 
-        // Only now: until here the worker keeps the local copies current, and on Garnet a
-        // subscription closing while a message is published can lose that message for the others.
-        self.worker.stop();
-        self.state.disable_local_reads();
+        // Every call, and not only the one that started it, returns once the stop is done.
+        self.state.shut_down.wait().await;
     }
 
     /// Runs one write or removal on the distributed store. The local copies are evicted before
@@ -303,6 +285,42 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 
         task.await??.map_err(HybridCacheError::distributed)
     }
+}
+
+/// The rest of `shutdown`, once heartbeats have stopped: waits for the writes still running, sends
+/// the stop message, and stops the worker.
+async fn stop(state: Arc<State>, backplane: Arc<RedisBackplane>, worker: Worker) {
+    let store = state.local_store.name();
+    let sequence = &state.sequence;
+    let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
+        while !sequence.idle() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+
+    if published.is_err() {
+        tracing::warn!(%store, "invalidations were still being published at shutdown; other nodes may clear once");
+    }
+
+    let stopping = BackplaneMessage::accounting(
+        state.node_id.clone(),
+        sequence.last(),
+        Invalidation::Stopping,
+    );
+
+    match send(&backplane, store, &stopping).await {
+        Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
+        Err(error) => {
+            tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
+        }
+    }
+
+    // Only now: until here the worker keeps the local copies current, and on Garnet a
+    // subscription closing while a message is published can lose that message for the others.
+    worker.stop();
+    state.disable_local_reads();
+    _ = state.shut_down.set(());
 }
 
 /// Publishes one invalidation under its sequence number, retrying with a growing wait. When every
