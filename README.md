@@ -95,30 +95,28 @@ it causes on other nodes share one trace.
 [docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md)
 lists every span and log line and what to alert on, and the
 [metrics docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) every metric;
-the examples show the setup.
+the example shows the setup.
 
 ## Examples
 
-Three axum services serve the same user API from `examples/users-api`, each on a different
-store: `axum-memory`, `axum-redis` and `axum-hybrid`. Each caches a scalar
-(`GET /users/count`), an object (`GET /users/{id}`) and a list (`GET /users`). The Redis and
-hybrid ones need a server at `REDIS_URL` (default `redis://127.0.0.1:6379`). A fourth,
-`axum-config`, runs on whichever store its `CACHE` variable names (`memory`, `redis` or
-`hybrid`), for an application that picks its store from configuration.
+`axum-config` serves a user API from `examples/users-api` on the store its `CACHE` variable
+names: `memory` (the default), `redis` or `hybrid`. It caches a scalar (`GET /users/count`), an
+object (`GET /users/{id}`) and a list (`GET /users`). The Redis and hybrid stores need a server
+at `REDIS_URL` (default `redis://127.0.0.1:6379`).
 
 ```sh
-cargo run -p axum-memory
+cargo run -p axum-config
 
 # Two hybrid instances: a write on one is seen by the other.
-PORT=3000 cargo run -p axum-hybrid
-PORT=3001 cargo run -p axum-hybrid
+CACHE=hybrid PORT=3000 cargo run -p axum-config
+CACHE=hybrid PORT=3001 cargo run -p axum-config
 curl localhost:3001/users/1
 curl -X PUT localhost:3000/users/1 -H 'content-type: application/json' -d '{"name":"Ada L."}'
 curl localhost:3001/users/1
 ```
 
-They push traces, metrics and logs over OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
-`http://localhost:4318`) and still run without a collector. To print what they send:
+It pushes traces, metrics and logs over OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
+`http://localhost:4318`) and still runs without a collector. To print what it sends:
 
 ```sh
 docker run --network host otel/opentelemetry-collector \

@@ -1,6 +1,6 @@
 [package]
 name = "users-api"
-description = "The user routes shared by the axum examples, written against any cache store"
+description = "The user routes of the axum example, written against any cache store"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
