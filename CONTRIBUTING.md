@@ -49,8 +49,8 @@ REDIS_IMAGE=ghcr.io/microsoft/garnet:2 cargo test --workspace --all-features
 A chaos test, ignored by `cargo test`, runs four hybrid nodes under load while the server restarts
 and freezes, a node is cut off or crashes, and subscriptions drop, and fails on any read staler
 than [Guarantees and limits](docs/01-architecture.md#guarantees-and-limits) allow. The `chaos`
-workflow runs it nightly for ten minutes on Redis 8 and Valkey 8. `CHAOS_SECS` sets how long the
-faults go on, 90 s by default:
+workflow runs it nightly for ten minutes on Redis 8, Valkey 8, Dragonfly 2 and Garnet 2.
+`CHAOS_SECS` sets how long the faults go on, 90 s by default:
 
 ```sh
 cargo test -p sisa-caching-hybrid --all-features --test chaos -- --ignored --nocapture
