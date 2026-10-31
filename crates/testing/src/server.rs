@@ -35,12 +35,16 @@ impl Server {
         }
     }
 
-    /// Flags that serve plain clients on `port`, reachable from other containers.
+    /// Flags that serve plain clients on `port`, reachable from other containers, with no
+    /// snapshots, so a restarted server comes back empty.
     pub(crate) fn serve(self, port: u16) -> Vec<String> {
         let port = port.to_string();
         let args: &[&str] = match self {
             Self::Redis => &["--port", &port, "--save", "", "--protected-mode", "no"],
-            Self::Dragonfly => &["--port", &port],
+            // Dragonfly saves a snapshot when it shuts down and loads the newest one when it
+            // starts. A kill can stop that save halfway, and the next start then brings back the
+            // values of an older snapshot.
+            Self::Dragonfly => &["--port", &port, "--dbfilename="],
             // Garnet listens on 127.0.0.1 unless told otherwise.
             Self::Garnet => &["--bind", "0.0.0.0", "--port", &port],
         };
