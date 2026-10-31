@@ -6,11 +6,12 @@ use sisa_caching_core::cache::KeyPrefix;
 
 use super::node_id::NodeId;
 
-const MESSAGE_VERSION: u8 = 1;
+const MESSAGE_VERSION: u8 = 2;
 
-/// The message a write publishes and every other node's worker receives. It names the writer, the
-/// store, and the local copies to remove, and carries the writer's trace context so the nodes that
-/// apply it continue the same trace. The same type is serialized directly for transport.
+/// The message a write publishes and every other node's worker receives. It names the writer and
+/// the local copies to remove, and carries the writer's trace context so the nodes that apply it
+/// continue the same trace. The channel it goes out on names the store. The same type is
+/// serialized directly for transport.
 ///
 /// A heartbeat is a message whose invalidation is [`Invalidation::Heartbeat`]: it removes nothing,
 /// and tells the other nodes that the writer is alive and how far it has published. A stop,
@@ -21,8 +22,6 @@ pub(crate) struct BackplaneMessage {
     version: u8,
     /// The writer's node id. That node skips the message.
     pub source: NodeId,
-    /// The store whose local copies go.
-    pub store: KeyPrefix,
     /// On an invalidation, its number in the writer's sequence, which counts up from 1 with every
     /// invalidation the writer publishes. On a heartbeat, the highest number up to which the writer
     /// has finished publishing every invalidation, whether or not the publish worked; on a stop,
@@ -42,7 +41,7 @@ pub(crate) struct BackplaneMessage {
 
 impl BackplaneMessage {
     /// A message carrying the current trace context, injected by the global text map propagator.
-    pub fn new(source: NodeId, store: KeyPrefix, invalidation: Invalidation) -> Self {
+    pub fn new(source: NodeId, invalidation: Invalidation) -> Self {
         let mut trace_context = HashMap::new();
 
         global::get_text_map_propagator(|propagator| propagator.inject(&mut trace_context));
@@ -50,7 +49,6 @@ impl BackplaneMessage {
         Self {
             version: MESSAGE_VERSION,
             source,
-            store,
             seq: None,
             invalidation,
             trace_context,
@@ -59,16 +57,10 @@ impl BackplaneMessage {
 
     /// A heartbeat or a stop, saying `source` has finished publishing every invalidation up to
     /// `seq`.
-    pub(crate) fn accounting(
-        source: NodeId,
-        store: KeyPrefix,
-        seq: u64,
-        invalidation: Invalidation,
-    ) -> Self {
+    pub(crate) fn accounting(source: NodeId, seq: u64, invalidation: Invalidation) -> Self {
         Self {
             version: MESSAGE_VERSION,
             source,
-            store,
             seq: Some(seq),
             invalidation,
             trace_context: HashMap::new(),
@@ -138,16 +130,12 @@ mod tests {
         trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
     };
     use opentelemetry_sdk::propagation::TraceContextPropagator;
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     use super::*;
 
     fn message(invalidation: Invalidation) -> BackplaneMessage {
-        BackplaneMessage::new(
-            NodeId::new("node-a"),
-            KeyPrefix::new("users").unwrap(),
-            invalidation,
-        )
+        BackplaneMessage::new(NodeId::new("node-a"), invalidation)
     }
 
     #[test]
@@ -155,19 +143,19 @@ mod tests {
         for (invalidation, payload) in [
             (
                 Invalidation::Key("profile:eu:42".to_owned()),
-                json!({"v":1,"source":"node-a","store":"users","kind":"key","target":"profile:eu:42"}),
+                json!({"v":2,"source":"node-a","kind":"key","target":"profile:eu:42"}),
             ),
             (
                 Invalidation::Key("42".to_owned()),
-                json!({"v":1,"source":"node-a","store":"users","kind":"key","target":"42"}),
+                json!({"v":2,"source":"node-a","kind":"key","target":"42"}),
             ),
             (
                 Invalidation::Prefix(KeyPrefix::new("profile:eu").unwrap()),
-                json!({"v":1,"source":"node-a","store":"users","kind":"prefix","target":"profile:eu"}),
+                json!({"v":2,"source":"node-a","kind":"prefix","target":"profile:eu"}),
             ),
             (
                 Invalidation::Clear,
-                json!({"v":1,"source":"node-a","store":"users","kind":"clear"}),
+                json!({"v":2,"source":"node-a","kind":"clear"}),
             ),
         ] {
             let message = message(invalidation);
@@ -183,14 +171,8 @@ mod tests {
     #[test]
     fn published_invalidations_and_heartbeats_carry_a_sequence_number() {
         let mut invalidation = message(Invalidation::Key("42".to_owned()));
-        let accounting = |invalidation| {
-            BackplaneMessage::accounting(
-                NodeId::new("node-a"),
-                KeyPrefix::new("users").unwrap(),
-                7,
-                invalidation,
-            )
-        };
+        let accounting =
+            |invalidation| BackplaneMessage::accounting(NodeId::new("node-a"), 7, invalidation);
         let heartbeat = accounting(Invalidation::Heartbeat);
         let stopping = accounting(Invalidation::Stopping);
 
@@ -199,15 +181,15 @@ mod tests {
         for (message, payload) in [
             (
                 invalidation,
-                json!({"v":1,"source":"node-a","store":"users","seq":7,"kind":"key","target":"42"}),
+                json!({"v":2,"source":"node-a","seq":7,"kind":"key","target":"42"}),
             ),
             (
                 heartbeat,
-                json!({"v":1,"source":"node-a","store":"users","seq":7,"kind":"heartbeat"}),
+                json!({"v":2,"source":"node-a","seq":7,"kind":"heartbeat"}),
             ),
             (
                 stopping,
-                json!({"v":1,"source":"node-a","store":"users","seq":7,"kind":"stopping"}),
+                json!({"v":2,"source":"node-a","seq":7,"kind":"stopping"}),
             ),
         ] {
             assert_eq!(serde_json::to_value(&message).unwrap(), payload);
@@ -239,7 +221,7 @@ mod tests {
             message(Invalidation::Clear)
         };
         let payload = json!({
-            "v":1,"source":"node-a","store":"users","kind":"clear","trace":{"traceparent":traceparent,"tracestate":""}
+            "v":2,"source":"node-a","kind":"clear","trace":{"traceparent":traceparent,"tracestate":""}
         });
 
         assert_eq!(serde_json::to_value(&message).unwrap(), payload);
@@ -258,7 +240,8 @@ mod tests {
 
     #[test]
     fn unknown_or_missing_versions_are_rejected() {
-        for version in [Some(json!(0)), Some(json!(2)), None] {
+        // Version 1 also named the store, which the channel now does.
+        for version in [Some(json!(0)), Some(json!(1)), Some(json!(3)), None] {
             let mut payload = serde_json::to_value(message(Invalidation::Clear)).unwrap();
 
             if let Some(version) = version {
@@ -272,15 +255,8 @@ mod tests {
     }
 
     #[test]
-    fn messages_validate_store_names_and_prefixes() {
-        let mut payload =
-            serde_json::to_value(message(Invalidation::Key("profile:42".to_owned()))).unwrap();
-        payload["store"] = Value::from("users::");
-
-        assert!(serde_json::from_value::<BackplaneMessage>(payload).is_err());
-
-        let payload =
-            json!({"v":1,"source":"node-a","store":"users","kind":"prefix","target":"profile::eu"});
+    fn messages_validate_prefixes() {
+        let payload = json!({"v":2,"source":"node-a","kind":"prefix","target":"profile::eu"});
 
         assert!(serde_json::from_value::<BackplaneMessage>(payload).is_err());
     }

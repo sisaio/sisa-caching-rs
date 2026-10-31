@@ -12,7 +12,7 @@ use std::{
 
 use crate::common::{
     Node, WRITES, Write, backplane, fast_heartbeats, key, local_value, memory, node, publish,
-    publish_removal, removal, start, start_with,
+    publish_removal, start, start_with,
 };
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
@@ -84,7 +84,7 @@ async fn a_prefix_removal_keeps_the_copies_under_other_prefixes() {
 }
 
 #[tokio::test]
-async fn a_node_skips_its_own_invalidations_and_other_stores() {
+async fn a_node_skips_its_own_invalidations() {
     let redis = Redis::start().await;
     let node = node(&memory("users"), &redis).await;
 
@@ -96,10 +96,8 @@ async fn a_node_skips_its_own_invalidations_and_other_stores() {
         .unwrap();
 
     publish_removal(&redis, &node.node_id().to_string(), "users", &key(1)).await;
-    // Another store's message on this store's channel, as a misconfigured writer might send.
-    publish(&redis, "users", &removal("elsewhere", "teams", &key(1))).await;
-    // Messages arrive in order: once this one is applied, the node's own message and the other
-    // store's have been handled too.
+    // Messages arrive in order: once this one is applied, the node's own message has been handled
+    // too.
     publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
     eventually("the node catches up", || async {
         local_value(&node, &key("marker")).await.is_none()
@@ -339,9 +337,10 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
 
     for payload in [
         "not json",
-        r#"{"v":2,"source":"elsewhere","store":"users","kind":"clear"}"#,
+        // The format before the channel named the store.
+        r#"{"v":1,"source":"elsewhere","store":"users","kind":"clear"}"#,
         // The prefix has an empty level, and the error for that quotes it.
-        r#"{"v":1,"source":"elsewhere","store":"users","kind":"prefix","target":"user::42"}"#,
+        r#"{"v":2,"source":"elsewhere","kind":"prefix","target":"user::42"}"#,
     ] {
         node.local_store()
             .set(&key(1), "ada".to_owned(), None)

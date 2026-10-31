@@ -73,7 +73,7 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
 }
 
 #[tokio::test]
-async fn stores_sharing_a_channel_get_only_their_own_invalidations() {
+async fn each_store_gets_only_its_own_invalidations() {
     let redis = Redis::start().await;
     let users_writer = node_with(&redis, "users", fast_retries()).await;
     let users_reader = node_with(&redis, "users", fast_retries()).await;

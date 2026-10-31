@@ -377,7 +377,7 @@ mod tests {
     }
 
     fn message(invalidation: Invalidation) -> BackplaneMessage {
-        BackplaneMessage::new(NodeId::new("node-a"), users(), invalidation)
+        BackplaneMessage::new(NodeId::new("node-a"), invalidation)
     }
 
     async fn next(subscription: &mut RedisSubscription) -> BackplaneMessage {
