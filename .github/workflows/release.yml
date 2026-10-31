@@ -30,7 +30,9 @@ env:
 
 jobs:
   # Tags the pushed commit and drafts its release, unless its version is tagged already. A push
-  # while an earlier release waits for approval finds the tag and does nothing.
+  # while an earlier release waits for approval finds the tag on another commit and does nothing.
+  # A rerun of a run that failed after tagging finds the tag on its own commit, with no published
+  # release, and carries on from there.
   tag:
     name: tag
     runs-on: ubuntu-24.04
@@ -56,18 +58,26 @@ jobs:
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           tag="v$version"
+          # `isDraft` of the version's release, or nothing when it has none.
+          draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
           if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-            echo "$tag exists; nothing to release"
-            exit 0
+            if [ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ] || [ "$draft" = false ]; then
+              echo "$tag exists; nothing to release"
+              exit 0
+            fi
+            echo "$tag is on this commit and not released yet; carrying on"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
           fi
-          # The changelog section for this version, without its heading.
-          awk -v heading="## [$version]" '
-            index($0, heading) == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
-          gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          if [ -z "$draft" ]; then
+            # The changelog section for this version, without its heading.
+            awk -v heading="## [$version]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > notes.md
+            gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   bench:
