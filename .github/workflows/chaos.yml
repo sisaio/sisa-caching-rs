@@ -30,6 +30,8 @@ jobs:
         server:
           - redis:8-alpine
           - valkey/valkey:8-alpine
+          - ghcr.io/dragonflydb/dragonfly:v2.0.2
+          - ghcr.io/microsoft/garnet:2
     env:
       REDIS_IMAGE: ${{ matrix.server }}
       CHAOS_SECS: ${{ inputs.seconds || '600' }}
