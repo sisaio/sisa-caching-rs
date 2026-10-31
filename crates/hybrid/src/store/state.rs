@@ -96,17 +96,22 @@ impl State {
     }
 
     /// Copies a distributed hit into the local layer, unless the key was invalidated since `seen`.
+    /// A copy it replaces, as when two reads of a key both promote it, is freed after its turn, so
+    /// dropping that value holds up no invalidation.
     pub(crate) async fn promote<CV: CacheValue>(
         &self,
         key: &str,
         seen: u64,
         entry: CacheEntry<CV>,
     ) {
-        let _turn = self.turns.read().await;
+        let replaced = {
+            let _turn = self.turns.read().await;
 
-        if self.local_reads_enabled() && self.generation(key) == seen {
-            _ = self.local_store.set_entry(key, entry).await;
-        }
+            (self.local_reads_enabled() && self.generation(key) == seen)
+                .then(|| self.local_store.replace_entry(key, entry))
+        };
+
+        drop(replaced);
     }
 
     /// Bumps every affected generation once no promotion is copying, then evicts the local copies.
@@ -594,6 +599,33 @@ mod tests {
         release.send(()).unwrap();
         invalidation.await.unwrap();
         assert!(promotion.is_ok(), "the promotion waited for the drop");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_slow_drop_of_a_copy_a_promotion_replaces_holds_up_no_invalidation() {
+        let state = Arc::new(state().await);
+        let (dropped, release) = promote_slow_drop(&state).await;
+
+        // A second read of the key promotes it again, which replaces the slow value.
+        let promoting = Arc::clone(&state);
+        let promotion = tokio::spawn(async move {
+            let seen = promoting.generation(&key());
+
+            promoting
+                .promote(&key(), seen, entry(&promoting, "a"))
+                .await;
+        });
+        dropped.await.unwrap();
+
+        let invalidation = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            state.invalidate(&Invalidation::Key("user:2".to_owned())),
+        )
+        .await;
+
+        release.send(()).unwrap();
+        promotion.await.unwrap();
+        assert!(invalidation.is_ok(), "the invalidation waited for the drop");
     }
 
     #[tokio::test]
