@@ -99,17 +99,14 @@ pub async fn publish(redis: &Redis, store: &str, payload: &str) {
         .unwrap();
 }
 
-/// The removal of `key` from `store` by `source`, without a `seq`.
-pub fn removal(source: &str, store: &str, key: &str) -> String {
-    serde_json::json!({
-        "v": 1, "source": source, "store": store, "kind": "key", "target": key,
-    })
-    .to_string()
+/// The removal of `key` by `source`, without a `seq`.
+pub fn removal(source: &str, key: &str) -> String {
+    serde_json::json!({ "v": 2, "source": source, "kind": "key", "target": key }).to_string()
 }
 
 /// Publishes the removal of `key` from `store` as `source` on the store's channel.
 pub async fn publish_removal(redis: &Redis, source: &str, store: &str, key: &str) {
-    publish(redis, store, &removal(source, store, key)).await;
+    publish(redis, store, &removal(source, key)).await;
 }
 
 /// Writes `user:1` = `old` to the distributed store, has `reader` copy it, then overwrites it

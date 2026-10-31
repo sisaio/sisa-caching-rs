@@ -234,25 +234,24 @@ error.
 ### Invalidation message
 
 After each write, a hybrid node publishes one JSON message on its store's pub/sub channel,
-`<store>:backplane`, such as `app:backplane` for a store named `app`. A writer in another language
-publishes on the same channel:
+`<store>:backplane`, such as `app:backplane` for a store named `app`. The channel names the store,
+so the message doesn't. A writer in another language publishes on the same channel:
 
 | Field | Required | Value |
 | --- | --- | --- |
-| `v` | Yes | The format version, `1` |
+| `v` | Yes | The format version, `2` |
 | `source` | Yes | An id unique to the writing process; nodes skip their own messages |
-| `store` | Yes | The store name, such as `app` |
 | `seq` | No | On an invalidation, its number in the writer's sequence, from 1 up; on a heartbeat, the number up to which the writer has finished publishing; on `stopping`, the last number it handed out |
 | `kind` | Yes | `key`, `prefix`, `clear`, `heartbeat`, or `stopping` |
 | `target` | For `key` and `prefix` | The key or prefix, without the store name |
 | `trace` | No | Trace propagation fields, such as `traceparent` |
 
 ```json
-{"v":1,"source":"node-7","store":"app","seq":41,"kind":"key","target":"user:42"}
-{"v":1,"source":"node-7","store":"app","seq":42,"kind":"prefix","target":"user"}
-{"v":1,"source":"node-7","store":"app","seq":43,"kind":"clear"}
-{"v":1,"source":"node-7","store":"app","seq":43,"kind":"heartbeat"}
-{"v":1,"source":"node-7","store":"app","seq":43,"kind":"stopping"}
+{"v":2,"source":"node-7","seq":41,"kind":"key","target":"user:42"}
+{"v":2,"source":"node-7","seq":42,"kind":"prefix","target":"user"}
+{"v":2,"source":"node-7","seq":43,"kind":"clear"}
+{"v":2,"source":"node-7","seq":43,"kind":"heartbeat"}
+{"v":2,"source":"node-7","seq":43,"kind":"stopping"}
 ```
 
 Each store's worker publishes a heartbeat every `heartbeat_interval_ms`. A heartbeat only counts

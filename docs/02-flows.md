@@ -176,7 +176,7 @@ sequenceDiagram
         A->>Bus: publish Invalidation::Key(key)
     end
     Bus-->>W: message, with A's trace context
-    W->>W: skip A's own messages and other stores' messages
+    W->>W: skip A's own messages
     W->>LB: bump generation, evict key
 ```
 

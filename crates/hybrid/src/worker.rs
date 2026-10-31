@@ -46,8 +46,8 @@ impl BackplaneWorker {
         }
     }
 
-    /// Handles one payload: applies another node's invalidation of this store and tracks that
-    /// node's sequence numbers, and clears the local layer when the payload can't be read or a
+    /// Handles one payload from this store's channel: applies another node's invalidation and
+    /// tracks that node's sequence numbers, and clears the local layer when the payload can't be read or a
     /// number went missing.
     async fn receive(&self, payload: &[u8], peers: &mut Peers) {
         let store = self.state.local_store.name();
@@ -63,9 +63,6 @@ impl BackplaneWorker {
             }
         };
 
-        if &message.store != store {
-            return;
-        }
         if message.source == self.state.node_id {
             peers.own_heard = Instant::now();
             return;
@@ -241,7 +238,6 @@ async fn send_heartbeats(state: Arc<State>, backplane: Arc<RedisBackplane>, inte
 
         let heartbeat = BackplaneMessage::accounting(
             state.node_id.clone(),
-            store.clone(),
             state.sequence.finished(),
             Invalidation::Heartbeat,
         );
@@ -409,8 +405,6 @@ impl Drop for BackplaneWorker {
 
 #[cfg(test)]
 mod tests {
-    use sisa_caching_core::cache::KeyPrefix;
-
     use super::*;
 
     /// A 1 ms first wait and a 50 ms cap.
@@ -452,11 +446,7 @@ mod tests {
     }
 
     fn from_peer(seq: u64, invalidation: Invalidation) -> BackplaneMessage {
-        let mut message = BackplaneMessage::new(
-            NodeId::new("peer"),
-            KeyPrefix::new("users").unwrap(),
-            invalidation,
-        );
+        let mut message = BackplaneMessage::new(NodeId::new("peer"), invalidation);
 
         message.seq = Some(seq);
         message
@@ -597,7 +587,6 @@ mod tests {
         let from = |node: usize| {
             let mut message = BackplaneMessage::new(
                 NodeId::new(format!("node-{node}")),
-                KeyPrefix::new("users").unwrap(),
                 Invalidation::Key("1".to_owned()),
             );
 

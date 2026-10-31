@@ -237,12 +237,11 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 
         let stopping = BackplaneMessage::accounting(
             self.node_id().clone(),
-            store.clone(),
             sequence.last(),
             Invalidation::Stopping,
         );
 
-        match send(&self.backplane, &stopping).await {
+        match send(&self.backplane, store, &stopping).await {
             Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
             Err(error) => {
                 tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
@@ -275,8 +274,8 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         // A node that only writes still runs its worker.
         self.start_worker();
 
-        let message =
-            BackplaneMessage::new(self.node_id().clone(), self.name().clone(), invalidation);
+        let message = BackplaneMessage::new(self.node_id().clone(), invalidation);
+        let store = self.name().clone();
         let state = Arc::clone(&self.state);
         let backplane = Arc::clone(&self.backplane);
 
@@ -295,7 +294,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.apply(&message.invalidation).await;
-                tokio::spawn(publish(publishing, backplane, message).in_current_span());
+                tokio::spawn(publish(publishing, backplane, store, message).in_current_span());
 
                 result
             }
@@ -312,16 +311,17 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 async fn publish(
     publishing: Publishing,
     backplane: Arc<RedisBackplane>,
+    store: KeyPrefix,
     mut message: BackplaneMessage,
 ) {
     message.seq = Some(publishing.seq);
 
-    match send(&backplane, &message).await {
-        Ok(subscribers) => METRICS.invalidation_delivered(&message.store, subscribers),
+    match send(&backplane, &store, &message).await {
+        Ok(subscribers) => METRICS.invalidation_delivered(&store, subscribers),
         Err(error) => {
-            METRICS.publish_failed(&message.store);
+            METRICS.publish_failed(&store);
             tracing::warn!(
-                store = %message.store,
+                %store,
                 %error,
                 kind = message.invalidation.kind(),
                 "could not publish an invalidation; other nodes clear their local layers at the next heartbeat"
@@ -330,10 +330,11 @@ async fn publish(
     }
 }
 
-/// Publishes `message` in up to `PUBLISH_ATTEMPTS` tries, and returns how many subscribers it
-/// reached.
+/// Publishes `message` on `store`'s channel in up to `PUBLISH_ATTEMPTS` tries, and returns how
+/// many subscribers it reached.
 async fn send(
     backplane: &RedisBackplane,
+    store: &KeyPrefix,
     message: &BackplaneMessage,
 ) -> sisa_caching_redis::error::Result<usize> {
     let mut delay = Duration::from_millis(50);
@@ -342,7 +343,7 @@ async fn send(
     loop {
         match backplane.publish(message).await {
             Err(error) if attempt < PUBLISH_ATTEMPTS => {
-                tracing::debug!(store = %message.store, %error, attempt, "publish failed; retrying");
+                tracing::debug!(%store, %error, attempt, "publish failed; retrying");
 
                 tokio::time::sleep(delay).await;
                 delay *= 2;
