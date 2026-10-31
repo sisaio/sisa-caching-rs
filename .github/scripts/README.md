@@ -51,14 +51,22 @@ Both scripts can run any number of times:
   with Contents and Pull requests set to read and write, and no webhook. Install it on this
   repository, then add its ID as the `RELEASE_APP_ID` secret and a private key as
   `RELEASE_APP_PRIVATE_KEY`. Without them, release PRs fall back to the built-in token and get no
-  CI.
+  CI. The app plays no part in publishing to crates.io.
 - **The `release` environment**, under Settings → Environments, with the maintainer as required
-  reviewer and deployments limited to `main`. The publish job waits there until approved.
-- **A way to publish to crates.io.** Until trusted publishing is set up, the publish job uses the
-  `CARGO_REGISTRY_TOKEN` secret. To switch, add a trusted publisher on each crate on crates.io
-  (Settings → Trusted Publishing → Add): owner `sisaio`, repository `sisa-caching-rs`, workflow
-  `release.yml`, environment `release`. Then delete the secret, and the job uses trusted
-  publishing from the next release on.
+  reviewer and deployments limited to `main`. The publish job waits there until approved. Create
+  it before a release runs: a workflow that names a missing environment makes GitHub create it
+  with no reviewers, and the publish then goes out unapproved.
+- **A way to publish to crates.io.** While the `CARGO_REGISTRY_TOKEN` secret is set, the publish
+  job uses it. To switch to trusted publishing:
+  1. On crates.io, open each published crate's Settings → Trusted Publishing → Add, and enter
+     owner `sisaio`, repository `sisa-caching-rs`, workflow `release.yml` and environment
+     `release`.
+  2. Delete the `CARGO_REGISTRY_TOKEN` secret, from the repository or the environment.
+  3. Revoke that token on crates.io, under Account Settings → API Tokens.
+
+  The next release then publishes with a short-lived token from `crates-io-auth-action`. A crate
+  that isn't on crates.io yet needs one publish with a token before it can have a trusted
+  publisher.
 
 ## By hand
 
