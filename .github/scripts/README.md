@@ -61,8 +61,9 @@ Both scripts can run any number of times:
   1. On crates.io, open each published crate's Settings → Trusted Publishing → Add, and enter
      owner `sisaio`, repository `sisa-caching-rs`, workflow `release.yml` and environment
      `release`.
-  2. Delete the `CARGO_REGISTRY_TOKEN` secret, from the repository or the environment.
-  3. Revoke that token on crates.io, under Account Settings → API Tokens.
+  2. Delete every `CARGO_REGISTRY_TOKEN` secret the workflow can see: in the organization, the
+     repository and the environment. While one is left, the job keeps using it.
+  3. Revoke those tokens on crates.io, under Account Settings → API Tokens.
 
   The next release then publishes with a short-lived token from `crates-io-auth-action`. A crate
   that isn't on crates.io yet needs one publish with a token before it can have a trusted
