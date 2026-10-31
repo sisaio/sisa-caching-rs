@@ -9,9 +9,7 @@ use sisa_caching_core::{
     clock::{Clock, SystemClock},
 };
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane,
-    error::HybridCacheError,
-    settings::{BackplaneWorkerSettings, RedisBackplaneSettings},
+    backplane::RedisBackplane, error::HybridCacheError, settings::BackplaneWorkerSettings,
     store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -74,9 +72,7 @@ pub async fn start_with<D: CacheStore + 'static>(
 
 /// A backplane on `redis` with its own connections, as in a process of its own.
 pub async fn backplane(redis: &Redis) -> RedisBackplane {
-    RedisBackplane::connect(redis.url(), RedisBackplaneSettings::default())
-        .await
-        .unwrap()
+    RedisBackplane::connect(redis.url()).await.unwrap()
 }
 
 /// A node with a fresh local layer over `distributed`, started.

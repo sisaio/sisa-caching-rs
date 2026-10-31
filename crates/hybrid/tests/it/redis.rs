@@ -3,7 +3,9 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::common::{assert_a_write_reaches, key, local_value, start};
+use crate::common::{
+    assert_a_write_reaches, fast_heartbeats, fast_retries, key, local_value, start_with,
+};
 use futures_util::StreamExt;
 use sisa_caching_core::{
     cache::{CacheEntry, CacheStore},
@@ -11,46 +13,33 @@ use sisa_caching_core::{
 };
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
-    settings::{HybridCacheSettings, RedisBackplaneSettings},
+    settings::{BackplaneWorkerSettings, HybridCacheSettings},
     store::{HybridCacheStore, RedisHybridCacheStore},
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Redis, eventually};
 
-async fn connect_backplane(redis: &Redis, settings: RedisBackplaneSettings) -> RedisBackplane {
-    RedisBackplane::connect(redis.url(), settings)
-        .await
-        .unwrap()
-}
-
 /// A node for `store`, with its own connections, as in a process of its own.
 async fn node_with(
     redis: &Redis,
     store: &str,
-    settings: RedisBackplaneSettings,
+    settings: BackplaneWorkerSettings,
 ) -> RedisHybridCacheStore {
-    start(
+    start_with(
         HybridCacheStore::new(
             InMemoryCacheStore::new(store).unwrap(),
             RedisCacheStore::new(store, redis.connection().await).unwrap(),
-            connect_backplane(redis, settings).await,
+            RedisBackplane::connect(redis.url()).await.unwrap(),
         )
         .unwrap(),
+        settings,
     )
     .await
 }
 
 async fn node(redis: &Redis) -> RedisHybridCacheStore {
-    node_with(redis, "users", RedisBackplaneSettings::default()).await
-}
-
-/// Pings every 50 ms and gives up after 100 ms, so a stall shows quickly.
-fn quick_pings() -> RedisBackplaneSettings {
-    let mut settings = RedisBackplaneSettings::default();
-    settings.ping_interval_ms = 50;
-    settings.ping_timeout_ms = 100;
-    settings
+    node_with(redis, "users", fast_retries()).await
 }
 
 #[tokio::test]
@@ -86,9 +75,9 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
 #[tokio::test]
 async fn stores_sharing_a_channel_get_only_their_own_invalidations() {
     let redis = Redis::start().await;
-    let users_writer = node_with(&redis, "users", RedisBackplaneSettings::default()).await;
-    let users_reader = node_with(&redis, "users", RedisBackplaneSettings::default()).await;
-    let teams_reader = node_with(&redis, "teams", RedisBackplaneSettings::default()).await;
+    let users_writer = node_with(&redis, "users", fast_retries()).await;
+    let users_reader = node_with(&redis, "users", fast_retries()).await;
+    let teams_reader = node_with(&redis, "teams", fast_retries()).await;
 
     for reader in [&users_reader, &teams_reader] {
         reader
@@ -227,7 +216,7 @@ async fn a_local_copy_of_another_type_falls_back_to_redis_decoding() {
 #[tokio::test]
 async fn a_stalled_subscription_turns_local_reads_off_until_it_is_back() {
     let redis = Redis::start().await;
-    let node = node_with(&redis, "users", quick_pings()).await;
+    let node = node_with(&redis, "users", fast_heartbeats()).await;
 
     node.set(&key(1), "ada".to_owned(), None).await.unwrap();
     node.get::<String>(&key(1)).await.unwrap();

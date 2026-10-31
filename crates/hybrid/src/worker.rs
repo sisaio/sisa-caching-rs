@@ -136,7 +136,7 @@ impl BackplaneWorker {
         let mut subscribed_before = false;
 
         loop {
-            match self.backplane.subscribe().await {
+            match self.backplane.subscribe(timeout).await {
                 Ok(mut subscription) => {
                     let subscribed_at = Instant::now();
 
