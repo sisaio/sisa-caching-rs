@@ -77,5 +77,5 @@ pub use sisa_caching_redis::{
 #[cfg(feature = "hybrid")]
 pub use sisa_caching_hybrid::{
     HybridCacheError, HybridCacheSettings, HybridCacheStore, RedisBackplane, RedisHybridCacheStore,
-    settings::BackplaneWorkerSettings,
+    settings::{BackplaneWorkerSettings, DistributedSettings, LocalSettings},
 };

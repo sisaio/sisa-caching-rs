@@ -115,14 +115,12 @@ impl RedisBackplane {
     ///
     /// ```no_run
     /// use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore, RedisBackplane};
-    /// use sisa_caching_memory::InMemoryCacheStore;
     /// use sisa_caching_redis::{
     ///     RedisCacheStore, SentinelConnection,
     ///     redis::sentinel::{SentinelClient, SentinelServerType},
     /// };
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let settings = HybridCacheSettings::default();
     /// let sentinel = SentinelClient::build(
     ///     vec!["redis://10.0.0.1:26379", "redis://10.0.0.2:26379"],
     ///     String::from("mymaster"),
@@ -132,11 +130,10 @@ impl RedisBackplane {
     /// let conn = SentinelConnection::connect(sentinel).await?;
     ///
     /// let cache = HybridCacheStore::new(
-    ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
-    ///     RedisCacheStore::new("app", conn.clone())?.with_settings(settings.distributed)?,
+    ///     RedisCacheStore::new("app", conn.clone())?,
     ///     RedisBackplane::sentinel(conn),
-    /// )?
-    /// .with_worker_settings(settings.worker)?;
+    ///     &HybridCacheSettings::default(),
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```

@@ -3,25 +3,23 @@
 
 use std::time::Duration;
 
-use crate::common::{fast_heartbeats, key, local_value, start_with};
+use crate::common::{fast_heartbeats, key, local_value, start};
 use redis::cluster_async::ClusterConnection;
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
-use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{RedisCluster, eventually};
 
 type Node = HybridCacheStore<RedisCacheStore<ClusterConnection>>;
 
 async fn node(cluster: &RedisCluster) -> Node {
-    start_with(
+    start(
         HybridCacheStore::new(
-            InMemoryCacheStore::new("users").unwrap(),
             RedisCacheStore::new("users", cluster.connection().await).unwrap(),
             RedisBackplane::cluster(cluster.client()).await.unwrap(),
+            &fast_heartbeats(),
         )
         .unwrap(),
-        fast_heartbeats(),
     )
     .await
 }

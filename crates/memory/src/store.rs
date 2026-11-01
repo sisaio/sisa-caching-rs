@@ -139,6 +139,9 @@ pub struct InMemoryCacheStore {
     name: KeyPrefix,
     clock: Arc<dyn Clock>,
     settings: InMemoryCacheSettings,
+    /// The longest the store holds an entry, whatever its TTL: a hybrid store's cap on its local
+    /// copies. `None`, the default, holds each entry for its whole TTL.
+    max_ttl: Option<Duration>,
     entries: Arc<Entries>,
     locker: Arc<Locker>,
     worker: Worker,
@@ -169,6 +172,7 @@ impl InMemoryCacheStore {
             name,
             clock: Arc::new(SystemClock),
             entries: Arc::new(Entries::new(settings.shards())),
+            max_ttl: None,
             settings,
             locker: Arc::default(),
             worker: Worker::new(),
@@ -194,6 +198,16 @@ impl InMemoryCacheStore {
         self.settings = settings;
 
         Ok(self)
+    }
+
+    /// Holds each entry for at most `max_ttl`, whatever its TTL; the entry keeps its own creation
+    /// time and TTL. The hybrid store sets it on its local layer, to bound how long a node serves a
+    /// copy whose invalidation was lost; a store on its own has nothing to invalidate.
+    #[doc(hidden)]
+    pub fn with_max_ttl(mut self, max_ttl: Option<Duration>) -> Self {
+        self.max_ttl = max_ttl;
+
+        self
     }
 
     /// The settings the store runs with.
@@ -237,12 +251,11 @@ impl InMemoryCacheStore {
                 });
         }
 
-        let max_ttl = self.settings.max_ttl();
+        let max_ttl = self.max_ttl;
         // An entry that never expires, in a store that caps nothing, needs no clock. Otherwise the
         // monotonic clock goes first: measured, the other order slows writes with a TTL.
         let now = (entry.expires_at().is_some() || max_ttl.is_some()).then(|| self.clock.instant());
-        // The store holds an entry for its remaining lifetime, or `max_ttl_secs` if that is
-        // shorter.
+        // The store holds an entry for its remaining lifetime, or `max_ttl` if that is shorter.
         let remaining = entry
             .expires_at()
             .and_then(|_| entry.remaining_ttl(self.clock.now()));
@@ -701,13 +714,7 @@ mod tests {
     #[tokio::test]
     async fn max_ttl_caps_how_long_an_entry_stays_but_keeps_its_metadata() {
         let clock = ManualClock::new();
-        let store = store(
-            &clock,
-            InMemoryCacheSettings {
-                max_ttl_secs: Some(10),
-                ..InMemoryCacheSettings::default()
-            },
-        );
+        let store = store(&clock, InMemoryCacheSettings::default()).with_max_ttl(Some(secs(10)));
 
         store.set(&key(1), 1_u32, ttl(60)).await.unwrap();
         // One that never expires is capped too.
@@ -1215,10 +1222,10 @@ mod tests {
                     settings.refresh_threshold = Some(0.5);
                     settings
                 },
-                max_ttl_secs: Some(8),
                 ..InMemoryCacheSettings::default()
             },
-        );
+        )
+        .with_max_ttl(Some(secs(8)));
         let user = key(1);
         let refresh = |advance: u64| {
             let clock = clock.clone();

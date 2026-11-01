@@ -5,30 +5,30 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sisa_caching_core::{
     cache::CacheError,
-    settings::{CacheSettings, check_duration},
+    settings::{CacheSettings, NoUnknownFields, check_duration},
 };
 
 /// The most maps a store's entries can be split over.
 const MAX_SHARDS: usize = 1_024;
 
 /// Settings for an [`InMemoryCacheStore`](crate::store::InMemoryCacheStore). In a config file the
-/// shared settings sit under `common`, and an unknown field fails, so a misspelled setting can't
-/// silently keep its default:
+/// shared settings sit beside the memory store's own, and an unknown field fails, so a misspelled
+/// setting can't silently keep its default:
 ///
 /// ```
 /// # use sisa_caching_memory::settings::InMemoryCacheSettings;
 /// let settings: InMemoryCacheSettings =
-///     serde_json::from_str(r#"{ "common": { "ttl_secs": 300 }, "max_entries": 10000 }"#)
-///         .unwrap();
+///     serde_json::from_str(r#"{ "ttl_secs": 300, "max_entries": 10000 }"#).unwrap();
 ///
 /// assert_eq!(settings.common.ttl_secs, Some(300));
 /// assert!(serde_json::from_str::<InMemoryCacheSettings>(r#"{ "ttl_sec": 300 }"#).is_err());
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 #[non_exhaustive]
 pub struct InMemoryCacheSettings {
     /// The settings every store has: the default TTL, refresh-ahead and the `get_or_set` lock wait.
+    #[serde(flatten)]
     pub common: CacheSettings,
 
     /// How often the store drops its expired entries: 60 seconds by default. `None` turns that
@@ -41,17 +41,16 @@ pub struct InMemoryCacheSettings {
     /// can go over the limit while it runs. `None` sets no limit; `validate` rejects `0`.
     pub max_entries: Option<usize>,
 
-    /// The longest an entry stays in the store, whatever its TTL. The entry keeps its own creation
-    /// time and TTL; only how long the store holds it is capped. `None` sets no cap; `validate`
-    /// rejects `0`.
-    pub max_ttl_secs: Option<u64>,
-
     /// How many maps the entries are split over, each with its own lock: 16 by default. More maps
     /// let threads using different keys run side by side, and a `remove_prefix`, purge or trim
     /// holds up one map at a time instead of the whole store; each call then hashes its key once
     /// more. `None` means one map, a little faster for a store used from one thread; `validate`
     /// rejects `0` and more than 1,024.
     pub shards: Option<usize>,
+
+    // Last, so it sees only the fields no other one took, and fails on them.
+    #[serde(flatten, skip_serializing)]
+    pub(crate) unknown_fields: NoUnknownFields,
 }
 
 impl Default for InMemoryCacheSettings {
@@ -60,16 +59,15 @@ impl Default for InMemoryCacheSettings {
             common: CacheSettings::default(),
             purge_interval_secs: Some(60),
             max_entries: None,
-            max_ttl_secs: None,
             shards: Some(16),
+            unknown_fields: NoUnknownFields,
         }
     }
 }
 
 impl InMemoryCacheSettings {
-    /// Fails when a setting is 0, `purge_interval_secs` or `max_ttl_secs` is over 365 days,
-    /// `shards` is over 1,024, or a shared setting is out of range, as
-    /// [`CacheSettings::validate`] says.
+    /// Fails when a setting is 0, `purge_interval_secs` is over 365 days, `shards` is over 1,024,
+    /// or a shared setting is out of range, as [`CacheSettings::validate`] says.
     pub fn validate(&self) -> Result<(), CacheError> {
         self.common.validate()?;
         check_duration(
@@ -77,7 +75,6 @@ impl InMemoryCacheSettings {
             self.purge_interval(),
             "use None to turn purging off",
         )?;
-        check_duration("max_ttl_secs", self.max_ttl(), "use None for no cap")?;
 
         for (field, count, none) in [
             ("max_entries", self.max_entries, "for no limit"),
@@ -109,11 +106,6 @@ impl InMemoryCacheSettings {
     /// How many maps `shards` asks for: 1 for `None`.
     pub fn shards(&self) -> usize {
         self.shards.unwrap_or(1)
-    }
-
-    /// `max_ttl_secs` as a `Duration`, or `None` when the store keeps each entry for its whole TTL.
-    pub fn max_ttl(&self) -> Option<Duration> {
-        self.max_ttl_secs.map(Duration::from_secs)
     }
 }
 
@@ -154,20 +146,6 @@ mod tests {
                 },
             ),
             (
-                "max_ttl_secs",
-                InMemoryCacheSettings {
-                    max_ttl_secs: too_long,
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-            (
-                "max_ttl_secs",
-                InMemoryCacheSettings {
-                    max_ttl_secs: Some(0),
-                    ..InMemoryCacheSettings::default()
-                },
-            ),
-            (
                 "max_entries",
                 InMemoryCacheSettings {
                     max_entries: Some(0),
@@ -203,7 +181,6 @@ mod tests {
                 settings
             },
             purge_interval_secs: year,
-            max_ttl_secs: year,
             shards: Some(MAX_SHARDS),
             ..InMemoryCacheSettings::default()
         };
@@ -218,9 +195,9 @@ mod tests {
     fn by_default_purging_runs_every_minute_nothing_is_capped_and_there_are_16_maps() {
         let settings = InMemoryCacheSettings::default();
 
+        assert_eq!(settings.common, CacheSettings::default());
         assert_eq!(settings.purge_interval(), Some(Duration::from_secs(60)));
         assert_eq!(settings.max_entries, None);
-        assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 16);
     }
 
@@ -229,7 +206,6 @@ mod tests {
         let settings = InMemoryCacheSettings {
             purge_interval_secs: None,
             max_entries: None,
-            max_ttl_secs: None,
             shards: None,
             ..InMemoryCacheSettings::default()
         };
@@ -237,7 +213,6 @@ mod tests {
         assert!(settings.validate().is_ok());
         assert_eq!(settings.purge_interval(), None);
         assert_eq!(settings.max_entries, None);
-        assert_eq!(settings.max_ttl(), None);
         assert_eq!(settings.shards(), 1);
     }
 }

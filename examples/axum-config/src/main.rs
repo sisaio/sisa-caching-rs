@@ -75,13 +75,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "hybrid" => {
             // Each instance keeps up to 10,000 entries in memory, for at most a minute each, which
             // caps how long it can serve a stale entry when a lost invalidation goes unnoticed.
-            // Redis keeps entries as the `redis` arm does.
+            // Entries live and refresh as in the `redis` arm, in both layers.
             let mut settings = HybridCacheSettings::default();
+            settings.common.ttl_secs = Some(600);
+            settings.common.refresh_threshold = Some(0.8);
+            settings.common.lock_timeout_ms = Some(5_000);
             settings.local.max_entries = Some(10_000);
             settings.local.max_ttl_secs = Some(60);
-            settings.distributed.common.ttl_secs = Some(600);
-            settings.distributed.common.refresh_threshold = Some(0.8);
-            settings.distributed.common.lock_timeout_ms = Some(5_000);
 
             // The local layer, the Redis store, the backplane, and the worker that applies other
             // instances' invalidations. Until it has subscribed, reads skip the local layer, so

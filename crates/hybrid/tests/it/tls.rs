@@ -4,12 +4,8 @@
 
 #![cfg(feature = "tls-rustls")]
 
-use crate::common::{assert_a_write_reaches, start};
-use sisa_caching_hybrid::{
-    backplane::RedisBackplane,
-    store::{HybridCacheStore, RedisHybridCacheStore},
-};
-use sisa_caching_memory::store::InMemoryCacheStore;
+use crate::common::{assert_a_write_reaches, hybrid, start};
+use sisa_caching_hybrid::{backplane::RedisBackplane, store::RedisHybridCacheStore};
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::RedisTls;
 
@@ -17,8 +13,7 @@ async fn node(tls: &RedisTls) -> RedisHybridCacheStore {
     let backplane = RedisBackplane::from_client(tls.client()).await.unwrap();
 
     start(
-        HybridCacheStore::new(
-            InMemoryCacheStore::new("users").unwrap(),
+        hybrid(
             RedisCacheStore::from_client("users", tls.client())
                 .await
                 .unwrap(),

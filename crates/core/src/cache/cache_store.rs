@@ -66,8 +66,8 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     /// The store's name, written in front of every key it stores.
     fn name(&self) -> &KeyPrefix;
 
-    /// The store's TTL, refresh-ahead and lock settings. A hybrid store returns its distributed
-    /// store's.
+    /// The store's TTL, refresh-ahead and lock settings. A hybrid store returns its own, which
+    /// both of its layers follow.
     fn cache_settings(&self) -> &CacheSettings;
 
     /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are

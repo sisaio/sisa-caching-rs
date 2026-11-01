@@ -14,8 +14,8 @@ explains how the parts fit, what they promise, and which rules hold them togethe
   keys and invalidation messages.
 - **A local layer with a known staleness bound.** The hybrid store serves reads from memory, and a
   node never serves a value it was told is invalid. When a message is lost, the writer's next
-  heartbeat shows it and the node clears its local layer; the memory store's `max_ttl_secs` caps
-  every copy all the same.
+  heartbeat shows it and the node clears its local layer; the local `max_ttl_secs` caps every copy
+  all the same.
 - **Small and explicit.** Building a store is all the setup: it runs its own worker. No hidden
   dependencies, and each store has one read path and one write path.
 
@@ -109,7 +109,8 @@ Rules every store follows:
 ### Memory
 
 `InMemoryCacheStore` keeps `shards` hash maps (16 by default), each behind its own lock. An entry
-stays for its remaining TTL, capped at `max_ttl_secs`. Past `max_entries`, a write starts a trim
+stays for its remaining TTL; a hybrid's local layer caps that at `local.max_ttl_secs`. Past
+`max_entries`, a write starts a trim
 that drops expired entries, then the least recently used ones down to 90% of the limit, so the
 next writes don't trim again. Values are freed after the lock is released. Expired entries read as
 misses and go when they are overwritten, trimmed, or purged. The store purges every
@@ -158,7 +159,7 @@ Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writ
 One store holds values of every type, so an application usually needs one, such as
 `catalog_hybrid_cache` holding categories, groups and products under their own key prefixes. Run
 a second store, such as `user_hybrid_cache`, when a set of data needs other settings: another
-TTL, another `max_entries`, or another `max_ttl_secs` for its local copies.
+TTL, another `local.max_entries`, or another `local.max_ttl_secs` for its local copies.
 
 Each store has its own local layer, generations, worker, subscription connection and channel, so
 the stores don't affect each other: a burst of writes to one never fills another's subscription
@@ -282,7 +283,7 @@ stays subscribed.
 | | |
 | --- | --- |
 | **Guaranteed** | After a write returns, this node's local copy is gone, and every node that receives the message drops its copy. |
-| **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds in `HybridCacheSettings`), even if every message is lost. With the cap set to `None`, or a local store built without those settings, the bound is the entry's own TTL. |
+| **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds by default), even if every message is lost. With the cap set to `None`, the bound is the entry's own TTL. |
 | **Guaranteed** | Once the worker notices the backplane is down (a closed subscription, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
 | **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer at its `stopping` message, or once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default) when it sent none. They also clear when a process stops without calling `shutdown`, so a rolling deploy that skips it clears every node's local layer once for each node it replaces. |
@@ -303,7 +304,7 @@ stays subscribed.
 | --- | --- | --- |
 | all | `CacheError` | `InvalidKey`, `TypeMismatch` (memory), `InvalidSettings` (a setting out of range, such as a TTL over 365 days) |
 | Redis | `RedisCacheError` | `Cache`, `Redis` (connection or command), `Json` (encode or decode) |
-| Hybrid | `HybridCacheError` | `Cache`, `StoreNameMismatch` at construction, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked, or the runtime shut down before it finished) |
+| Hybrid | `HybridCacheError` | `Cache`, `Distributed` (the distributed store's error), `WriteStopped` (the write task panicked, or the runtime shut down before it finished) |
 
 The error enums and `metrics::Layer` are `#[non_exhaustive]`, so a later release can add a
 variant without breaking a `match`. So are the settings structs, so it can add a setting: build
@@ -378,12 +379,12 @@ Settled; reopen only with new evidence.
 - Durations in settings are `u64` seconds or milliseconds. A setting that can be off is an `Option`,
   off with `None`, and `validate` rejects `0` in every setting and a duration over 365 days,
   naming the field. Each store's settings and `HybridCacheSettings` have one `validate`, and
-  `with_settings` and `with_worker_settings` return a `Result`; `HybridCacheStore::new` checks the
-  backplane's settings.
-  Settings nest (a store's shared `CacheSettings` sit under `common`, a hybrid's parts under
-  `local`, `distributed`, `backplane` and `worker`), and an unknown field fails to deserialize, so a
-  misspelled setting can't silently keep its default. A hybrid's `local.common` fails `validate`:
-  hybrid calls read `distributed.common`.
+  `with_settings` and `HybridCacheStore::new` return a `Result`.
+  A store's shared `CacheSettings` sit at the top level of its settings, through serde's
+  `flatten`, and a hybrid's parts under `local`, `distributed` and `worker`, which hold no TTL
+  settings: a hybrid's own apply to both layers. An unknown field fails to deserialize, so a
+  misspelled setting can't silently keep its default; `deny_unknown_fields` doesn't work beside
+  `flatten`, so a last flattened field fails on whatever fields the others didn't take.
 - Info spans and warnings carry the store and the invalidation kind, never a key or a value; only
   debug spans and events carry keys. Stores warn only about the errors they swallow. Their info
   lines say that a worker started or stopped, a backplane subscribed, or store calls work again,
