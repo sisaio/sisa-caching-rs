@@ -237,6 +237,7 @@ struct SlowReplies {
     delay: Duration,
 }
 
+// Passes each command on, then holds the reply for `delay`.
 impl ConnectionLike for SlowReplies {
     fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
         Box::pin(async move {
@@ -266,6 +267,7 @@ impl ConnectionLike for SlowReplies {
     }
 }
 
+// One server, so the default methods fit.
 impl RedisConnection for SlowReplies {}
 
 #[tokio::test]
@@ -293,6 +295,7 @@ async fn a_late_reply_never_returns_an_expired_value() {
 #[derive(Clone, Deserialize)]
 struct SlowToEncode(String);
 
+// Sleeps before writing the string, so encoding takes 100 ms.
 impl Serialize for SlowToEncode {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         std::thread::sleep(Duration::from_millis(100));

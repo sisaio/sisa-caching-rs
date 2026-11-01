@@ -131,6 +131,7 @@ async fn purge_every<C: Clock>(store: InMemoryCacheStore<C>, interval: Duration)
 /// shut down first.
 struct Trimming<C>(InMemoryCacheStore<C>);
 
+// Lets the next trim start, whether or not this one ran.
 impl<C> Drop for Trimming<C> {
     fn drop(&mut self) {
         self.0.entries.trimming.store(false, Ordering::Release);
@@ -417,8 +418,10 @@ impl<C: Clock> InMemoryCacheStore<C> {
     }
 }
 
+// Marks this as one of the stores that may implement `CacheStore`.
 impl<C: Clock> sisa_caching_core::sealed::Sealed for InMemoryCacheStore<C> {}
 
+// The cache API over the in-process maps.
 impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
     type Error = CacheError;
     type Clock = C;

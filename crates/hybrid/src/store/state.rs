@@ -79,6 +79,7 @@ pub(crate) struct Publishing {
     pub(crate) seq: u64,
 }
 
+// Marks the number's publish as over, so a heartbeat can vouch for it.
 impl Drop for Publishing {
     fn drop(&mut self) {
         self.sequence

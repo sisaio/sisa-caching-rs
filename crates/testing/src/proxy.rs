@@ -68,6 +68,7 @@ impl Proxy {
     }
 }
 
+// Stops forwarding along with the proxy.
 impl Drop for Proxy {
     fn drop(&mut self) {
         self.task.abort();

@@ -24,6 +24,7 @@ static ALONGSIDE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscrib
 #[derive(Clone)]
 pub struct Logs(Arc<Mutex<Vec<String>>>);
 
+// An empty log, with the process-wide dispatcher set up first.
 impl Default for Logs {
     fn default() -> Self {
         LazyLock::force(&ALONGSIDE);
@@ -38,6 +39,7 @@ impl Logs {
     }
 }
 
+// Keeps each event at info or above as a line, and ignores spans.
 impl Subscriber for Logs {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         *metadata.level() <= Level::INFO
@@ -54,6 +56,7 @@ impl Subscriber for Logs {
     fn event(&self, event: &Event<'_>) {
         struct Line(String);
 
+        // Adds each field as ` name=value`.
         impl Visit for Line {
             fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
                 self.0.push_str(&format!(" {field}={value:?}"));

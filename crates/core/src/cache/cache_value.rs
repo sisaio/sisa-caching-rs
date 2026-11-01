@@ -12,4 +12,5 @@ use serde::{Serialize, de::DeserializeOwned};
 /// can free a value while an invalidation waits behind it.
 pub trait CacheValue: Any + Serialize + DeserializeOwned + Clone + Send + Sync + 'static {}
 
+// Every type that meets the bounds is a value, so no caller implements it.
 impl<T> CacheValue for T where T: Any + Serialize + DeserializeOwned + Clone + Send + Sync + 'static {}

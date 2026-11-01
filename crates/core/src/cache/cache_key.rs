@@ -76,12 +76,14 @@ impl KeyPrefix {
     }
 }
 
+// Writes the name as given, as keys and logs show it.
 impl fmt::Display for KeyPrefix {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
+// Lets serde read a store name from a string, checked as `new` checks it.
 impl TryFrom<String> for KeyPrefix {
     type Error = CacheError;
 
@@ -90,6 +92,7 @@ impl TryFrom<String> for KeyPrefix {
     }
 }
 
+// Lets serde write a store name back as a plain string.
 impl From<KeyPrefix> for String {
     fn from(prefix: KeyPrefix) -> Self {
         prefix.to_string()
@@ -134,6 +137,7 @@ impl CacheKey {
     }
 }
 
+// Lets a key go wherever a `&str` is expected, as every store method takes one.
 impl Deref for CacheKey {
     type Target = str;
 
@@ -142,12 +146,14 @@ impl Deref for CacheKey {
     }
 }
 
+// Writes the joined key, such as `user:42`, for logs and messages.
 impl fmt::Display for CacheKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
+// Hands over the joined key without copying it.
 impl From<CacheKey> for String {
     fn from(key: CacheKey) -> Self {
         key.0

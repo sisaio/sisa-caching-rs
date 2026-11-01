@@ -32,6 +32,7 @@ pub struct BackplaneWorkerSettings {
     pub heartbeat_timeout_ms: u64,
 }
 
+// Retries from 100 ms backing off to 5 s, and a heartbeat every second, lost after 5 s.
 impl Default for BackplaneWorkerSettings {
     fn default() -> Self {
         Self {

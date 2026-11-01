@@ -34,8 +34,10 @@ enum LostReply {
     Cache(#[from] CacheError),
 }
 
+// Lets this test store implement `CacheStore`.
 impl sisa_caching_core::sealed::Sealed for LostReplies {}
 
+// Applies each write, then reports it as failed.
 impl CacheStore for LostReplies {
     type Error = LostReply;
     type Clock = SystemClock;
@@ -137,6 +139,7 @@ struct Gate {
     release: Semaphore,
 }
 
+// No stops and no permits, so writes go straight through.
 impl Default for Gate {
     fn default() -> Self {
         Self {
@@ -184,8 +187,10 @@ impl GatedStore {
     }
 }
 
+// Lets this test store implement `CacheStore`.
 impl sisa_caching_core::sealed::Sealed for GatedStore {}
 
+// The memory store's API, with each write held at the gate's points.
 impl CacheStore for GatedStore {
     type Error = CacheError;
     type Clock = SystemClock;

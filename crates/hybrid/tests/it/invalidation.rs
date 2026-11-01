@@ -505,8 +505,10 @@ impl PausingStore {
     }
 }
 
+// Lets this test store implement `CacheStore`.
 impl sisa_caching_core::sealed::Sealed for PausingStore {}
 
+// The memory store's API, with reads and writes that can pause.
 impl CacheStore for PausingStore {
     type Error = CacheError;
     type Clock = SystemClock;

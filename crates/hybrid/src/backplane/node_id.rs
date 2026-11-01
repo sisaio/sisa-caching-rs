@@ -27,18 +27,21 @@ impl NodeId {
     }
 }
 
+// Writes the id as given, as messages and logs carry it.
 impl fmt::Display for NodeId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
+// Lets serde read an id from a message.
 impl From<String> for NodeId {
     fn from(id: String) -> Self {
         Self::new(id)
     }
 }
 
+// Lets serde write the id as a plain string.
 impl From<NodeId> for String {
     fn from(id: NodeId) -> Self {
         id.to_string()

@@ -60,10 +60,13 @@ pub trait RedisConnection: ConnectionLike + Clone + Send + Sync + 'static {
     }
 }
 
+// One server, with or without replicas, so the default methods fit.
 impl RedisConnection for ConnectionManager {}
 
+// One server too, without the reconnects a `ConnectionManager` adds.
 impl RedisConnection for MultiplexedConnection {}
 
+// A cluster: `primaries` asks every primary, and `query_node` sends to one of them.
 impl RedisConnection for ClusterConnection {
     async fn primaries(&mut self) -> RedisResult<Vec<Option<NodeAddress>>> {
         // Asked of every primary, so each reply comes keyed by the address this connection reaches
@@ -221,6 +224,7 @@ pub struct SentinelConnection {
     primary: Arc<RwLock<Primary>>,
 }
 
+// Shows how many failovers it has followed; the clients have nothing to show.
 impl std::fmt::Debug for SentinelConnection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -330,6 +334,7 @@ impl SentinelConnection {
     }
 }
 
+// Sends each command to the current primary, and follows a failover when a reply shows one.
 impl ConnectionLike for SentinelConnection {
     fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
         Box::pin(self.send(
@@ -355,4 +360,5 @@ impl ConnectionLike for SentinelConnection {
     }
 }
 
+// One primary at a time, so the default methods fit.
 impl RedisConnection for SentinelConnection {}
