@@ -15,17 +15,26 @@ leaves that cost out of the previous release's column.
 
 | Group | Benchmark | What it times |
 | --- | --- | --- |
-| memory | get hit, get miss, set | One call on a store with one shard |
+| memory | get hit, get miss, set, remove | One call on a store with one shard. `remove` takes out a key written just before it, untimed |
 | memory | get_or_set hit | `get_or_set` when the value is cached, so the loader never runs |
+| memory | get_or_set miss | `get_or_set` when the key is missing: a read, the key's lock, a second read, the loader and the write. The key is removed before each call, untimed |
 | memory 8 tasks | get hit, shards 1 and 16 | Eight tasks reading different keys at once, through one map or sixteen |
 | memory 1M entries | remove_prefix, nothing matches | `remove_prefix` on a store of a million entries in one map, when no key matches |
 | memory 1M entries | purge, nothing expired | A purge of that store when nothing has expired |
 | memory 1M entries | purge, every entry expired | A purge that drops a million expired entries |
 | memory 1M entries | set that trims | A write that takes a store past `max_entries` of a million, so it drops entries down to nine tenths of that. It runs outside a tokio runtime, where the write runs the trim itself |
-| redis | get hit, get miss, set | One call, including the round trip and JSON encoding |
+| redis | get hit, get miss, set, remove | One call, including the round trip and JSON encoding |
+| redis | get_or_set hit, get_or_set miss | As for memory: a miss makes three round trips, two reads and the write |
 | hybrid | get local hit | A read served from the local layer |
 | hybrid | get local miss, Redis hit | A read that goes to Redis and copies the value into the local layer |
-| hybrid | set | A write: Redis and both local evictions; the publish runs in the background, so it isn't timed |
+| hybrid | get miss | A read that misses both layers |
+| hybrid | set, remove | A write: Redis and both local evictions; the publish runs in the background, so it isn't timed |
+| hybrid | get_or_set local hit, get_or_set miss | As for memory; a miss reads both layers twice and writes as `set` does |
+
+Every store times the same calls: `get` hit and miss, `set`, `remove`, and `get_or_set` hit and
+miss. `remove_prefix` is timed on a large memory store only: on Redis it scans every key on the
+server, so its time says more about what else the server holds than about the store. `clear` isn't
+timed.
 
 Each `memory 1M entries` call walks every entry without yielding, and calls on the map it is
 walking wait for it. Inside a tokio runtime, the store runs its trims and its purge worker's purges

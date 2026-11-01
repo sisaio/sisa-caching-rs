@@ -1,7 +1,10 @@
-//! What the benchmarks store: a small user record under `user:{id}`, and the meter provider they
-//! record their metrics with.
+//! What the benchmarks store: a small user record under `user:{id}`, the meter provider they
+//! record their metrics with, and a timer for calls that need the store set up before each one.
 
-use std::sync::OnceLock;
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::{ManualReader, SdkMeterProvider};
@@ -41,4 +44,24 @@ pub fn meter_provider() {
         global::set_meter_provider(provider.clone());
         provider
     });
+}
+
+/// Runs `prepare` then `call`, `iters` times, and returns the time `call` took in all: for a call
+/// that needs the store in some state first, such as a key to remove or a key that isn't there.
+pub async fn time_after(
+    iters: u64,
+    mut prepare: impl AsyncFnMut(),
+    mut call: impl AsyncFnMut(),
+) -> Duration {
+    let mut total = Duration::ZERO;
+
+    for _ in 0..iters {
+        prepare().await;
+
+        let start = Instant::now();
+
+        call().await;
+        total += start.elapsed();
+    }
+    total
 }

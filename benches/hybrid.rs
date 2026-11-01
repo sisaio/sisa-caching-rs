@@ -1,13 +1,10 @@
 //! The hybrid store over Redis in Docker on this machine: what a local hit saves, and what a
 //! write costs. A write's invalidation is published in the background, so it isn't timed.
 
-use std::{
-    hint::black_box,
-    time::{Duration, Instant},
-};
+use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use sisa_caching_benches::{User, key, meter_provider, user};
+use sisa_caching_benches::{User, key, meter_provider, time_after, user};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_hybrid::{
     backplane::RedisBackplane, settings::HybridCacheSettings, store::HybridCacheStore,
@@ -41,7 +38,7 @@ fn hybrid(c: &mut Criterion) {
         store
     });
     // Built before timing, so the times leave out formatting a key.
-    let (hit, written) = (key(1), key(2));
+    let (hit, miss, written) = (key(1), key(3), key(2));
     let mut group = c.benchmark_group("hybrid");
 
     group.bench_function("get local hit", |b| {
@@ -49,27 +46,57 @@ fn hybrid(c: &mut Criterion) {
             .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
     group.bench_function("get local miss, Redis hit", |b| {
-        b.to_async(&runtime).iter_custom(|iters| {
-            let (store, hit) = (&store, &hit);
-
-            async move {
-                let mut total = Duration::ZERO;
-
-                for _ in 0..iters {
-                    store.local_store().remove(hit).await.unwrap();
-
-                    let start = Instant::now();
-
-                    black_box(store.get::<User>(hit).await.unwrap());
-                    total += start.elapsed();
-                }
-                total
-            }
+        b.to_async(&runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || _ = store.local_store().remove(&hit).await.unwrap(),
+                async || _ = black_box(store.get::<User>(black_box(&hit)).await.unwrap()),
+            )
+            .await
         });
+    });
+    group.bench_function("get miss", |b| {
+        b.to_async(&runtime)
+            .iter(async || store.get::<User>(black_box(&miss)).await.unwrap());
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
             .iter(async || store.set(black_box(&written), user(2), None).await.unwrap());
+    });
+    group.bench_function("remove", |b| {
+        b.to_async(&runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || store.set(&written, user(2), None).await.unwrap(),
+                async || assert!(store.remove(black_box(&written)).await.unwrap()),
+            )
+            .await
+        });
+    });
+    group.bench_function("get_or_set local hit", |b| {
+        b.to_async(&runtime).iter(async || {
+            store
+                .get_or_set(black_box(&hit), async || Ok::<_, ()>(user(1)), None)
+                .await
+                .unwrap()
+        });
+    });
+    group.bench_function("get_or_set miss", |b| {
+        b.to_async(&runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || _ = store.remove(&written).await.unwrap(),
+                async || {
+                    black_box(
+                        store
+                            .get_or_set(black_box(&written), async || Ok::<_, ()>(user(2)), None)
+                            .await
+                            .unwrap(),
+                    );
+                },
+            )
+            .await
+        });
     });
     group.finish();
 }

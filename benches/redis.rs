@@ -4,7 +4,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use sisa_caching_benches::{User, key, meter_provider, user};
+use sisa_caching_benches::{User, key, meter_provider, time_after, user};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::Redis;
@@ -35,6 +35,41 @@ fn redis(c: &mut Criterion) {
     group.bench_function("set", |b| {
         b.to_async(&runtime)
             .iter(async || store.set(black_box(&written), user(3), None).await.unwrap());
+    });
+    group.bench_function("remove", |b| {
+        b.to_async(&runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || store.set(&written, user(3), None).await.unwrap(),
+                async || assert!(store.remove(black_box(&written)).await.unwrap()),
+            )
+            .await
+        });
+    });
+    group.bench_function("get_or_set hit", |b| {
+        b.to_async(&runtime).iter(async || {
+            store
+                .get_or_set(black_box(&hit), async || Ok::<_, ()>(user(1)), None)
+                .await
+                .unwrap()
+        });
+    });
+    group.bench_function("get_or_set miss", |b| {
+        b.to_async(&runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || _ = store.remove(&written).await.unwrap(),
+                async || {
+                    black_box(
+                        store
+                            .get_or_set(black_box(&written), async || Ok::<_, ()>(user(3)), None)
+                            .await
+                            .unwrap(),
+                    );
+                },
+            )
+            .await
+        });
     });
     group.finish();
 }
