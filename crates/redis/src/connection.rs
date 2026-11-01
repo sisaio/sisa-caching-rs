@@ -95,14 +95,14 @@ impl RedisConnection for ClusterConnection {
             let node: Vec<Value> = from_redis_value(node)?;
             let mut node = node.into_iter();
             let host: Option<String> = from_redis_value(node.next().unwrap_or(Value::Nil))?;
-            let address = (
+            let address = Some((
                 host.filter(|host| !host.is_empty())
                     .unwrap_or_else(|| asked.to_owned()),
                 from_redis_value(node.next().unwrap_or(Value::Nil))?,
-            );
+            ));
 
-            if !primaries.contains(&Some(address.clone())) {
-                primaries.push(Some(address));
+            if !primaries.contains(&address) {
+                primaries.push(address);
             }
         }
 
