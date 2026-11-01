@@ -15,7 +15,7 @@ leaves that cost out of the previous release's column.
 
 | Group | Benchmark | What it times |
 | --- | --- | --- |
-| memory | get hit, get miss, set, remove | One call on a store with one shard. `remove` takes out a key written just before it, untimed |
+| memory | get hit, get miss, set, remove | One call on a store with one shard. `set` writes over the same key each time; `remove` takes out a key written just before it, untimed |
 | memory | get_or_set hit | `get_or_set` when the value is cached, so the loader never runs |
 | memory | get_or_set miss | `get_or_set` when the key is missing: a read, the key's lock, a second read, the loader and the write. The key is removed before each call, untimed |
 | memory 8 tasks | get hit, shards 1 and 16 | Eight tasks reading different keys at once, through one map or sixteen |
