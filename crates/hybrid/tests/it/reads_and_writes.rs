@@ -44,15 +44,27 @@ fn with_local_ttl(local_ttl_secs: u64) -> HybridCacheSettings {
 }
 
 #[tokio::test]
-async fn a_read_copies_a_distributed_hit_into_the_local_layer_unchanged() {
+async fn a_read_copies_a_distributed_hit_unchanged_for_the_local_ttl() {
     let redis = Redis::start().await;
-    let distributed = memory("users");
-    let node = node(&distributed, &redis).await;
+    let clock = ManualClock::new();
+    let distributed = on_clock(&clock, InMemoryCacheSettings::default());
+    let node = start(
+        HybridCacheStore::new_on_clock(
+            distributed.clone(),
+            backplane(&redis).await,
+            &with_local_ttl(10),
+            clock.clone(),
+        )
+        .unwrap(),
+    )
+    .await;
 
     distributed
-        .set(&key(1), "ada".to_owned(), ttl(60))
+        .set(&key(1), "ada".to_owned(), ttl(100))
         .await
         .unwrap();
+
+    let original = distributed.get_entry::<String>(&key(1)).await.unwrap();
 
     assert_eq!(local_value(&node, &key(1)).await, None);
     assert_eq!(
@@ -60,13 +72,30 @@ async fn a_read_copies_a_distributed_hit_into_the_local_layer_unchanged() {
         Some("ada")
     );
     assert_eq!(
-        node.local_store()
-            .get_entry::<String>(&key(1))
-            .await
-            .unwrap(),
-        distributed.get_entry(&key(1)).await.unwrap(),
+        node.local_store().get_entry(&key(1)).await.unwrap(),
+        original,
         "same value, creation time and TTL"
     );
+
+    clock.advance(secs(10));
+    assert_eq!(
+        local_value(&node, &key(1)).await,
+        None,
+        "the local TTL let it go"
+    );
+    assert_eq!(
+        node.get_entry(&key(1)).await.unwrap(),
+        original,
+        "read again"
+    );
+    assert_eq!(
+        node.local_store().get_entry(&key(1)).await.unwrap(),
+        original,
+        "copied again"
+    );
+
+    clock.advance(secs(90));
+    assert_eq!(node.get::<String>(&key(1)).await.unwrap(), None);
 }
 
 #[tokio::test]
@@ -136,51 +165,6 @@ async fn calls_use_the_hybrid_stores_own_settings() {
     .expect("the 20 ms lock timeout ends the wait");
 
     assert_eq!(loaded.as_deref(), Ok("ada"));
-}
-
-#[tokio::test]
-async fn a_local_copy_stays_for_the_local_ttl_and_keeps_the_entrys_metadata() {
-    let redis = Redis::start().await;
-    let clock = ManualClock::new();
-    let distributed = on_clock(&clock, InMemoryCacheSettings::default());
-    let node = start(
-        HybridCacheStore::new_on_clock(
-            distributed.clone(),
-            backplane(&redis).await,
-            &with_local_ttl(10),
-            clock.clone(),
-        )
-        .unwrap(),
-    )
-    .await;
-
-    distributed
-        .set(&key(1), "ada".to_owned(), ttl(100))
-        .await
-        .unwrap();
-
-    let original = distributed.get_entry::<String>(&key(1)).await.unwrap();
-
-    assert_eq!(node.get_entry(&key(1)).await.unwrap(), original);
-    assert_eq!(
-        node.local_store().get_entry(&key(1)).await.unwrap(),
-        original
-    );
-
-    clock.advance(secs(10));
-    assert_eq!(
-        local_value(&node, &key(1)).await,
-        None,
-        "the local TTL let it go"
-    );
-    assert_eq!(
-        node.get_entry(&key(1)).await.unwrap(),
-        original,
-        "read again"
-    );
-
-    clock.advance(secs(90));
-    assert_eq!(node.get::<String>(&key(1)).await.unwrap(), None);
 }
 
 #[tokio::test]
