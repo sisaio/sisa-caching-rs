@@ -19,7 +19,7 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
     let reader = node(&distributed, &redis).await;
 
     // Local reads come on just before the gauge is set, so wait for it.
-    eventually("the workers report the backplane up", || async {
+    eventually("the workers report the backplane up", async || {
         metrics.value("sisa.caching.backplane.connected", &[]) == 1
     })
     .await;
@@ -30,16 +30,16 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
     reader.get::<String>(&key(1)).await.unwrap();
     // A load: two misses, one before and one after the lock, and one duration.
     writer
-        .get_or_set(&key(2), || async { Ok::<_, ()>("grace".to_owned()) }, None)
+        .get_or_set(&key(2), async || Ok::<_, ()>("grace".to_owned()), None)
         .await
         .unwrap();
 
-    eventually("the reader applies both writes", || async {
+    eventually("the reader applies both writes", async || {
         metrics.value("sisa.caching.invalidations.received", &[]) == 2
     })
     .await;
     // Each reached both subscriptions, the writer's own included.
-    eventually("both publishes count their subscribers", || async {
+    eventually("both publishes count their subscribers", async || {
         metrics.value("sisa.caching.invalidations.delivered", &[]) == 4
     })
     .await;
@@ -55,7 +55,7 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
 
     // A message no node can read counts once on each.
     publish(&redis, "app", "not json").await;
-    eventually("both nodes count it", || async {
+    eventually("both nodes count it", async || {
         metrics.value("sisa.caching.backplane.unreadable", &[]) == 2
     })
     .await;
@@ -71,11 +71,11 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
     redis.stop().await;
     writer.remove(&key(1)).await.unwrap();
 
-    eventually("the publish gives up", || async {
+    eventually("the publish gives up", async || {
         metrics.value("sisa.caching.publish.failures", &[]) == 1
     })
     .await;
-    eventually("the workers report the backplane down", || async {
+    eventually("the workers report the backplane down", async || {
         metrics.value("sisa.caching.backplane.connected", &[]) == 0
     })
     .await;

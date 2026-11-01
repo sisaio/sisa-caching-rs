@@ -26,15 +26,15 @@ fn redis(c: &mut Criterion) {
 
     group.bench_function("get hit", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&hit)).await.unwrap() });
+            .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
     group.bench_function("get miss", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&miss)).await.unwrap() });
+            .iter(async || store.get::<User>(black_box(&miss)).await.unwrap());
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.set(black_box(&written), user(3), None).await.unwrap() });
+            .iter(async || store.set(black_box(&written), user(3), None).await.unwrap());
     });
     group.finish();
 }

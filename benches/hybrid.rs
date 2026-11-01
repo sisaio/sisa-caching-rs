@@ -33,7 +33,7 @@ fn hybrid(c: &mut Criterion) {
         .unwrap();
 
         store.start_worker();
-        eventually("the backplane worker subscribes", || async {
+        eventually("the backplane worker subscribes", async || {
             store.local_reads_enabled()
         })
         .await;
@@ -46,7 +46,7 @@ fn hybrid(c: &mut Criterion) {
 
     group.bench_function("get local hit", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&hit)).await.unwrap() });
+            .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
     group.bench_function("get local miss, Redis hit", |b| {
         b.to_async(&runtime).iter_custom(|iters| {
@@ -69,7 +69,7 @@ fn hybrid(c: &mut Criterion) {
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.set(black_box(&written), user(2), None).await.unwrap() });
+            .iter(async || store.set(black_box(&written), user(2), None).await.unwrap());
     });
     group.finish();
 }

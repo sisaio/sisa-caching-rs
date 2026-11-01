@@ -23,7 +23,7 @@
 //! let cache = InMemoryCacheStore::new("app")?;
 //!
 //! let name = cache
-//!     .get_or_set("user:v1:42", || async { Ok::<_, std::io::Error>("Ada".to_string()) }, None)
+//!     .get_or_set("user:v1:42", async || Ok::<_, std::io::Error>("Ada".to_string()), None)
 //!     .await?;
 //!
 //! assert_eq!(name, "Ada");

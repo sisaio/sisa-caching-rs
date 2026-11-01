@@ -18,7 +18,7 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
     let _logging = tracing::subscriber::set_default(logs.clone());
     let redis = Redis::start_restartable().await;
     let store = RedisCacheStore::connect("app", redis.url()).await.unwrap();
-    let load = || async { Ok::<_, ()>("loaded".to_owned()) };
+    let load = async || Ok::<_, ()>("loaded".to_owned());
 
     // Data that doesn't decode as the requested type is a miss: the caller gets no value.
     store.set(&key(0), "ada".to_owned(), None).await.unwrap();
@@ -47,7 +47,7 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
     );
 
     redis.restart().await;
-    eventually("the store reconnects", || async {
+    eventually("the store reconnects", async || {
         store.get::<String>(&key(1)).await.is_ok()
     })
     .await;

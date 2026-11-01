@@ -61,7 +61,7 @@ pub async fn start<D: CacheStore + 'static, C: Clock>(
     store: HybridCacheStore<D, C>,
 ) -> HybridCacheStore<D, C> {
     store.start_worker();
-    eventually("the backplane worker subscribes", || async {
+    eventually("the backplane worker subscribes", async || {
         store.local_reads_enabled()
     })
     .await;
@@ -125,7 +125,7 @@ pub async fn assert_a_write_reaches<D, R>(
 
     writer.set(&key(1), "new".to_owned(), None).await.unwrap();
 
-    eventually("the reader drops its copy", || async {
+    eventually("the reader drops its copy", async || {
         local_value(reader, &key(1)).await.is_none()
     })
     .await;

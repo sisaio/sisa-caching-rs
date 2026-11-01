@@ -123,7 +123,7 @@ impl RedisCluster {
             .await;
         }
         for node in &nodes {
-            wait_for("every node sees all slots served", || async {
+            wait_for("every node sees all slots served", async || {
                 let info: String = query(node, redis::cmd("CLUSTER").arg("INFO")).await;
                 let slots: Vec<redis::Value> =
                     query(node, redis::cmd("CLUSTER").arg("SLOTS")).await;
@@ -201,7 +201,7 @@ impl RedisCluster {
 
         let target_ip = self.addresses[target].0.to_string();
         for node in &nodes {
-            wait_for("every node sees the slot moved", || async {
+            wait_for("every node sees the slot moved", async || {
                 let ranges: Vec<(u16, u16, (String, u16))> =
                     query::<Vec<Vec<redis::Value>>>(node, redis::cmd("CLUSTER").arg("SLOTS"))
                         .await

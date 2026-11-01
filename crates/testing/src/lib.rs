@@ -32,11 +32,7 @@ pub use crate::{
 };
 
 /// Polls `check` until it holds, and fails the test with `what` after five seconds.
-pub async fn eventually<F, Fut>(what: &str, mut check: F)
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = bool>,
-{
+pub async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
 
     while !check().await {

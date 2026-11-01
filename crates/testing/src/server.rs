@@ -96,7 +96,7 @@ pub(crate) fn beside(
 
 // Servers log readiness differently, so wait until one answers PING.
 pub(crate) async fn wait_for_ping(client: &Client) {
-    wait_for("the server answers PING", || async {
+    wait_for("the server answers PING", async || {
         ping(client).await.is_ok()
     })
     .await;
@@ -114,11 +114,7 @@ pub(crate) async fn query<T: redis::FromRedisValue>(client: &Client, cmd: &mut r
 
 /// Waits up to 60 s for `check`, which topology changes such as a cluster agreeing on its slots
 /// can need.
-pub(crate) async fn wait_for<F, Fut>(what: &str, mut check: F)
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = bool>,
-{
+pub(crate) async fn wait_for(what: &str, mut check: impl AsyncFnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while !check().await {
         assert!(Instant::now() < deadline, "timed out after 60 s: {what}");

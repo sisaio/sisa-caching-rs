@@ -49,7 +49,7 @@ impl RedisSentinel {
             redis::cmd("REPLICAOF").arg(ip.to_string()).arg(6379),
         )
         .await;
-        wait_for("the replica syncs", || async {
+        wait_for("the replica syncs", async || {
             let info: String = query(&replica_client, redis::cmd("INFO").arg("replication")).await;
             info.contains("master_link_status:up")
         })
@@ -75,7 +75,7 @@ impl RedisSentinel {
             ip,
         };
         let sentinel_client = redis.server(26379);
-        wait_for("Sentinel finds the replica", || async {
+        wait_for("Sentinel finds the replica", async || {
             let replicas: redis::RedisResult<Vec<redis::Value>> = async {
                 let mut connection = sentinel_client.get_multiplexed_async_connection().await?;
                 redis::cmd("SENTINEL")
@@ -157,7 +157,7 @@ impl RedisSentinel {
             .await
             .unwrap();
         // Sentinel refuses with NOGOODSLAVE until it has fresh news of the replica.
-        wait_for("Sentinel starts the failover", || async {
+        wait_for("Sentinel starts the failover", async || {
             redis::cmd("SENTINEL")
                 .arg("FAILOVER")
                 .arg("primary")
@@ -167,7 +167,7 @@ impl RedisSentinel {
         })
         .await;
 
-        eventually("Sentinel names 6380 as the primary", || async {
+        eventually("Sentinel names 6380 as the primary", async || {
             let primary = self.sentinel_client().async_get_client().await;
 
             primary.is_ok_and(|client| {

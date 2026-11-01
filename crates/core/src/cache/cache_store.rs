@@ -263,7 +263,7 @@ where
     // The locks go by the store's full key, built only when a call locks: a hit never needs it.
     let full_key = || store.name().format_key(key);
     // Loads, records how long it took, and stores what it got.
-    let load = || async move {
+    let load = async move || {
         let started = Instant::now();
         let loaded = load().await;
 
@@ -279,7 +279,7 @@ where
     };
 
     // Reads the key, and records a failed read.
-    let read = || async {
+    let read = async || {
         let read = store.get_entry::<CV>(key).await;
 
         record(store, "get", &locker.reads_failing, &read);

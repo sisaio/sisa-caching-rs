@@ -161,7 +161,7 @@ mod tests {
         let running = Worker::new();
         let (stopped, done) = oneshot::channel::<()>();
 
-        running.start("waiting", &store(), || async move {
+        running.start("waiting", &store(), async move || {
             let _stopped = stopped;
 
             pending::<()>().await;
@@ -222,7 +222,7 @@ mod tests {
         let worker = Worker::new();
         let (ran, panicked) = oneshot::channel::<()>();
 
-        worker.start("panicking", &store(), || async move {
+        worker.start("panicking", &store(), async move || {
             let _ran = ran;
 
             panic!("the task failed");

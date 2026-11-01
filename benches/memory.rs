@@ -61,20 +61,20 @@ fn single(c: &mut Criterion) {
 
     group.bench_function("get hit", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&hit)).await.unwrap() });
+            .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
     group.bench_function("get miss", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.get::<User>(black_box(&miss)).await.unwrap() });
+            .iter(async || store.get::<User>(black_box(&miss)).await.unwrap());
     });
     group.bench_function("set", |b| {
         b.to_async(&runtime)
-            .iter(|| async { store.set(black_box(&written), user(3), None).await.unwrap() });
+            .iter(async || store.set(black_box(&written), user(3), None).await.unwrap());
     });
     group.bench_function("get_or_set hit", |b| {
-        b.to_async(&runtime).iter(|| async {
+        b.to_async(&runtime).iter(async || {
             store
-                .get_or_set(black_box(&hit), || async { Ok::<_, ()>(user(1)) }, None)
+                .get_or_set(black_box(&hit), async || Ok::<_, ()>(user(1)), None)
                 .await
                 .unwrap()
         });
@@ -150,7 +150,7 @@ fn large(c: &mut Criterion) {
     fill(&runtime, &filled, 0..ENTRIES, None);
     group.bench_function("remove_prefix, nothing matches", |b| {
         b.to_async(&runtime)
-            .iter(|| async { filled.remove_prefix(black_box("other")).await.unwrap() });
+            .iter(async || filled.remove_prefix(black_box("other")).await.unwrap());
     });
     group.bench_function("purge, nothing expired", |b| b.iter(|| filled.purge()));
     drop(filled);
