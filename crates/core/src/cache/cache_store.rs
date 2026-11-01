@@ -78,8 +78,8 @@ where
         loaded
     };
 
-    // Reads the key, and records a failed read.
-    let read = async || {
+    // Reads the entry of `key`, the one key this call is for, and records a failed read.
+    let read_entry = async || {
         let outcome = store.get_entry::<CV>(key).await;
 
         record_outcome(store, "get", &locker.reads_failing, &outcome);
@@ -91,7 +91,7 @@ where
             .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
     };
 
-    let due_entry = match read().await {
+    let due_entry = match read_entry().await {
         Ok(Some(entry)) if !needs_refresh(&entry) => return Ok(entry.value),
         Ok(Some(entry)) => Some(entry),
         _ => None,
@@ -107,7 +107,7 @@ where
             };
 
             // Another caller may have refreshed it between this one's read and its lock.
-            if let Ok(Some(current)) = read().await
+            if let Ok(Some(current)) = read_entry().await
                 && !needs_refresh(&current)
             {
                 return Ok(current.value);
@@ -116,7 +116,7 @@ where
             return match load_and_set().await {
                 // The cached value only while the store still holds it: the load may have
                 // outlasted its TTL or the store's local TTL, or a write may have removed it.
-                Err(error) => match read().await {
+                Err(error) => match read_entry().await {
                     Ok(Some(cached)) => {
                         tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
 
@@ -144,7 +144,7 @@ where
         // Another caller may have stored the value while this one waited. On a value of another
         // type, data that doesn't decode, or a store that can't be reached, the loaded value is
         // stored over whatever is there.
-        match read().await {
+        match read_entry().await {
             Ok(Some(entry)) => Ok(entry.value),
             _ => load_and_set().await,
         }
