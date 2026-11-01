@@ -144,6 +144,7 @@ pub struct HybridCacheStore<D: CacheStore + 'static, C: Clock = SystemClock> {
     reads: &'static Reads,
 }
 
+// Clones share the layers, the backplane and the worker, so they are one store.
 impl<D: CacheStore + 'static, C: Clock> Clone for HybridCacheStore<D, C> {
     fn clone(&self) -> Self {
         Self {
@@ -380,6 +381,7 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
     }
 }
 
+// The cache API: reads try the local layer first, and writes go to Redis, then to every node.
 impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
     type Error = HybridCacheError;
     // The local layer's clock, which the store's writes and refresh checks read.
@@ -500,6 +502,7 @@ impl RedisHybridCacheStore {
     }
 }
 
+// Marks this as one of the stores that may implement `CacheStore`.
 impl<D: CacheStore + 'static, C: Clock> sisa_caching_core::sealed::Sealed
     for HybridCacheStore<D, C>
 {

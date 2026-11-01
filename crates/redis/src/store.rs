@@ -215,8 +215,10 @@ impl RedisCacheStore {
     }
 }
 
+// Marks this as one of the stores that may implement `CacheStore`.
 impl<Conn: RedisConnection> sisa_caching_core::sealed::Sealed for RedisCacheStore<Conn> {}
 
+// The cache API, one Redis hash per key.
 impl<Conn> CacheStore for RedisCacheStore<Conn>
 where
     Conn: RedisConnection,

@@ -14,6 +14,7 @@ struct Claim<'a> {
     mutex: Arc<Mutex<()>>,
 }
 
+// Gives up the share, and removes the key's mutex if it was the last one.
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
         // Shares are only handed out under this lock, so a count of two, the map's and this one,
@@ -34,6 +35,7 @@ pub struct KeyGuard<'a> {
     _claim: Claim<'a>,
 }
 
+// Shows the key held; the mutex guard has nothing to show.
 impl std::fmt::Debug for KeyGuard<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

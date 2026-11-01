@@ -178,6 +178,7 @@ impl Node {
     }
 }
 
+// Shuts the node's runtime down in the background, as a plain drop panics inside a runtime.
 impl Drop for Node {
     fn drop(&mut self) {
         // Not a plain drop, which blocks and so panics inside the test's runtime.

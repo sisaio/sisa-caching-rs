@@ -18,6 +18,7 @@ pub trait Clock: Clone + Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
 
+// The real time: the wall clock for creation times, the monotonic one for deadlines.
 impl Clock for SystemClock {
     #[expect(
         clippy::disallowed_methods,

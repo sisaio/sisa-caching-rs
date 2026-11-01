@@ -196,12 +196,14 @@ enum AppError {
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
+// Lets `?` turn any error into a 500.
 impl<E: std::error::Error + Send + Sync + 'static> From<E> for AppError {
     fn from(error: E) -> Self {
         Self::Internal(Box::new(error))
     }
 }
 
+// Answers with the error's status code, and logs a 500's cause.
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {

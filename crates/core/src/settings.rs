@@ -83,6 +83,7 @@ pub struct CacheSettings {
     pub lock_timeout_ms: Option<u64>,
 }
 
+// No default TTL or early refresh, and 30 seconds before a waiting caller loads on its own.
 impl Default for CacheSettings {
     fn default() -> Self {
         Self {

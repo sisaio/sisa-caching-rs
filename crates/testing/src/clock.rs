@@ -47,12 +47,14 @@ impl ManualClock {
     }
 }
 
+// What `new` gives, as Clippy expects of a type with a plain `new`.
 impl Default for ManualClock {
     fn default() -> Self {
         Self::new()
     }
 }
 
+// Time that moves only when the test moves it, from a fixed start.
 impl Clock for ManualClock {
     fn now(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH

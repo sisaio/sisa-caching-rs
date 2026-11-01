@@ -88,6 +88,7 @@ pub(crate) struct RedisSubscription {
     primary: Option<JoinHandle<RedisCacheError>>,
 }
 
+// Stops watching the primary along with the subscription.
 impl Drop for RedisSubscription {
     fn drop(&mut self) {
         if let Some(primary) = &self.primary {
@@ -161,6 +162,7 @@ pub struct RedisBackplane {
     channel: Arc<str>,
 }
 
+// The server type and the channel, without the clients' and connections' internals.
 impl std::fmt::Debug for RedisBackplane {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let server = match self.server {

@@ -18,6 +18,7 @@ pub struct Database {
     path: PathBuf,
 }
 
+// The example's file in the temp directory.
 impl Default for Database {
     fn default() -> Self {
         Self::at(std::env::temp_dir().join("sisa-caching-example-users.json"))

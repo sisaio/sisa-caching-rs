@@ -55,6 +55,7 @@ pub struct HybridCacheSettings {
     pub(crate) unknown_fields: NoUnknownFields,
 }
 
+// Each part's own defaults.
 impl Default for HybridCacheSettings {
     fn default() -> Self {
         Self {

@@ -13,6 +13,7 @@ use crate::cache::KeyPrefix;
 #[derive(Debug)]
 struct Running(AbortHandle);
 
+// Ends the task once the store's last clone lets go of it.
 impl Drop for Running {
     fn drop(&mut self) {
         self.0.abort();
@@ -22,6 +23,7 @@ impl Drop for Running {
 /// A worker's name and store, which log its stop when dropped, or its panic while unwinding.
 struct Stopped(&'static str, KeyPrefix);
 
+// Logs the worker's stop, or its panic, however the task ends.
 impl Drop for Stopped {
     fn drop(&mut self) {
         let Self(name, store) = self;
@@ -102,6 +104,7 @@ impl Worker {
     }
 }
 
+// What `new` gives, as Clippy expects of a type with a plain `new`.
 impl Default for Worker {
     fn default() -> Self {
         Self::new()

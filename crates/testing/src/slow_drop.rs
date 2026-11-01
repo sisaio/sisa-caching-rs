@@ -31,12 +31,14 @@ impl SlowDrop {
     }
 }
 
+// A clone has no gate, so only the stored original's drop waits.
 impl Clone for SlowDrop {
     fn clone(&self) -> Self {
         Self { gate: None }
     }
 }
 
+// Says the drop started, then waits for the test's go-ahead, up to five seconds.
 impl Drop for SlowDrop {
     fn drop(&mut self) {
         if let Some((dropping, gate)) = self.gate.take() {
