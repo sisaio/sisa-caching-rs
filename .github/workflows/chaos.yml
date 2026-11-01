@@ -1,7 +1,7 @@
 # The hybrid chaos test: several nodes under load for ten minutes while the server restarts and
 # freezes, a node is cut off or crashes, and subscriptions drop, failing on any read staler than
 # the docs allow. Nightly and by hand, outside `ci`: it runs for minutes.
-name: chaos
+name: Chaos
 
 on:
   schedule:

@@ -2,7 +2,7 @@
 # links, the tests, which run against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and
 # coverage on main. The Redis tests start their servers in Docker. PRs that change no Rust inputs
 # skip the Rust jobs; `ci` sums them up for the ruleset.
-name: ci
+name: CI
 
 on:
   pull_request:
