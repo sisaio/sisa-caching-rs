@@ -338,10 +338,10 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
 
     for payload in [
         "not json",
-        // The format before the channel named the store.
-        r#"{"v":1,"source":"elsewhere","store":"users","kind":"clear"}"#,
+        // A version this node doesn't know.
+        r#"{"v":2,"source":"elsewhere","kind":"clear"}"#,
         // The prefix has an empty level, and the error for that quotes it.
-        r#"{"v":2,"source":"elsewhere","kind":"prefix","target":"user::42"}"#,
+        r#"{"v":1,"source":"elsewhere","kind":"prefix","target":"user::42"}"#,
     ] {
         node.local_store()
             .set(&key(1), "ada".to_owned(), None)

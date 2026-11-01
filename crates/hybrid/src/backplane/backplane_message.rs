@@ -6,7 +6,7 @@ use sisa_caching_core::cache::KeyPrefix;
 
 use super::node_id::NodeId;
 
-const MESSAGE_VERSION: u8 = 2;
+const MESSAGE_VERSION: u8 = 1;
 
 /// The message a write publishes and every other node's worker receives. It names the writer and
 /// the local copies to remove, and carries the writer's trace context so the nodes that apply it
@@ -143,19 +143,19 @@ mod tests {
         for (invalidation, payload) in [
             (
                 Invalidation::Key("profile:eu:42".to_owned()),
-                json!({"v":2,"source":"node-a","kind":"key","target":"profile:eu:42"}),
+                json!({"v":1,"source":"node-a","kind":"key","target":"profile:eu:42"}),
             ),
             (
                 Invalidation::Key("42".to_owned()),
-                json!({"v":2,"source":"node-a","kind":"key","target":"42"}),
+                json!({"v":1,"source":"node-a","kind":"key","target":"42"}),
             ),
             (
                 Invalidation::Prefix(KeyPrefix::new("profile:eu").unwrap()),
-                json!({"v":2,"source":"node-a","kind":"prefix","target":"profile:eu"}),
+                json!({"v":1,"source":"node-a","kind":"prefix","target":"profile:eu"}),
             ),
             (
                 Invalidation::Clear,
-                json!({"v":2,"source":"node-a","kind":"clear"}),
+                json!({"v":1,"source":"node-a","kind":"clear"}),
             ),
         ] {
             let message = message(invalidation);
@@ -181,15 +181,15 @@ mod tests {
         for (message, payload) in [
             (
                 invalidation,
-                json!({"v":2,"source":"node-a","seq":7,"kind":"key","target":"42"}),
+                json!({"v":1,"source":"node-a","seq":7,"kind":"key","target":"42"}),
             ),
             (
                 heartbeat,
-                json!({"v":2,"source":"node-a","seq":7,"kind":"heartbeat"}),
+                json!({"v":1,"source":"node-a","seq":7,"kind":"heartbeat"}),
             ),
             (
                 stopping,
-                json!({"v":2,"source":"node-a","seq":7,"kind":"stopping"}),
+                json!({"v":1,"source":"node-a","seq":7,"kind":"stopping"}),
             ),
         ] {
             assert_eq!(serde_json::to_value(&message).unwrap(), payload);
@@ -221,7 +221,7 @@ mod tests {
             message(Invalidation::Clear)
         };
         let payload = json!({
-            "v":2,"source":"node-a","kind":"clear","trace":{"traceparent":traceparent,"tracestate":""}
+            "v":1,"source":"node-a","kind":"clear","trace":{"traceparent":traceparent,"tracestate":""}
         });
 
         assert_eq!(serde_json::to_value(&message).unwrap(), payload);
@@ -240,8 +240,7 @@ mod tests {
 
     #[test]
     fn unknown_or_missing_versions_are_rejected() {
-        // Version 1 also named the store, which the channel now does.
-        for version in [Some(json!(0)), Some(json!(1)), Some(json!(3)), None] {
+        for version in [Some(json!(0)), Some(json!(2)), None] {
             let mut payload = serde_json::to_value(message(Invalidation::Clear)).unwrap();
 
             if let Some(version) = version {
@@ -256,7 +255,7 @@ mod tests {
 
     #[test]
     fn messages_validate_prefixes() {
-        let payload = json!({"v":2,"source":"node-a","kind":"prefix","target":"profile::eu"});
+        let payload = json!({"v":1,"source":"node-a","kind":"prefix","target":"profile::eu"});
 
         assert!(serde_json::from_value::<BackplaneMessage>(payload).is_err());
     }

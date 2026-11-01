@@ -86,7 +86,7 @@
 //! `app:backplane` for a store named `app`:
 //!
 //! ```json
-//! {"v":2,"source":"node-7","kind":"key","target":"user:42"}
+//! {"v":1,"source":"node-7","kind":"key","target":"user:42"}
 //! ```
 //!
 //! `kind` is `key`, `prefix` or `clear`. `target` is the key or prefix without the store name;
