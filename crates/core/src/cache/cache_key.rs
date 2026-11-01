@@ -53,13 +53,12 @@ impl KeyPrefix {
         Ok(())
     }
 
-    /// Whether `full_key` is under this prefix: `user` matches `user:42` but not `users:42`.
+    /// Whether `key` is under this prefix: `user` matches `user:42` but not `users:42`.
     // Inlined, as a store's `remove_prefix` calls it for every entry.
     #[inline]
     #[doc(hidden)]
-    pub fn matches(&self, full_key: &str) -> bool {
-        full_key
-            .strip_prefix(self.as_str())
+    pub fn matches(&self, key: &str) -> bool {
+        key.strip_prefix(self.as_str())
             .is_some_and(|rest| rest.starts_with(KEY_SEPARATOR))
     }
 
