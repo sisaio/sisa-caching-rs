@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stopped_worker_ends_its_task_and_never_starts_one() {
+    async fn a_stopped_worker_ends_its_task_and_no_stopped_or_none_worker_starts_one() {
         let running = Worker::new();
         let (stopped, done) = oneshot::channel::<()>();
 
@@ -178,17 +178,21 @@ mod tests {
         assert!(closed.unwrap().is_err(), "the task's future was dropped");
 
         let unstarted = Worker::new();
-        let starts = AtomicUsize::new(0);
-        let task = || {
-            starts.fetch_add(1, Ordering::SeqCst);
-            async {}
-        };
 
         unstarted.stop();
-        for worker in [&running, &unstarted] {
-            worker.start("counting", &store(), task);
+        for (worker, case) in [
+            (&running, "stopped after it started"),
+            (&unstarted, "stopped before it started"),
+            (&Worker::none(), "none"),
+        ] {
+            let starts = AtomicUsize::new(0);
+
+            worker.start("counting", &store(), || {
+                starts.fetch_add(1, Ordering::SeqCst);
+                async {}
+            });
+            assert_eq!(starts.load(Ordering::SeqCst), 0, "{case}");
         }
-        assert_eq!(starts.load(Ordering::SeqCst), 0, "neither starts a task");
     }
 
     #[test]
@@ -208,18 +212,6 @@ mod tests {
             .unwrap()
             .block_on(async { worker.start("counting", &store(), task) });
         assert_eq!(starts.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn none_never_starts() {
-        let starts = AtomicUsize::new(0);
-
-        Worker::none().start("counting", &store(), || {
-            starts.fetch_add(1, Ordering::SeqCst);
-            async {}
-        });
-
-        assert_eq!(starts.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
