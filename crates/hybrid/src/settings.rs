@@ -10,10 +10,6 @@ use sisa_caching_core::{
 use sisa_caching_memory::settings::InMemoryCacheSettings;
 use sisa_caching_redis::settings::RedisCacheSettings;
 
-/// The default local `ttl_secs`: the longest a node keeps a copy, and so serves a stale one when a
-/// lost invalidation goes unnoticed.
-pub const DEFAULT_LOCAL_TTL_SECS: u64 = 60;
-
 /// Everything a hybrid store is configured with, as one config section. The shared settings sit
 /// at the top, beside the sections for the two layers and the worker, and an unknown field fails:
 ///
@@ -89,11 +85,11 @@ impl HybridCacheSettings {
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct LocalSettings {
-    /// How long a node keeps a local copy: [`DEFAULT_LOCAL_TTL_SECS`] by default. A copy never
-    /// outlives its entry, so one with a shorter TTL left expires with it. It is also the longest
-    /// a node serves a stale copy when an invalidation is lost and nothing notices, so local
-    /// copies can't be kept for good, even of an entry the distributed store keeps until
-    /// removed. `validate` rejects `0`.
+    /// How long a node keeps a local copy: 60 seconds by default. A copy never outlives its
+    /// entry, so one with a shorter TTL left expires with it. It is also the longest a node serves
+    /// a stale copy when an invalidation is lost and nothing notices, so local copies can't be
+    /// kept for good, even of an entry the distributed store keeps until removed. `validate`
+    /// rejects `0`.
     pub ttl_secs: u64,
 
     /// The most copies a node holds, as [`InMemoryCacheSettings::max_entries`] says. `None`, the
@@ -114,7 +110,8 @@ impl Default for LocalSettings {
         let memory = InMemoryCacheSettings::default();
 
         Self {
-            ttl_secs: DEFAULT_LOCAL_TTL_SECS,
+            // A minute bounds how long a lost invalidation leaves a node serving a stale copy.
+            ttl_secs: 60,
             max_entries: memory.max_entries,
             purge_interval_secs: memory.purge_interval_secs,
             shards: memory.shards,
