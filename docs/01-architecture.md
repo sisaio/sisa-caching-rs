@@ -21,22 +21,22 @@ explains how the parts fit, what they promise, and which rules hold them togethe
 
 ## Crates
 
-The published crates, each built on the ones under it:
+The published crates, each built on the ones below it:
 
 ```mermaid
-block-beta
-    columns 2
-    facade["<b>sisa-caching</b><br/>re-exports, one feature per store"]:2
-    hybrid["<b>sisa-caching-hybrid</b><br/>local copies in front of Redis, kept coherent"]:2
-    memory["<b>sisa-caching-memory</b><br/>in-process store"]
-    redis["<b>sisa-caching-redis</b><br/>Redis-family store"]
-    core["<b>sisa-caching-core</b><br/>CacheStore, keys, entries, settings, clock, metrics"]:2
+flowchart TD
+    facade[sisa-caching] --> hybrid[sisa-caching-hybrid]
+    hybrid --> memory[sisa-caching-memory]
+    hybrid --> redis[sisa-caching-redis]
+    memory --> core[sisa-caching-core]
+    redis --> core
 ```
 
-`sisa-caching` depends on every store crate, each behind its feature, and re-exports what
-applications use. Three more stay unpublished: `sisa-caching-testing`, built on core, which only
-the store crates' tests use; `examples`, which use `sisa-caching`; and `benches`, which use the
-store crates directly.
+`sisa-caching` re-exports what applications use from every store crate, each behind its
+feature, so with only `memory` or `redis` on it uses that store crate without the hybrid one.
+Three more stay unpublished: `sisa-caching-testing`, built on core, which only the store crates'
+tests use; `examples`, which use `sisa-caching`; and `benches`, which use the store crates
+directly.
 
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
