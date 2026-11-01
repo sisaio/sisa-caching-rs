@@ -107,18 +107,32 @@ Build settings from `default()` and set fields on it.
 
 ## Code style
 
-`rustfmt.toml` and `clippy.toml` settle layout and lints, and CI fails on either. What they
-don't check:
+`rustfmt.toml`, `clippy.toml` and the workspace's `[workspace.lints]` settle layout and lints, and
+CI fails on any of them. A new package takes those lints with `[lints] workspace = true`. What
+they don't check:
 
 - Imports come in groups separated by a blank line: `std`, other crates, then `crate` and
   `super`.
 - Doc comments and comments are full sentences, wrapped at 100 columns like the code. A comment
   says why, or what a reader can't see from the code; it doesn't repeat the code.
 - Names are whole words (`entry`, `deadline`), and the value type parameter is `CV` everywhere.
+- A name means one thing in its scope. A new binding may reuse a name for the same value
+  converted (`let prefix = prefix.into()`); anything else gets a name of its own, such as
+  `load_and_set` for the closure that wraps `load`. Clippy's `shadow_unrelated` catches the plain
+  cases.
 - Library code returns errors instead of panicking: no `unwrap` outside tests, and `expect` only
   for an invariant, with a message saying why it holds. Poisoned locks are recovered with
   `into_inner`.
 - A blank line separates steps in a long function; short functions need none.
+- A file defines each item before the code that uses it: helpers first, then the type built from
+  them, with its struct and impls together. The test module comes last.
+- Each trait impl has a one-line `//` comment above it saying what it gives the caller or why it
+  exists.
+- Write a closure that returns a future as an async closure, `async || ...` or
+  `async move || ...`, not `|| async { ... }`. Keep an `async move` block only where Rust needs
+  one: the body of a public trait method that returns `impl Future + Send`, since an `async fn`
+  there can't promise `Send`, and a future handed to a function such as `tokio::spawn`,
+  `timeout` or `Box::pin`.
 - Every public type implements `Debug`, which `missing_debug_implementations` checks. A store's
   shows its name and settings, never a cached value or a connection.
 
