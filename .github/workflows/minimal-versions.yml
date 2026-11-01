@@ -1,7 +1,7 @@
 # Checks the workspace with every direct dependency at the lowest version its `Cargo.toml`
 # allows, so those lower bounds stay true. Weekly and by hand, outside `ci`: a new release of a
 # dependency can't break a PR this way.
-name: minimal-versions
+name: Minimal Versions
 
 on:
   schedule:

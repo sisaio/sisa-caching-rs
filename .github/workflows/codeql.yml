@@ -1,5 +1,5 @@
 # CodeQL advanced setup for the Rust code and the GitHub Actions workflows.
-name: codeql
+name: CodeQL
 
 on:
   pull_request:

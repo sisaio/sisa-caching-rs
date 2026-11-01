@@ -16,7 +16,7 @@
 # Publishing uses the `CARGO_REGISTRY_TOKEN` secret while it is set, and crates.io trusted
 # publishing from the `release` environment once it is deleted. A crate's very first publish
 # needs the token.
-name: release
+name: Release
 
 on:
   push:

@@ -1,5 +1,5 @@
 # Rejects pull requests that add a dependency with a known high or critical vulnerability.
-name: dependency-review
+name: Dependency Review
 
 on:
   pull_request:

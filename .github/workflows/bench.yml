@@ -4,7 +4,7 @@
 # workflow calls it with the new tag while that release is still a draft, because a published
 # release is immutable and takes no more assets. Run it by hand to see the table in the run's
 # summary without touching a release. Only the job that records on the release can write.
-name: bench
+name: Bench
 
 on:
   workflow_call:
