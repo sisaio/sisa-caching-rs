@@ -210,22 +210,25 @@ impl<C: Clock> State<C> {
     }
 
     /// Copies a distributed hit into the local layer, unless the key was invalidated since `seen`.
-    /// A copy it replaces, as when two reads of a key both promote it, is freed after its turn, so
-    /// dropping that value holds up no invalidation.
+    /// A value it doesn't copy, and a copy it replaces, as when two reads of a key both promote
+    /// it, are freed after its turn, so dropping them holds up no invalidation.
     pub(crate) async fn promote<CV: CacheValue>(
         &self,
         key: &str,
         seen: u64,
         entry: CacheEntry<CV>,
     ) {
-        let replaced = {
-            let _turn = self.turns.read().await;
+        let turn = self.turns.read().await;
 
-            (self.local_reads_enabled() && self.generation(key) == seen)
-                .then(|| self.local_store.replace_entry(key, entry))
-        };
+        if self.local_reads_enabled() && self.generation(key) == seen {
+            let replaced = self.local_store.replace_entry(key, entry);
 
-        drop(replaced);
+            drop(turn);
+            drop(replaced);
+        } else {
+            drop(turn);
+            drop(entry);
+        }
     }
 
     /// Bumps every affected generation once no promotion is copying, then evicts the local copies.
@@ -620,6 +623,34 @@ mod tests {
 
         let invalidation = tokio::time::timeout(
             std::time::Duration::from_secs(1),
+            state.invalidate(&Invalidation::Key("user:2".to_owned())),
+        )
+        .await;
+
+        release.send(()).unwrap();
+        promotion.await.unwrap();
+        assert!(invalidation.is_ok(), "the invalidation waited for the drop");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_slow_drop_of_a_value_a_promotion_turns_down_holds_up_no_invalidation() {
+        let state = Arc::new(state().await);
+        let seen = state.generation(&key());
+
+        state.invalidate(&Invalidation::Key(key())).await;
+
+        // The key changed since `seen`, so the promotion drops the value instead of copying it.
+        let (slow, dropped, release) = SlowDrop::new();
+        let promoting = Arc::clone(&state);
+        let promotion = tokio::spawn(async move {
+            promoting
+                .promote(&key(), seen, CacheEntry::new(slow, SystemClock.now(), None))
+                .await;
+        });
+        dropped.await.unwrap();
+
+        let invalidation = tokio::time::timeout(
+            Duration::from_secs(1),
             state.invalidate(&Invalidation::Key("user:2".to_owned())),
         )
         .await;
