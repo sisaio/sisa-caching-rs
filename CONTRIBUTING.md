@@ -161,20 +161,17 @@ Every issue and pull request also gets labels from these groups, so anyone can f
 Work moves across the `sisa-caching` project board:
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> Backlog: issue opened
-    Backlog --> Ready: accepted, milestone set
-    Ready --> InProgress: assigned
-    InProgress --> Blocked: waiting on something else
-    Blocked --> InProgress: unblocked
-    InProgress --> InReview: PR opened with "Closes #n"
-    InReview --> InProgress: changes requested
-    InReview --> Done: PR merged
-    Backlog --> Done: closed as duplicate or not planned
-    Done --> Backlog: reopened
-    InProgress: In Progress
-    InReview: In Review
+flowchart LR
+    opened([New issue]) --> Backlog
+    Backlog -->|accepted, milestone set| Ready
+    Ready -->|assigned| InProgress[In Progress]
+    InProgress -->|waiting on something else| Blocked
+    Blocked -->|unblocked| InProgress
+    InProgress -->|"PR opened with Closes #n"| InReview[In Review]
+    InReview -->|changes requested| InProgress
+    InReview -->|PR merged| Done
+    Backlog -->|closed as duplicate or not planned| Done
+    Done -->|reopened| Backlog
 ```
 
 Only the maintainer moves an issue to Ready and sets its milestone and Priority (P0 urgent to P3

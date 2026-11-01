@@ -104,7 +104,8 @@ impl From<KeyPrefix> for String {
 /// empty level and the key has no `:`.
 ///
 /// Put the version of what the key holds in the prefix, as below, and bump it when a field is
-/// renamed or changes type. Nothing checks that it's there.
+/// renamed or changes type, or a value keeps its shape but changes meaning. Nothing checks that
+/// it's there.
 ///
 /// ```
 /// use sisa_caching_core::CacheKey;

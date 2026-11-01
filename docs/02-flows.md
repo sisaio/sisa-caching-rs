@@ -5,8 +5,8 @@ why each step is there.
 
 ## `get_or_set`, on every store
 
-One loader runs per key per process. Other callers for the same key wait on its lock, up to
-`lock_timeout_ms`, then read what it stored.
+One loader runs per key across a store and its clones. Other callers for the same key wait on its
+lock, up to `lock_timeout_ms`, then read what it stored.
 
 ```mermaid
 sequenceDiagram
@@ -259,12 +259,12 @@ sequenceDiagram
     Store->>W: cancel, without waiting
 ```
 
-The memory store starts its purge worker on its first write, since entries only come in there.
-The hybrid store starts its backplane worker on its first read or write, or in `connect`, so a
-node that only writes runs one too. A worker holds the store's entries or state but not the
-store's `Worker`, so it never keeps itself running. A call outside a tokio runtime starts
-nothing, and the next one inside a runtime does. The worker runs on the runtime of the call that
-started it, so that runtime must outlive the store: a store whose first call ran on a short-lived
-runtime, such as one a setup step builds, loses its worker for good when that runtime shuts down.
-When the backplane worker stops for any reason, such as a panic, its hybrid store turns local
-reads off and reads Redis from then on.
+The memory store starts its purge worker on its first write, since entries only come in there. The
+hybrid store starts its backplane worker on its first read or write, in `connect` or in
+`start_worker`, so a node that only writes runs one too. A worker holds the store's entries or state
+but not the store's `Worker`, so it never keeps itself running. A call outside a tokio runtime
+starts nothing, and the next one inside a runtime does. The worker runs on the runtime of the call
+that started it, so that runtime must outlive the store: a store whose first call ran on a
+short-lived runtime, such as one a setup step builds, loses its worker for good when that runtime
+shuts down. When the backplane worker stops for any reason, such as a panic, its hybrid store turns
+local reads off and reads Redis from then on.

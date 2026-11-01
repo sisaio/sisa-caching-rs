@@ -40,7 +40,8 @@ Each `memory 1M entries` call walks every entry without yielding, and calls on t
 walking wait for it. Inside a tokio runtime, the store runs its trims and its purge worker's purges
 on the blocking pool, and a hybrid node walks every prefix invalidation there too, its own or
 another node's, so those hold up no async thread. A memory store's `remove_prefix` and `purge`
-called by the application run on the caller's thread.
+called by the application walk on the caller's thread; `remove_prefix` frees what it removed on
+the blocking pool.
 
 ## Reading the numbers
 
@@ -63,14 +64,14 @@ cargo bench -p sisa-caching-benches
 cargo run -p sisa-caching-benches --bin summary   # prints the Markdown table
 ```
 
-To compare with a release, as the release job does:
+To compare with a release, as the release job does, with that release's tag for `v0.X.Y`:
 
 ```sh
-git worktree add ../previous v0.1.0
+git worktree add ../previous v0.X.Y
 (cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target" \
     cargo bench -p sisa-caching-benches -- --save-baseline previous)
 cargo bench -p sisa-caching-benches -- --save-baseline current
-cargo run -p sisa-caching-benches --bin summary -- v0.1.0
+cargo run -p sisa-caching-benches --bin summary -- v0.X.Y
 ```
 
 `REDIS_IMAGE` picks the server, for example `valkey/valkey:8-alpine`. Criterion's HTML report is

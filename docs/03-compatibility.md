@@ -59,9 +59,9 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 
 - When a command fails because the primary went away or answers `READONLY` or `LOADING`, the
   connection asks Sentinel for the primary again and moves there if it changed; while Sentinel
-  names the same one, the connection stays and reconnects by itself. A command refused with either
-  didn't run, so it is sent once more; one cut off by a broken connection may have run, so it
-  returns its error.
+  names the same one, the connection stays and reconnects by itself. A command the server refused
+  with either, or that the connection couldn't send, didn't run, so it is sent once more; one cut
+  off by a broken connection may have run, so it returns its error.
 - A hybrid node notices a new primary within `heartbeat_timeout_ms` (5 s by default): each
   subscription asks Sentinel for the primary that often and moves the shared connection there. Its
   own heartbeats can't show the move, since a demoted primary still delivers what is published on
