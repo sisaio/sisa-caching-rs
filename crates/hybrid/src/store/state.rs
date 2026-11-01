@@ -447,8 +447,8 @@ mod tests {
 
             promote(&state, "order:1").await;
 
-            for n in 0..REMOVING_LIMIT {
-                let prefix = KeyPrefix::new(format!("p{n}")).unwrap();
+            for index in 0..REMOVING_LIMIT {
+                let prefix = KeyPrefix::new(format!("p{index}")).unwrap();
 
                 state.apply(&Invalidation::Prefix(prefix)).await;
             }

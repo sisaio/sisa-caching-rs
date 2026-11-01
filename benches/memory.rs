@@ -48,31 +48,34 @@ fn fill<C: Clock>(
     });
 }
 
-fn single(c: &mut Criterion) {
+fn single(criterion: &mut Criterion) {
     meter_provider();
 
     let runtime = Runtime::new().unwrap();
     let store = store(1);
     // Built before timing, so the times leave out formatting a key.
     let (hit, miss, written) = (key(1), key(2), key(3));
-    let mut group = c.benchmark_group("memory");
+    let mut group = criterion.benchmark_group("memory");
 
     runtime.block_on(store.set(&hit, user(1), None)).unwrap();
 
-    group.bench_function("get hit", |b| {
-        b.to_async(&runtime)
+    group.bench_function("get hit", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
-    group.bench_function("get miss", |b| {
-        b.to_async(&runtime)
+    group.bench_function("get miss", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.get::<User>(black_box(&miss)).await.unwrap());
     });
-    group.bench_function("set", |b| {
-        b.to_async(&runtime)
+    group.bench_function("set", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.set(black_box(&written), user(3), None).await.unwrap());
     });
-    group.bench_function("remove", |b| {
-        b.to_async(&runtime).iter_custom(async |iters| {
+    group.bench_function("remove", |bencher| {
+        bencher.to_async(&runtime).iter_custom(async |iters| {
             time_after(
                 iters,
                 async || store.set(&written, user(3), None).await.unwrap(),
@@ -81,16 +84,16 @@ fn single(c: &mut Criterion) {
             .await
         });
     });
-    group.bench_function("get_or_set hit", |b| {
-        b.to_async(&runtime).iter(async || {
+    group.bench_function("get_or_set hit", |bencher| {
+        bencher.to_async(&runtime).iter(async || {
             store
                 .get_or_set(black_box(&hit), async || Ok::<_, ()>(user(1)), None)
                 .await
                 .unwrap()
         });
     });
-    group.bench_function("get_or_set miss", |b| {
-        b.to_async(&runtime).iter_custom(async |iters| {
+    group.bench_function("get_or_set miss", |bencher| {
+        bencher.to_async(&runtime).iter_custom(async |iters| {
             time_after(
                 iters,
                 async || _ = store.remove(&written).await.unwrap(),
@@ -110,21 +113,21 @@ fn single(c: &mut Criterion) {
 }
 
 /// Eight tasks reading different keys, through one map or sixteen.
-fn parallel(c: &mut Criterion) {
+fn parallel(criterion: &mut Criterion) {
     meter_provider();
 
     const TASKS: u64 = 8;
 
     let runtime = Runtime::new().unwrap();
-    let mut group = c.benchmark_group("memory 8 tasks");
+    let mut group = criterion.benchmark_group("memory 8 tasks");
 
     for shards in [1, 16] {
         let store = store(shards);
 
         fill(&runtime, &store, 0..TASKS, None);
 
-        group.bench_function(BenchmarkId::new("get hit, shards", shards), |b| {
-            b.to_async(&runtime).iter_custom(|iters| {
+        group.bench_function(BenchmarkId::new("get hit, shards", shards), |bencher| {
+            bencher.to_async(&runtime).iter_custom(|iters| {
                 let store = store.clone();
 
                 async move {
@@ -157,13 +160,13 @@ fn parallel(c: &mut Criterion) {
 
 /// The calls that walk every entry of one map, at a million entries. Each holds that map's lock,
 /// and the thread it runs on, until it is done.
-fn large(c: &mut Criterion) {
+fn large(criterion: &mut Criterion) {
     meter_provider();
 
     const ENTRIES: u64 = 1_000_000;
 
     let runtime = Runtime::new().unwrap();
-    let mut group = c.benchmark_group("memory 1M entries");
+    let mut group = criterion.benchmark_group("memory 1M entries");
 
     // Each call takes milliseconds, and some need a full store rebuilt before them.
     group
@@ -175,15 +178,18 @@ fn large(c: &mut Criterion) {
     let filled = store(1);
 
     fill(&runtime, &filled, 0..ENTRIES, None);
-    group.bench_function("remove_prefix, nothing matches", |b| {
-        b.to_async(&runtime)
+    group.bench_function("remove_prefix, nothing matches", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || filled.remove_prefix(black_box("other")).await.unwrap());
     });
-    group.bench_function("purge, nothing expired", |b| b.iter(|| filled.purge()));
+    group.bench_function("purge, nothing expired", |bencher| {
+        bencher.iter(|| filled.purge())
+    });
     drop(filled);
 
-    group.bench_function("purge, every entry expired", |b| {
-        b.iter_custom(|iters| {
+    group.bench_function("purge, every entry expired", |bencher| {
+        bencher.iter_custom(|iters| {
             let mut total = Duration::ZERO;
 
             for _ in 0..iters {
@@ -216,8 +222,8 @@ fn large(c: &mut Criterion) {
     let mut next = ENTRIES - ENTRIES / 10;
 
     fill(&runtime, &full, 0..next, None);
-    group.bench_function("set that trims", |b| {
-        b.iter_custom(|iters| {
+    group.bench_function("set that trims", |bencher| {
+        bencher.iter_custom(|iters| {
             let mut total = Duration::ZERO;
 
             for _ in 0..iters {

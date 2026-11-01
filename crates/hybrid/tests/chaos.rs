@@ -252,15 +252,15 @@ impl History {
 
     /// A number below `below`, from a shared xorshift.
     fn random(&self, below: usize) -> usize {
-        let mut x = self
+        let mut state = self
             .seed
             .fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
             | 1;
 
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        (x % below as u64) as usize
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % below as u64) as usize
     }
 
     fn count(&self, counter: &AtomicU64) {
