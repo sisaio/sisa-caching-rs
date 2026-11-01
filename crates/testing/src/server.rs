@@ -11,6 +11,10 @@ use testcontainers::{
     ContainerAsync, ContainerRequest, GenericImage, ImageExt, runners::AsyncRunner,
 };
 
+fn image_name() -> String {
+    std::env::var("REDIS_IMAGE").unwrap_or_else(|_| "redis:8-alpine".into())
+}
+
 /// The server family `REDIS_IMAGE` runs. Each takes its own flags, and Cluster, Sentinel and TLS
 /// are set up differently on each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,30 +57,11 @@ impl Server {
     }
 }
 
-fn image_name() -> String {
-    std::env::var("REDIS_IMAGE").unwrap_or_else(|_| "redis:8-alpine".into())
-}
-
 pub(crate) fn image() -> GenericImage {
     let image = image_name();
     let (name, tag) = image.rsplit_once(':').unwrap_or((&image, "latest"));
 
     GenericImage::new(name, tag)
-}
-
-/// Starts one server and waits until it answers on `port`.
-pub(crate) async fn start_server(
-    request: ContainerRequest<GenericImage>,
-    port: u16,
-) -> (ContainerAsync<GenericImage>, IpAddr) {
-    let container = request
-        .start()
-        .await
-        .expect("Docker must be running to start Redis for the tests");
-    let ip = container.get_bridge_ip_address().await.unwrap();
-
-    wait_for_ping(&Client::open(format!("redis://{ip}:{port}")).unwrap()).await;
-    (container, ip)
 }
 
 /// `request` to run in `container`'s network namespace, so its server shares that address.
@@ -92,14 +77,6 @@ pub(crate) fn beside(
         config.publish_all_ports = Some(false);
         config.port_bindings = None;
     })
-}
-
-// Servers log readiness differently, so wait until one answers PING.
-pub(crate) async fn wait_for_ping(client: &Client) {
-    wait_for("the server answers PING", async || {
-        ping(client).await.is_ok()
-    })
-    .await;
 }
 
 async fn ping(client: &Client) -> redis::RedisResult<()> {
@@ -120,4 +97,27 @@ pub(crate) async fn wait_for(what: &str, mut check: impl AsyncFnMut() -> bool) {
         assert!(Instant::now() < deadline, "timed out after 60 s: {what}");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+// Servers log readiness differently, so wait until one answers PING.
+pub(crate) async fn wait_for_ping(client: &Client) {
+    wait_for("the server answers PING", async || {
+        ping(client).await.is_ok()
+    })
+    .await;
+}
+
+/// Starts one server and waits until it answers on `port`.
+pub(crate) async fn start_server(
+    request: ContainerRequest<GenericImage>,
+    port: u16,
+) -> (ContainerAsync<GenericImage>, IpAddr) {
+    let container = request
+        .start()
+        .await
+        .expect("Docker must be running to start Redis for the tests");
+    let ip = container.get_bridge_ip_address().await.unwrap();
+
+    wait_for_ping(&Client::open(format!("redis://{ip}:{port}")).unwrap()).await;
+    (container, ip)
 }

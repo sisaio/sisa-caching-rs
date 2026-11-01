@@ -10,6 +10,10 @@ use std::{
 
 use sisa_caching_core::clock::Clock;
 
+fn millis(duration: Duration) -> u64 {
+    duration.as_millis() as u64
+}
+
 /// A clock that only moves on [`advance`](Self::advance). Clones share the time, so a test keeps
 /// one and gives another to a store.
 #[derive(Debug, Clone)]
@@ -60,8 +64,4 @@ impl Clock for ManualClock {
     fn instant(&self) -> Instant {
         self.start + self.elapsed()
     }
-}
-
-fn millis(duration: Duration) -> u64 {
-    duration.as_millis() as u64
 }

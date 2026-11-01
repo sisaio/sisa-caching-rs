@@ -12,6 +12,146 @@ use crate::{
     settings::CacheSettings,
 };
 
+/// Counts a failed store call in [`METRICS`], and logs the first failure of a run and the success
+/// that ends it, so an outage logs two lines however many calls fail. `failing` holds whether the
+/// last such call failed.
+fn record_outcome<S, T>(
+    store: &S,
+    operation: &'static str,
+    failing: &AtomicBool,
+    result: &Result<T, S::Error>,
+) where
+    S: CacheStore + ?Sized,
+{
+    match result {
+        Err(error) => {
+            METRICS.failed(store.name(), operation);
+
+            if !failing.swap(true, Ordering::Relaxed) {
+                tracing::warn!(store = %store.name(), operation, %error, "store calls are failing; get_or_set counts each failure and logs again once one works");
+            }
+        }
+        Ok(_) => {
+            // A load first, so a success writes nothing while the store works.
+            if failing.load(Ordering::Relaxed) && failing.swap(false, Ordering::Relaxed) {
+                tracing::info!(store = %store.name(), operation, "store calls work again");
+            }
+        }
+    }
+}
+
+/// The body of `get_or_set`, under the store's own locks and clock.
+///
+/// Runs in a `cache get_or_set` debug span with the full key, and records each load's duration and
+/// each failed store call in [`METRICS`]. Its warnings name the store, not the key: the span shows
+/// the key once debug is on.
+#[tracing::instrument(level = "debug", name = "cache get_or_set", skip_all, fields(key = %store.name().format_key(key)))]
+async fn get_or_set_with_lock<S, CV, F, Fut, E>(
+    store: &S,
+    key: &str,
+    load: F,
+    options: Option<CacheOptions>,
+) -> Result<CV, E>
+where
+    S: CacheStore + ?Sized,
+    CV: CacheValue,
+    F: FnOnce() -> Fut + Send,
+    Fut: Future<Output = Result<CV, E>> + Send,
+    E: Send,
+{
+    let (settings, locker, clock) = (store.cache_settings(), store.locker(), store.clock());
+    // The locks go by the store's full key, built only when a call locks: a hit never needs it.
+    let full_key = || store.name().format_key(key);
+    // Loads, records how long it took, and stores what it got.
+    let load_and_set = async move || {
+        let started = Instant::now();
+        let loaded = load().await;
+
+        METRICS.loaded(store.name(), started.elapsed(), loaded.is_ok());
+
+        if let Ok(value) = &loaded {
+            let stored = store.set(key, value.clone(), options).await;
+
+            record_outcome(store, "set", &locker.writes_failing, &stored);
+        }
+
+        loaded
+    };
+
+    // Reads the key, and records a failed read.
+    let read = async || {
+        let outcome = store.get_entry::<CV>(key).await;
+
+        record_outcome(store, "get", &locker.reads_failing, &outcome);
+        outcome
+    };
+    let needs_refresh = |entry: &CacheEntry<CV>| {
+        settings
+            .refresh_threshold()
+            .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
+    };
+
+    let due_entry = match read().await {
+        Ok(Some(entry)) if !needs_refresh(&entry) => return Ok(entry.value),
+        Ok(Some(entry)) => Some(entry),
+        _ => None,
+    };
+
+    // The rest holds the lock, the loader and the write, so it goes on the heap: a hit never
+    // builds or moves it.
+    Box::pin(async move {
+        if let Some(entry) = due_entry {
+            // One caller refreshes; the rest are served the cached value meanwhile.
+            let Some(_guard) = locker.try_lock(&full_key()) else {
+                return Ok(entry.value);
+            };
+
+            // Another caller may have refreshed it between this one's read and its lock.
+            if let Ok(Some(entry)) = read().await
+                && !needs_refresh(&entry)
+            {
+                return Ok(entry.value);
+            }
+
+            return match load_and_set().await {
+                // The cached value only while the store still holds it: the load may have
+                // outlasted its TTL or the store's local TTL, or a write may have removed it.
+                Err(error) => match read().await {
+                    Ok(Some(entry)) => {
+                        tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
+
+                        Ok(entry.value)
+                    }
+                    _ => Err(error),
+                },
+                loaded => loaded,
+            };
+        }
+
+        let _guard = match settings.lock_timeout() {
+            Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
+                Ok(guard) => Some(guard),
+                Err(_) => {
+                    // Another caller's load is still running: this one loads too, without the lock.
+                    tracing::warn!(store = %store.name(), ?timeout, "lock wait timed out; loading without the lock");
+
+                    None
+                }
+            },
+            None => Some(locker.lock(&full_key()).await),
+        };
+
+        // Another caller may have stored the value while this one waited. On a value of another
+        // type, data that doesn't decode, or a store that can't be reached, the loaded value is
+        // stored over whatever is there.
+        match read().await {
+            Ok(Some(entry)) => Ok(entry.value),
+            _ => load_and_set().await,
+        }
+    })
+    .await
+}
+
 /// A named store that holds values of any [`CacheValue`] type under string keys. The type is
 /// named on each call, so one store serves every type an application caches.
 ///
@@ -238,144 +378,4 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
 
     /// Removes every key in this store, and nothing outside it.
     fn clear(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-/// The body of `get_or_set`, under the store's own locks and clock.
-///
-/// Runs in a `cache get_or_set` debug span with the full key, and records each load's duration and
-/// each failed store call in [`METRICS`]. Its warnings name the store, not the key: the span shows
-/// the key once debug is on.
-#[tracing::instrument(level = "debug", name = "cache get_or_set", skip_all, fields(key = %store.name().format_key(key)))]
-async fn get_or_set_with_lock<S, CV, F, Fut, E>(
-    store: &S,
-    key: &str,
-    load: F,
-    options: Option<CacheOptions>,
-) -> Result<CV, E>
-where
-    S: CacheStore + ?Sized,
-    CV: CacheValue,
-    F: FnOnce() -> Fut + Send,
-    Fut: Future<Output = Result<CV, E>> + Send,
-    E: Send,
-{
-    let (settings, locker, clock) = (store.cache_settings(), store.locker(), store.clock());
-    // The locks go by the store's full key, built only when a call locks: a hit never needs it.
-    let full_key = || store.name().format_key(key);
-    // Loads, records how long it took, and stores what it got.
-    let load_and_set = async move || {
-        let started = Instant::now();
-        let loaded = load().await;
-
-        METRICS.loaded(store.name(), started.elapsed(), loaded.is_ok());
-
-        if let Ok(value) = &loaded {
-            let stored = store.set(key, value.clone(), options).await;
-
-            record_outcome(store, "set", &locker.writes_failing, &stored);
-        }
-
-        loaded
-    };
-
-    // Reads the key, and records a failed read.
-    let read = async || {
-        let outcome = store.get_entry::<CV>(key).await;
-
-        record_outcome(store, "get", &locker.reads_failing, &outcome);
-        outcome
-    };
-    let needs_refresh = |entry: &CacheEntry<CV>| {
-        settings
-            .refresh_threshold()
-            .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
-    };
-
-    let due_entry = match read().await {
-        Ok(Some(entry)) if !needs_refresh(&entry) => return Ok(entry.value),
-        Ok(Some(entry)) => Some(entry),
-        _ => None,
-    };
-
-    // The rest holds the lock, the loader and the write, so it goes on the heap: a hit never
-    // builds or moves it.
-    Box::pin(async move {
-        if let Some(entry) = due_entry {
-            // One caller refreshes; the rest are served the cached value meanwhile.
-            let Some(_guard) = locker.try_lock(&full_key()) else {
-                return Ok(entry.value);
-            };
-
-            // Another caller may have refreshed it between this one's read and its lock.
-            if let Ok(Some(entry)) = read().await
-                && !needs_refresh(&entry)
-            {
-                return Ok(entry.value);
-            }
-
-            return match load_and_set().await {
-                // The cached value only while the store still holds it: the load may have
-                // outlasted its TTL or the store's local TTL, or a write may have removed it.
-                Err(error) => match read().await {
-                    Ok(Some(entry)) => {
-                        tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
-
-                        Ok(entry.value)
-                    }
-                    _ => Err(error),
-                },
-                loaded => loaded,
-            };
-        }
-
-        let _guard = match settings.lock_timeout() {
-            Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
-                Ok(guard) => Some(guard),
-                Err(_) => {
-                    // Another caller's load is still running: this one loads too, without the lock.
-                    tracing::warn!(store = %store.name(), ?timeout, "lock wait timed out; loading without the lock");
-
-                    None
-                }
-            },
-            None => Some(locker.lock(&full_key()).await),
-        };
-
-        // Another caller may have stored the value while this one waited. On a value of another
-        // type, data that doesn't decode, or a store that can't be reached, the loaded value is
-        // stored over whatever is there.
-        match read().await {
-            Ok(Some(entry)) => Ok(entry.value),
-            _ => load_and_set().await,
-        }
-    })
-    .await
-}
-
-/// Counts a failed store call in [`METRICS`], and logs the first failure of a run and the success
-/// that ends it, so an outage logs two lines however many calls fail. `failing` holds whether the
-/// last such call failed.
-fn record_outcome<S, T>(
-    store: &S,
-    operation: &'static str,
-    failing: &AtomicBool,
-    result: &Result<T, S::Error>,
-) where
-    S: CacheStore + ?Sized,
-{
-    match result {
-        Err(error) => {
-            METRICS.failed(store.name(), operation);
-
-            if !failing.swap(true, Ordering::Relaxed) {
-                tracing::warn!(store = %store.name(), operation, %error, "store calls are failing; get_or_set counts each failure and logs again once one works");
-            }
-        }
-        Ok(_) => {
-            // A load first, so a success writes nothing while the store works.
-            if failing.load(Ordering::Relaxed) && failing.swap(false, Ordering::Relaxed) {
-                tracing::info!(store = %store.name(), operation, "store calls work again");
-            }
-        }
-    }
 }

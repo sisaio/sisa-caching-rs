@@ -7,18 +7,23 @@ use std::{
 
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-/// One async mutex per key, created on first use and removed once nobody holds or waits on it.
-///
-/// `lock` calls for one key wait on each other; calls for different keys never do. `try_lock`
-/// never waits.
-///
-/// It also keeps whether the store's last read and last write inside `get_or_set` failed, so a
-/// run of failures logs once.
-#[derive(Debug, Default)]
-pub struct Locker {
-    locks: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
-    pub(crate) reads_failing: AtomicBool,
-    pub(crate) writes_failing: AtomicBool,
+/// A share of one key's mutex. The last share to go removes the mutex from the map.
+struct Claim<'a> {
+    locker: &'a Locker,
+    key: String,
+    mutex: Arc<Mutex<()>>,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        // Shares are only handed out under this lock, so a count of two, the map's and this one,
+        // means this share is the last.
+        let mut locks = self.locker.lock_registry();
+
+        if Arc::strong_count(&self.mutex) == 2 {
+            locks.remove(&self.key);
+        }
+    }
 }
 
 /// Holds the lock for one key until dropped.
@@ -38,11 +43,18 @@ impl std::fmt::Debug for KeyGuard<'_> {
     }
 }
 
-/// A share of one key's mutex. The last share to go removes the mutex from the map.
-struct Claim<'a> {
-    locker: &'a Locker,
-    key: String,
-    mutex: Arc<Mutex<()>>,
+/// One async mutex per key, created on first use and removed once nobody holds or waits on it.
+///
+/// `lock` calls for one key wait on each other; calls for different keys never do. `try_lock`
+/// never waits.
+///
+/// It also keeps whether the store's last read and last write inside `get_or_set` failed, so a
+/// run of failures logs once.
+#[derive(Debug, Default)]
+pub struct Locker {
+    locks: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub(crate) reads_failing: AtomicBool,
+    pub(crate) writes_failing: AtomicBool,
 }
 
 impl Locker {
@@ -85,18 +97,6 @@ impl Locker {
 
     fn lock_registry(&self) -> StdMutexGuard<'_, HashMap<String, Arc<Mutex<()>>>> {
         self.locks.lock().unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-impl Drop for Claim<'_> {
-    fn drop(&mut self) {
-        // Shares are only handed out under this lock, so a count of two, the map's and this one,
-        // means this share is the last.
-        let mut locks = self.locker.lock_registry();
-
-        if Arc::strong_count(&self.mutex) == 2 {
-            locks.remove(&self.key);
-        }
     }
 }
 

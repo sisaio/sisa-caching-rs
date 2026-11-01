@@ -19,6 +19,214 @@ use crate::{
     store::state::State,
 };
 
+/// The wait before each subscribe: `reconnect_delay_ms`, doubling after each try up to
+/// `max_reconnect_delay_ms`. Only a subscription that stayed up that long starts it over, so one
+/// that breaks right away can't resubscribe and clear the local layer in a tight loop.
+struct Backoff<'a> {
+    settings: &'a BackplaneWorkerSettings,
+    next: Duration,
+}
+
+impl<'a> Backoff<'a> {
+    fn new(settings: &'a BackplaneWorkerSettings) -> Self {
+        Self {
+            settings,
+            next: settings.reconnect_delay(),
+        }
+    }
+
+    /// Starts over after a subscription that stayed up for `up`.
+    fn lost(&mut self, up: Duration) {
+        if up >= self.settings.max_reconnect_delay() {
+            self.next = self.settings.reconnect_delay();
+        }
+    }
+
+    fn wait(&mut self) -> Duration {
+        let wait = self.next;
+
+        self.next = (wait * 2).min(self.settings.max_reconnect_delay());
+        wait
+    }
+}
+
+/// Publishes a heartbeat every `interval`, one at a time, so they arrive in order. The first goes
+/// out after one interval.
+async fn send_heartbeats<C: Clock>(
+    state: Arc<State<C>>,
+    backplane: Arc<RedisBackplane>,
+    interval: Duration,
+) {
+    let store = state.local_store.name();
+    let mut ticks = tokio::time::interval_at(Instant::now() + interval, interval);
+
+    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        ticks.tick().await;
+
+        let stopped = state.stopped.lock().await;
+
+        if *stopped {
+            return;
+        }
+
+        let heartbeat = BackplaneMessage::accounting(
+            state.node_id.clone(),
+            state.sequence.finished(),
+            Invalidation::Heartbeat,
+        );
+
+        if let Err(error) = backplane.publish(&heartbeat).await {
+            tracing::debug!(%store, %error, "could not publish a heartbeat");
+        }
+    }
+}
+
+/// Numbers one node may have received above its last heartbeat before it is tracked afresh.
+const RECEIVED_LIMIT: usize = 1 << 16;
+/// Nodes tracked at once before every node is tracked afresh.
+const NODE_LIMIT: usize = 1 << 12;
+
+/// What a heartbeat shows that clears the local layer.
+#[derive(Debug, PartialEq)]
+enum Gap {
+    /// A number it counts never arrived.
+    Missing,
+    /// It is the node's first, and counts numbers this subscription never got: sent before the
+    /// subscribe, or lost since.
+    Unknown,
+    /// The numbers can't be tracked: the last one there is, or more than the limits hold. The
+    /// node, or every node, is tracked afresh from the clear on.
+    Untracked,
+}
+
+struct Peer {
+    /// The `seq` of its last heartbeat: every number up to it was received or is accounted for.
+    /// `None` until its first heartbeat.
+    finished: Option<u64>,
+    /// The numbers received above `finished`.
+    received: BTreeSet<u64>,
+    /// When its last heartbeat arrived, or its first message before that.
+    heard: Instant,
+}
+
+impl Peer {
+    /// Takes a heartbeat's or a stop's `seq`, and returns the gap it shows.
+    fn account(&mut self, seq: u64) -> Option<Gap> {
+        let finished = match self.finished {
+            Some(finished) if seq <= finished => return None,
+            finished => finished,
+        };
+        let above = self.received.split_off(&(seq + 1));
+        let received = std::mem::replace(&mut self.received, above).len() as u64;
+
+        self.finished = Some(seq);
+
+        if received == seq - finished.unwrap_or(0) {
+            return None;
+        }
+
+        Some(if finished.is_some() {
+            Gap::Missing
+        } else {
+            Gap::Unknown
+        })
+    }
+}
+
+/// What one subscription has heard from the other nodes of its store. A node is tracked from the
+/// first message this subscription gets from it. Nothing says which of its earlier numbers were
+/// sent before the subscribe, so its first heartbeat clears the local layer unless every number up
+/// to it arrived. That covers an invalidation lost between the subscribe and that heartbeat, as
+/// during a failover, at the cost of one more clear for each node that published before.
+struct Peers {
+    /// When this node last heard itself.
+    own_heard: Instant,
+    nodes: HashMap<NodeId, Peer>,
+}
+
+impl Peers {
+    fn new() -> Self {
+        Self {
+            own_heard: Instant::now(),
+            nodes: HashMap::new(),
+        }
+    }
+
+    /// Records another node's message, and returns the gap it shows: a heartbeat that counts a
+    /// number this subscription never got. A message without a `seq` is not tracked.
+    fn receive(&mut self, message: &BackplaneMessage) -> Option<Gap> {
+        let seq = message.seq?;
+
+        // Nothing counts past the last number, so no heartbeat could vouch for what follows it.
+        if seq == u64::MAX {
+            self.nodes.remove(&message.source);
+
+            return Some(Gap::Untracked);
+        }
+        if !self.nodes.contains_key(&message.source) && self.nodes.len() >= NODE_LIMIT {
+            self.nodes.clear();
+
+            return Some(Gap::Untracked);
+        }
+
+        let peer = self
+            .nodes
+            .entry(message.source.clone())
+            .or_insert_with(|| Peer {
+                finished: None,
+                received: BTreeSet::new(),
+                heard: Instant::now(),
+            });
+
+        if !message.invalidation.is_accounting() {
+            if peer.finished.is_none_or(|finished| seq > finished) {
+                peer.received.insert(seq);
+            }
+
+            // A heartbeat that stays below what keeps arriving, as while one publish is stuck,
+            // vouches for none of it. The clear covers every number up to the highest received.
+            if peer.received.len() > RECEIVED_LIMIT {
+                peer.finished = peer.received.last().copied();
+                peer.received.clear();
+
+                return Some(Gap::Untracked);
+            }
+
+            return None;
+        }
+
+        peer.heard = Instant::now();
+
+        let gap = peer.account(seq);
+
+        // A node that stops sends nothing more, so it is forgotten rather than timed out.
+        if message.invalidation == Invalidation::Stopping {
+            self.nodes.remove(&message.source);
+        }
+
+        gap
+    }
+
+    /// Forgets the nodes whose heartbeats stopped for `timeout`, and returns them.
+    fn expire(&mut self, timeout: Duration) -> Vec<NodeId> {
+        let mut gone = Vec::new();
+
+        self.nodes.retain(|node, peer| {
+            let alive = peer.heard.elapsed() < timeout;
+
+            if !alive {
+                gone.push(node.clone());
+            }
+
+            alive
+        });
+
+        gone
+    }
+}
+
 /// Subscribes to one hybrid store's backplane and applies other nodes' invalidations to its local
 /// layer. It holds the store's state but not its `Worker`, so the store's last clone dropping
 /// stops it.
@@ -185,214 +393,6 @@ impl<C: Clock> BackplaneWorker<C> {
 
             tokio::time::sleep(backoff.wait()).await;
         }
-    }
-}
-
-/// The wait before each subscribe: `reconnect_delay_ms`, doubling after each try up to
-/// `max_reconnect_delay_ms`. Only a subscription that stayed up that long starts it over, so one
-/// that breaks right away can't resubscribe and clear the local layer in a tight loop.
-struct Backoff<'a> {
-    settings: &'a BackplaneWorkerSettings,
-    next: Duration,
-}
-
-impl<'a> Backoff<'a> {
-    fn new(settings: &'a BackplaneWorkerSettings) -> Self {
-        Self {
-            settings,
-            next: settings.reconnect_delay(),
-        }
-    }
-
-    /// Starts over after a subscription that stayed up for `up`.
-    fn lost(&mut self, up: Duration) {
-        if up >= self.settings.max_reconnect_delay() {
-            self.next = self.settings.reconnect_delay();
-        }
-    }
-
-    fn wait(&mut self) -> Duration {
-        let wait = self.next;
-
-        self.next = (wait * 2).min(self.settings.max_reconnect_delay());
-        wait
-    }
-}
-
-/// Publishes a heartbeat every `interval`, one at a time, so they arrive in order. The first goes
-/// out after one interval.
-async fn send_heartbeats<C: Clock>(
-    state: Arc<State<C>>,
-    backplane: Arc<RedisBackplane>,
-    interval: Duration,
-) {
-    let store = state.local_store.name();
-    let mut ticks = tokio::time::interval_at(Instant::now() + interval, interval);
-
-    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-    loop {
-        ticks.tick().await;
-
-        let stopped = state.stopped.lock().await;
-
-        if *stopped {
-            return;
-        }
-
-        let heartbeat = BackplaneMessage::accounting(
-            state.node_id.clone(),
-            state.sequence.finished(),
-            Invalidation::Heartbeat,
-        );
-
-        if let Err(error) = backplane.publish(&heartbeat).await {
-            tracing::debug!(%store, %error, "could not publish a heartbeat");
-        }
-    }
-}
-
-/// Numbers one node may have received above its last heartbeat before it is tracked afresh.
-const RECEIVED_LIMIT: usize = 1 << 16;
-/// Nodes tracked at once before every node is tracked afresh.
-const NODE_LIMIT: usize = 1 << 12;
-
-/// What one subscription has heard from the other nodes of its store. A node is tracked from the
-/// first message this subscription gets from it. Nothing says which of its earlier numbers were
-/// sent before the subscribe, so its first heartbeat clears the local layer unless every number up
-/// to it arrived. That covers an invalidation lost between the subscribe and that heartbeat, as
-/// during a failover, at the cost of one more clear for each node that published before.
-struct Peers {
-    /// When this node last heard itself.
-    own_heard: Instant,
-    nodes: HashMap<NodeId, Peer>,
-}
-
-struct Peer {
-    /// The `seq` of its last heartbeat: every number up to it was received or is accounted for.
-    /// `None` until its first heartbeat.
-    finished: Option<u64>,
-    /// The numbers received above `finished`.
-    received: BTreeSet<u64>,
-    /// When its last heartbeat arrived, or its first message before that.
-    heard: Instant,
-}
-
-impl Peer {
-    /// Takes a heartbeat's or a stop's `seq`, and returns the gap it shows.
-    fn account(&mut self, seq: u64) -> Option<Gap> {
-        let finished = match self.finished {
-            Some(finished) if seq <= finished => return None,
-            finished => finished,
-        };
-        let above = self.received.split_off(&(seq + 1));
-        let received = std::mem::replace(&mut self.received, above).len() as u64;
-
-        self.finished = Some(seq);
-
-        if received == seq - finished.unwrap_or(0) {
-            return None;
-        }
-
-        Some(if finished.is_some() {
-            Gap::Missing
-        } else {
-            Gap::Unknown
-        })
-    }
-}
-
-/// What a heartbeat shows that clears the local layer.
-#[derive(Debug, PartialEq)]
-enum Gap {
-    /// A number it counts never arrived.
-    Missing,
-    /// It is the node's first, and counts numbers this subscription never got: sent before the
-    /// subscribe, or lost since.
-    Unknown,
-    /// The numbers can't be tracked: the last one there is, or more than the limits hold. The
-    /// node, or every node, is tracked afresh from the clear on.
-    Untracked,
-}
-
-impl Peers {
-    fn new() -> Self {
-        Self {
-            own_heard: Instant::now(),
-            nodes: HashMap::new(),
-        }
-    }
-
-    /// Records another node's message, and returns the gap it shows: a heartbeat that counts a
-    /// number this subscription never got. A message without a `seq` is not tracked.
-    fn receive(&mut self, message: &BackplaneMessage) -> Option<Gap> {
-        let seq = message.seq?;
-
-        // Nothing counts past the last number, so no heartbeat could vouch for what follows it.
-        if seq == u64::MAX {
-            self.nodes.remove(&message.source);
-
-            return Some(Gap::Untracked);
-        }
-        if !self.nodes.contains_key(&message.source) && self.nodes.len() >= NODE_LIMIT {
-            self.nodes.clear();
-
-            return Some(Gap::Untracked);
-        }
-
-        let peer = self
-            .nodes
-            .entry(message.source.clone())
-            .or_insert_with(|| Peer {
-                finished: None,
-                received: BTreeSet::new(),
-                heard: Instant::now(),
-            });
-
-        if !message.invalidation.is_accounting() {
-            if peer.finished.is_none_or(|finished| seq > finished) {
-                peer.received.insert(seq);
-            }
-
-            // A heartbeat that stays below what keeps arriving, as while one publish is stuck,
-            // vouches for none of it. The clear covers every number up to the highest received.
-            if peer.received.len() > RECEIVED_LIMIT {
-                peer.finished = peer.received.last().copied();
-                peer.received.clear();
-
-                return Some(Gap::Untracked);
-            }
-
-            return None;
-        }
-
-        peer.heard = Instant::now();
-
-        let gap = peer.account(seq);
-
-        // A node that stops sends nothing more, so it is forgotten rather than timed out.
-        if message.invalidation == Invalidation::Stopping {
-            self.nodes.remove(&message.source);
-        }
-
-        gap
-    }
-
-    /// Forgets the nodes whose heartbeats stopped for `timeout`, and returns them.
-    fn expire(&mut self, timeout: Duration) -> Vec<NodeId> {
-        let mut gone = Vec::new();
-
-        self.nodes.retain(|node, peer| {
-            let alive = peer.heard.elapsed() < timeout;
-
-            if !alive {
-                gone.push(node.clone());
-            }
-
-            alive
-        });
-
-        gone
     }
 }
 

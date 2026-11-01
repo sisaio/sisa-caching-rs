@@ -7,6 +7,20 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// Forwards one connection until the proxy is cut, then holds it until the cut ends and closes it.
+async fn forward(mut client: TcpStream, target: String, mut cut: watch::Receiver<bool>) {
+    if !*cut.borrow_and_update()
+        && let Ok(mut server) = TcpStream::connect(&target).await
+    {
+        tokio::select! {
+            _ = copy_bidirectional(&mut client, &mut server) => return,
+            _ = cut.wait_for(|cut| *cut) => {}
+        }
+    }
+
+    let _ = cut.wait_for(|cut| !*cut).await;
+}
+
 /// Forwards every connection to a server until [`cut`](Self::cut), as a network split would:
 /// nothing passes and nothing is refused, so a client finds out only by timing out. Its
 /// connections then close at [`restore`](Self::restore), with whatever was sent meanwhile, as
@@ -58,18 +72,4 @@ impl Drop for Proxy {
     fn drop(&mut self) {
         self.task.abort();
     }
-}
-
-/// Forwards one connection until the proxy is cut, then holds it until the cut ends and closes it.
-async fn forward(mut client: TcpStream, target: String, mut cut: watch::Receiver<bool>) {
-    if !*cut.borrow_and_update()
-        && let Ok(mut server) = TcpStream::connect(&target).await
-    {
-        tokio::select! {
-            _ = copy_bidirectional(&mut client, &mut server) => return,
-            _ = cut.wait_for(|cut| *cut) => {}
-        }
-    }
-
-    let _ = cut.wait_for(|cut| !*cut).await;
 }

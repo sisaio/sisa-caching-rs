@@ -8,6 +8,44 @@ use super::node_id::NodeId;
 
 const MESSAGE_VERSION: u8 = 1;
 
+/// The local copies an invalidation removes. These correspond to a memory store's `remove`,
+/// `remove_prefix`, and `clear` operations, and a heartbeat or a stop removes none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "target", rename_all = "snake_case")]
+pub(crate) enum Invalidation {
+    /// One key.
+    Key(String),
+    /// Every key under a prefix.
+    Prefix(KeyPrefix),
+    /// Every key in the store.
+    Clear,
+    /// None: the writer's periodic heartbeat, which carries its `seq`.
+    Heartbeat,
+    /// None: the writer's last heartbeat, sent by `shutdown`. The other nodes forget the writer
+    /// instead of clearing their local layers when its heartbeats stop.
+    Stopping,
+}
+
+impl Invalidation {
+    /// The wire name of the kind: `key`, `prefix`, `clear`, `heartbeat` or `stopping`. Info spans
+    /// and warnings carry this instead of the key, so they don't export cache keys.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Key(_) => "key",
+            Self::Prefix(_) => "prefix",
+            Self::Clear => "clear",
+            Self::Heartbeat => "heartbeat",
+            Self::Stopping => "stopping",
+        }
+    }
+
+    /// Whether it removes nothing and only accounts for the writer's numbers: a heartbeat or a
+    /// stop.
+    pub fn is_accounting(&self) -> bool {
+        matches!(self, Self::Heartbeat | Self::Stopping)
+    }
+}
+
 /// The message a write publishes and every other node's worker receives. It names the writer and
 /// the local copies to remove, and carries the writer's trace context so the nodes that apply it
 /// continue the same trace. The channel it goes out on names the store. The same type is
@@ -70,44 +108,6 @@ impl BackplaneMessage {
     /// The writer's trace context, for the receiver to continue its trace.
     pub(crate) fn parent_context(&self) -> opentelemetry::Context {
         global::get_text_map_propagator(|propagator| propagator.extract(&self.trace_context))
-    }
-}
-
-/// The local copies an invalidation removes. These correspond to a memory store's `remove`,
-/// `remove_prefix`, and `clear` operations, and a heartbeat or a stop removes none.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "target", rename_all = "snake_case")]
-pub(crate) enum Invalidation {
-    /// One key.
-    Key(String),
-    /// Every key under a prefix.
-    Prefix(KeyPrefix),
-    /// Every key in the store.
-    Clear,
-    /// None: the writer's periodic heartbeat, which carries its `seq`.
-    Heartbeat,
-    /// None: the writer's last heartbeat, sent by `shutdown`. The other nodes forget the writer
-    /// instead of clearing their local layers when its heartbeats stop.
-    Stopping,
-}
-
-impl Invalidation {
-    /// The wire name of the kind: `key`, `prefix`, `clear`, `heartbeat` or `stopping`. Info spans
-    /// and warnings carry this instead of the key, so they don't export cache keys.
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Key(_) => "key",
-            Self::Prefix(_) => "prefix",
-            Self::Clear => "clear",
-            Self::Heartbeat => "heartbeat",
-            Self::Stopping => "stopping",
-        }
-    }
-
-    /// Whether it removes nothing and only accounts for the writer's numbers: a heartbeat or a
-    /// stop.
-    pub fn is_accounting(&self) -> bool {
-        matches!(self, Self::Heartbeat | Self::Stopping)
     }
 }
 

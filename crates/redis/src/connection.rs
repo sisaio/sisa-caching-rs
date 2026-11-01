@@ -119,6 +119,66 @@ impl RedisConnection for ClusterConnection {
     }
 }
 
+/// The connection to the current primary, and how many times it has moved, so a clone that saw a
+/// command fail can tell whether another clone already moved.
+#[derive(Clone)]
+struct Primary {
+    generation: u64,
+    client: Client,
+    connection: ConnectionManager,
+}
+
+impl Primary {
+    async fn connect(client: Client, generation: u64) -> RedisResult<Self> {
+        let connection =
+            ConnectionManager::new_with_config(client.clone(), connection_config()).await?;
+
+        Ok(Self {
+            generation,
+            client,
+            connection,
+        })
+    }
+}
+
+/// What a failover does to a command: the old primary went away, or it is a replica now.
+enum Failover {
+    /// The command didn't run, so it can be sent again.
+    NotRun,
+    /// The connection broke; the command may have run.
+    MayHaveRun,
+}
+
+fn not_run(kind: Option<ServerErrorKind>) -> bool {
+    matches!(
+        kind,
+        Some(ServerErrorKind::ReadOnly | ServerErrorKind::BusyLoading)
+    )
+}
+
+fn failover(error: &RedisError) -> Option<Failover> {
+    // Inside a transaction `READONLY` arrives as one of the aborted commands' errors.
+    let read_only = error
+        .clone()
+        .into_server_errors()
+        .is_some_and(|errors| errors.iter().any(|(_, error)| not_run(error.kind())));
+
+    if read_only || error.is_connection_refusal() {
+        Some(Failover::NotRun)
+    } else if error.is_io_error() || error.is_connection_dropped() {
+        Some(Failover::MayHaveRun)
+    } else {
+        None
+    }
+}
+
+/// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, and a
+/// server that is loading runs no commands, so a reply of `READONLY` or `LOADING` means the
+/// command didn't run.
+fn read_only(reply: &Value) -> bool {
+    matches!(reply, Value::ServerError(error) if not_run(error.kind()))
+}
+
 /// A connection to the primary that Redis Sentinel names. When a command fails because the old
 /// primary went away or refuses writes with `READONLY`, this asks Sentinel for the primary and
 /// moves there if it changed; while Sentinel names the same one, the connection stays and
@@ -159,15 +219,6 @@ impl RedisConnection for ClusterConnection {
 pub struct SentinelConnection {
     sentinel: Arc<Mutex<SentinelClient>>,
     primary: Arc<RwLock<Primary>>,
-}
-
-/// The connection to the current primary, and how many times it has moved, so a clone that saw a
-/// command fail can tell whether another clone already moved.
-#[derive(Clone)]
-struct Primary {
-    generation: u64,
-    client: Client,
-    connection: ConnectionManager,
 }
 
 impl std::fmt::Debug for SentinelConnection {
@@ -239,57 +290,6 @@ impl SentinelConnection {
         *self.primary.write().unwrap_or_else(|e| e.into_inner()) = primary.clone();
         Ok(primary)
     }
-}
-
-impl Primary {
-    async fn connect(client: Client, generation: u64) -> RedisResult<Self> {
-        let connection =
-            ConnectionManager::new_with_config(client.clone(), connection_config()).await?;
-
-        Ok(Self {
-            generation,
-            client,
-            connection,
-        })
-    }
-}
-
-/// What a failover does to a command: the old primary went away, or it is a replica now.
-enum Failover {
-    /// The command didn't run, so it can be sent again.
-    NotRun,
-    /// The connection broke; the command may have run.
-    MayHaveRun,
-}
-
-fn failover(error: &RedisError) -> Option<Failover> {
-    // Inside a transaction `READONLY` arrives as one of the aborted commands' errors.
-    let read_only = error
-        .clone()
-        .into_server_errors()
-        .is_some_and(|errors| errors.iter().any(|(_, error)| not_run(error.kind())));
-
-    if read_only || error.is_connection_refusal() {
-        Some(Failover::NotRun)
-    } else if error.is_io_error() || error.is_connection_dropped() {
-        Some(Failover::MayHaveRun)
-    } else {
-        None
-    }
-}
-
-/// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, and a
-/// server that is loading runs no commands, so a reply of `READONLY` or `LOADING` means the
-/// command didn't run.
-fn read_only(reply: &Value) -> bool {
-    matches!(reply, Value::ServerError(error) if not_run(error.kind()))
-}
-
-fn not_run(kind: Option<ServerErrorKind>) -> bool {
-    matches!(
-        kind,
-        Some(ServerErrorKind::ReadOnly | ServerErrorKind::BusyLoading)
-    )
 }
 
 impl SentinelConnection {
