@@ -21,43 +21,22 @@ explains how the parts fit, what they promise, and which rules hold them togethe
 
 ## Crates
 
-```mermaid
-flowchart BT
-    subgraph published [Published to crates.io]
-        facade[sisa-caching]
-        core[sisa-caching-core]
-        memory[sisa-caching-memory]
-        redis[sisa-caching-redis]
-        hybrid[sisa-caching-hybrid]
-    end
-    subgraph unpublished [Unpublished]
-        testing[sisa-caching-testing]
-        examples[examples]
-        benches[benches]
-    end
+The published crates, each built on the ones under it:
 
-    facade --> core
-    facade --> memory
-    facade --> redis
-    facade --> hybrid
-    memory --> core
-    redis --> core
-    hybrid --> core
-    hybrid --> memory
-    hybrid --> redis
-    testing --> core
-    memory -. tests .-> testing
-    redis -. tests .-> testing
-    hybrid -. tests .-> testing
-    examples --> facade
-    benches --> memory
-    benches --> redis
-    benches --> hybrid
+```mermaid
+block-beta
+    columns 2
+    facade["<b>sisa-caching</b><br/>re-exports, one feature per store"]:2
+    hybrid["<b>sisa-caching-hybrid</b><br/>local copies in front of Redis, kept coherent"]:2
+    memory["<b>sisa-caching-memory</b><br/>in-process store"]
+    redis["<b>sisa-caching-redis</b><br/>Redis-family store"]
+    core["<b>sisa-caching-core</b><br/>CacheStore, keys, entries, settings, clock, metrics"]:2
 ```
 
-An arrow points from a crate to one it depends on; a dotted arrow is a dev-dependency.
-`sisa-caching` depends on every part, each behind its feature, and re-exports what applications
-use. `examples` use it; `benches` use every store crate directly.
+`sisa-caching` depends on every store crate, each behind its feature, and re-exports what
+applications use. Three more stay unpublished: `sisa-caching-testing`, built on core, which only
+the store crates' tests use; `examples`, which use `sisa-caching`; and `benches`, which use the
+store crates directly.
 
 | Crate | Published | Main types | What it holds |
 | --- | --- | --- | --- |
