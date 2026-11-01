@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     cache::{CacheEntry, CacheError, CacheOptions, CacheValue, KeyPrefix},
-    clock::{Clock, SystemClock},
+    clock::Clock,
     locker::Locker,
     metrics::METRICS,
     settings::CacheSettings,
@@ -63,6 +63,11 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     /// What the store's calls fail with. Every [`CacheError`] converts into it.
     type Error: From<CacheError> + std::error::Error + Send + Sync + 'static;
 
+    /// The clock `set` and `get_or_set` read the time from: a type, not a `dyn Clock`, so those
+    /// reads compile to direct calls.
+    #[doc(hidden)]
+    type Clock: Clock;
+
     /// The store's name, written in front of every key it stores.
     fn name(&self) -> &KeyPrefix;
 
@@ -77,9 +82,7 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
 
     /// Where `set` and `get_or_set` read the time.
     #[doc(hidden)]
-    fn clock(&self) -> &dyn Clock {
-        &SystemClock
-    }
+    fn clock(&self) -> &Self::Clock;
 
     /// The entry under `key` as a `CV`, or `None` when it is missing or expired. The memory store
     /// fails with [`CacheError::TypeMismatch`] when it holds another Rust type there. The Redis

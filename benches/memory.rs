@@ -10,7 +10,10 @@ use std::{
 use criterion::{BenchmarkId, Criterion, SamplingMode, criterion_group, criterion_main};
 use futures_util::FutureExt;
 use sisa_caching_benches::{User, key, meter_provider, user};
-use sisa_caching_core::cache::{CacheOptions, CacheStore};
+use sisa_caching_core::{
+    cache::{CacheOptions, CacheStore},
+    clock::Clock,
+};
 use sisa_caching_memory::{settings::InMemoryCacheSettings, store::InMemoryCacheStore};
 use sisa_caching_testing::ManualClock;
 use tokio::runtime::Runtime;
@@ -27,7 +30,12 @@ fn store(shards: usize) -> InMemoryCacheStore {
 }
 
 /// Writes a user under each id, expiring after `ttl` if one is given.
-fn fill(runtime: &Runtime, store: &InMemoryCacheStore, ids: Range<u64>, ttl: Option<Duration>) {
+fn fill<C: Clock>(
+    runtime: &Runtime,
+    store: &InMemoryCacheStore<C>,
+    ids: Range<u64>,
+    ttl: Option<Duration>,
+) {
     let options = ttl.map(CacheOptions::with_ttl);
 
     runtime.block_on(async {

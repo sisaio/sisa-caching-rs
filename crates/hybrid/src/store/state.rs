@@ -11,6 +11,7 @@ use std::{
 
 use sisa_caching_core::{
     cache::{CacheEntry, CacheStore, CacheValue, KeyPrefix},
+    clock::{Clock, SystemClock},
     locker::Locker,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -30,8 +31,8 @@ const REMOVING_LIMIT: usize = 16;
 /// never lands between a promotion's check and its copy.
 ///
 /// The memory store's writes and removals never fail, so their results are dropped here.
-pub(crate) struct State {
-    pub(crate) local_store: InMemoryCacheStore,
+pub(crate) struct State<C: Clock = SystemClock> {
+    pub(crate) local_store: InMemoryCacheStore<C>,
     pub(crate) node_id: NodeId,
     /// Lets one `get_or_set` per key load at a time, across the store's clones.
     pub(crate) locker: Locker,
@@ -51,8 +52,8 @@ pub(crate) struct State {
     pub(crate) shut_down: tokio::sync::SetOnce<()>,
 }
 
-impl State {
-    pub(crate) fn new(local_store: InMemoryCacheStore) -> Self {
+impl<C: Clock> State<C> {
+    pub(crate) fn new(local_store: InMemoryCacheStore<C>) -> Self {
         Self {
             // Off until a backplane worker runs for this store.
             local_reads_enabled: AtomicBool::new(false),

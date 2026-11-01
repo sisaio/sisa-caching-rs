@@ -98,7 +98,7 @@ fn off_async_thread(work: impl FnOnce() + Send + 'static) {
 
 /// The store's purge task: drops `store`'s expired entries every `interval`, on the blocking pool,
 /// as a purge walks every entry. A panic there stops the task.
-async fn purge_every(store: InMemoryCacheStore, interval: Duration) {
+async fn purge_every<C: Clock>(store: InMemoryCacheStore<C>, interval: Duration) {
     loop {
         tokio::time::sleep(interval).await;
 
@@ -134,10 +134,13 @@ impl StoredEntry {
 /// starts on its first write inside a tokio runtime. The task stops when the store's last clone
 /// drops. Inside a runtime, its purges, the trims of a full store and the freeing of what `clear`
 /// took run on the blocking pool, so they hold up no async thread.
+///
+/// `C` is the clock the store reads the time from, [`SystemClock`] unless
+/// [`with_clock`](Self::with_clock) sets another.
 #[derive(Clone)]
-pub struct InMemoryCacheStore {
+pub struct InMemoryCacheStore<C = SystemClock> {
     name: KeyPrefix,
-    clock: Arc<dyn Clock>,
+    clock: C,
     settings: InMemoryCacheSettings,
     /// The longest the store holds an entry, whatever its TTL: a hybrid store's TTL for its local
     /// copies. `None`, the default, holds each entry for its whole TTL.
@@ -149,7 +152,7 @@ pub struct InMemoryCacheStore {
 }
 
 /// The name, the settings and how many entries it holds; never a value.
-impl std::fmt::Debug for InMemoryCacheStore {
+impl<C> std::fmt::Debug for InMemoryCacheStore<C> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("InMemoryCacheStore")
@@ -170,7 +173,7 @@ impl InMemoryCacheStore {
         Ok(Self {
             reads: METRICS.reads(&name, Layer::Memory),
             name,
-            clock: Arc::new(SystemClock),
+            clock: SystemClock,
             entries: Arc::new(Entries::new(settings.shards())),
             local_ttl: None,
             settings,
@@ -178,13 +181,23 @@ impl InMemoryCacheStore {
             worker: Worker::new(),
         })
     }
+}
 
+impl<C: Clock> InMemoryCacheStore<C> {
     /// Runs the store on `clock` instead of the system clock, so tests can move time. Set it while
-    /// building the store, before any write.
-    pub fn with_clock(mut self, clock: impl Clock) -> Self {
-        self.clock = Arc::new(clock);
-
-        self
+    /// building the store, before any write: the store keeps its entries but starts a purge task
+    /// of its own, on the new clock.
+    pub fn with_clock<T: Clock>(self, clock: T) -> InMemoryCacheStore<T> {
+        InMemoryCacheStore {
+            name: self.name,
+            clock,
+            settings: self.settings,
+            local_ttl: self.local_ttl,
+            entries: self.entries,
+            locker: self.locker,
+            worker: Worker::new(),
+            reads: self.reads,
+        }
     }
 
     /// Replaces the store's settings. Fails when one is out of range, such as a TTL over 365
@@ -243,7 +256,7 @@ impl InMemoryCacheStore {
         &self,
         key: &str,
         entry: CacheEntry<CV>,
-    ) -> impl Send + use<CV> {
+    ) -> impl Send + use<C, CV> {
         // Entries only come in here, so the purge starts with the first one.
         if let Some(interval) = self.settings.purge_interval() {
             self.worker
@@ -395,18 +408,19 @@ impl InMemoryCacheStore {
 
 /// A started trim. Dropping it lets the next one start, even if it never ran, as when its runtime
 /// shut down first.
-struct Trimming(InMemoryCacheStore);
+struct Trimming<C>(InMemoryCacheStore<C>);
 
-impl Drop for Trimming {
+impl<C> Drop for Trimming<C> {
     fn drop(&mut self) {
         self.0.entries.trimming.store(false, Ordering::Release);
     }
 }
 
-impl sisa_caching_core::sealed::Sealed for InMemoryCacheStore {}
+impl<C: Clock> sisa_caching_core::sealed::Sealed for InMemoryCacheStore<C> {}
 
-impl CacheStore for InMemoryCacheStore {
+impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
     type Error = CacheError;
+    type Clock = C;
 
     fn name(&self) -> &KeyPrefix {
         &self.name
@@ -420,8 +434,8 @@ impl CacheStore for InMemoryCacheStore {
         &self.locker
     }
 
-    fn clock(&self) -> &dyn Clock {
-        &*self.clock
+    fn clock(&self) -> &C {
+        &self.clock
     }
 
     #[tracing::instrument(level = "debug", name = "memory get", skip_all, fields(key = %self.name.format_key(key)))]
@@ -554,7 +568,10 @@ mod tests {
         Duration::from_secs(secs)
     }
 
-    fn store(clock: &ManualClock, settings: InMemoryCacheSettings) -> InMemoryCacheStore {
+    fn store(
+        clock: &ManualClock,
+        settings: InMemoryCacheSettings,
+    ) -> InMemoryCacheStore<ManualClock> {
         InMemoryCacheStore::new("app")
             .unwrap()
             .with_clock(clock.clone())
@@ -581,7 +598,7 @@ mod tests {
     }
 
     /// The ids in `ids` the store still holds.
-    async fn held(store: &InMemoryCacheStore, ids: Range<u32>) -> Vec<u32> {
+    async fn held<C: Clock>(store: &InMemoryCacheStore<C>, ids: Range<u32>) -> Vec<u32> {
         let mut held = Vec::new();
 
         for id in ids {
@@ -594,7 +611,7 @@ mod tests {
     }
 
     /// Waits until the store's trim, which runs on the blocking pool, is done.
-    async fn trimmed(store: &InMemoryCacheStore) {
+    async fn trimmed<C: Clock>(store: &InMemoryCacheStore<C>) {
         eventually("the trim ends", || async {
             !store.entries.trimming.load(Ordering::Acquire)
         })
@@ -1346,7 +1363,7 @@ mod tests {
     #[derive(Serialize, Deserialize)]
     struct CallsTheStore {
         #[serde(skip)]
-        store: Option<InMemoryCacheStore>,
+        store: Option<InMemoryCacheStore<ManualClock>>,
     }
 
     impl Clone for CallsTheStore {
