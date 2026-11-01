@@ -342,7 +342,7 @@ async fn calls_fail_at_once_while_the_server_is_down_and_work_once_it_is_back() 
     }
 
     let loaded = store
-        .get_or_set(&key(1), || async { Ok::<_, ()>("loaded".to_owned()) }, None)
+        .get_or_set(&key(1), async || Ok::<_, ()>("loaded".to_owned()), None)
         .await;
 
     assert_eq!(loaded.as_deref(), Ok("loaded"));
@@ -354,7 +354,7 @@ async fn calls_fail_at_once_while_the_server_is_down_and_work_once_it_is_back() 
 
     redis.restart().await;
 
-    eventually("the store reconnects", || async {
+    eventually("the store reconnects", async || {
         store.set(&key(1), "grace".to_owned(), None).await.is_ok()
     })
     .await;

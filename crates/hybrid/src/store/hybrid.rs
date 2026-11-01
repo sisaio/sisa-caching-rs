@@ -472,20 +472,18 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
     async fn set_entry<CV: CacheValue>(&self, key: &str, entry: CacheEntry<CV>) -> Result<()> {
         let key = key.to_owned();
 
-        self.mutate(
-            Invalidation::Key(key.clone()),
-            move |distributed| async move { distributed.set_entry(&key, entry).await },
-        )
+        self.mutate(Invalidation::Key(key.clone()), async move |distributed| {
+            distributed.set_entry(&key, entry).await
+        })
         .await
     }
 
     async fn remove(&self, key: &str) -> Result<bool> {
         let key = key.to_owned();
 
-        self.mutate(
-            Invalidation::Key(key.clone()),
-            move |distributed| async move { distributed.remove(&key).await },
-        )
+        self.mutate(Invalidation::Key(key.clone()), async move |distributed| {
+            distributed.remove(&key).await
+        })
         .await
     }
 
@@ -494,13 +492,13 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
 
         self.mutate(
             Invalidation::Prefix(prefix.clone()),
-            move |distributed| async move { distributed.remove_prefix(prefix.as_str()).await },
+            async move |distributed| distributed.remove_prefix(prefix.as_str()).await,
         )
         .await
     }
 
     async fn clear(&self) -> Result<()> {
-        self.mutate(Invalidation::Clear, |distributed| async move {
+        self.mutate(Invalidation::Clear, async move |distributed| {
             distributed.clear().await
         })
         .await

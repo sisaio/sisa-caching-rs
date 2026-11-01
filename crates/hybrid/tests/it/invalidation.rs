@@ -44,9 +44,10 @@ async fn every_write_evicts_the_copy_on_other_nodes() {
 
         write.run(&writer).await.unwrap();
 
-        eventually(&format!("{write:?}: the reader drops its copy"), || async {
-            local_value(&reader, &key(1)).await.is_none()
-        })
+        eventually(
+            &format!("{write:?}: the reader drops its copy"),
+            async || local_value(&reader, &key(1)).await.is_none(),
+        )
         .await;
         assert_eq!(
             reader.get::<String>(&key(1)).await.unwrap().as_deref(),
@@ -77,7 +78,7 @@ async fn a_prefix_removal_keeps_the_copies_under_other_prefixes() {
 
     writer.remove_prefix("user").await.unwrap();
 
-    eventually("the reader drops the prefix", || async {
+    eventually("the reader drops the prefix", async || {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;
@@ -100,7 +101,7 @@ async fn a_node_skips_its_own_invalidations() {
     // Messages arrive in order: once this one is applied, the node's own message has been handled
     // too.
     publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
-    eventually("the node catches up", || async {
+    eventually("the node catches up", async || {
         local_value(&node, &key("marker")).await.is_none()
     })
     .await;
@@ -152,7 +153,7 @@ async fn a_failed_publish_is_tried_again() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     redis.set_user("writer", "+publish").await;
 
-    eventually("a later try reaches the reader", || async {
+    eventually("a later try reaches the reader", async || {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;
@@ -160,7 +161,7 @@ async fn a_failed_publish_is_tried_again() {
     // arrive in order: once the marker is applied, those heartbeats have been handled.
     tokio::time::sleep(Duration::from_millis(100)).await;
     publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
-    eventually("the reader catches up", || async {
+    eventually("the reader catches up", async || {
         local_value(&reader, &key("marker")).await.is_none()
     })
     .await;
@@ -184,7 +185,7 @@ async fn a_publish_refused_on_every_try_clears_the_other_nodes_at_the_next_heart
     tokio::time::sleep(Duration::from_millis(500)).await;
     redis.set_user("writer", "+publish").await;
 
-    eventually("the next heartbeat shows the number missing", || async {
+    eventually("the next heartbeat shows the number missing", async || {
         local_value(&reader, &key("other")).await.is_none()
     })
     .await;
@@ -222,7 +223,7 @@ async fn a_publish_refused_before_a_node_first_hears_the_writer_clears_it_at_the
 
     eventually(
         "the first heartbeat counts a number the reader never got",
-        || async { local_value(&reader, &key(1)).await.is_none() },
+        async || local_value(&reader, &key(1)).await.is_none(),
     )
     .await;
     assert!(reader.local_reads_enabled());
@@ -253,7 +254,7 @@ async fn a_node_whose_heartbeats_stop_makes_the_others_clear() {
         .await
         .unwrap();
 
-    eventually("the reader notices the writer is gone", || async {
+    eventually("the reader notices the writer is gone", async || {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;
@@ -313,7 +314,7 @@ async fn a_node_that_stops_hearing_its_own_heartbeats_subscribes_again() {
     // Its heartbeats are refused, so none comes back, while the subscription stays up.
     redis.set_user("node", "-publish").await;
 
-    eventually("the node takes its subscription for lost", || async {
+    eventually("the node takes its subscription for lost", async || {
         local_value(&node, &key(1)).await.is_none()
     })
     .await;
@@ -348,7 +349,7 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
             .unwrap();
         publish(&redis, "users", payload).await;
 
-        eventually(&format!("{payload}: the node clears"), || async {
+        eventually(&format!("{payload}: the node clears"), async || {
             local_value(&node, &key(1)).await.is_none()
         })
         .await;
@@ -376,7 +377,7 @@ async fn the_first_read_or_write_starts_the_worker() {
     reader.get::<String>(&key(1)).await.unwrap();
     writer.set(&key(1), "ada".to_owned(), None).await.unwrap();
 
-    eventually("both workers subscribe", || async {
+    eventually("both workers subscribe", async || {
         reader.local_reads_enabled() && writer.local_reads_enabled()
     })
     .await;
@@ -403,7 +404,7 @@ async fn clones_share_one_worker_until_the_last_drops() {
     assert!(clone.local_reads_enabled(), "the clone keeps it running");
 
     drop(clone);
-    eventually("the worker stops", || async {
+    eventually("the worker stops", async || {
         redis.subscriptions().await == 0
     })
     .await;
@@ -441,7 +442,7 @@ async fn a_lost_subscription_reads_through_until_it_is_back() {
     node.get::<String>(&key(1)).await.unwrap();
 
     redis.stop().await;
-    eventually("the node notices", || async { !node.local_reads_enabled() }).await;
+    eventually("the node notices", async || !node.local_reads_enabled()).await;
 
     assert_eq!(
         local_value(&node, &key(1)).await,
@@ -459,7 +460,7 @@ async fn a_lost_subscription_reads_through_until_it_is_back() {
     );
 
     redis.restart().await;
-    eventually("the node subscribes again", || async {
+    eventually("the node subscribes again", async || {
         node.local_reads_enabled()
     })
     .await;
@@ -663,7 +664,7 @@ async fn an_invalidation_from_elsewhere_during_a_read_drops_its_copy() {
         .unwrap();
     publish_removal(&redis, "elsewhere", "users", &key(1)).await;
     publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
-    eventually("the invalidations land", || async {
+    eventually("the invalidations land", async || {
         local_value(&node, &key("marker")).await.is_none()
     })
     .await;
@@ -731,7 +732,7 @@ async fn a_shutdown_whose_callers_give_up_still_stops_the_store() {
 
     distributed.finish_write.notify_one();
     write.await.unwrap().unwrap();
-    eventually("the store stops without its callers", || async {
+    eventually("the store stops without its callers", async || {
         !node.local_reads_enabled()
     })
     .await;
@@ -756,7 +757,7 @@ async fn a_shutdown_that_gives_up_on_a_write_makes_the_other_nodes_clear() {
     // Gives up on the write after two seconds, and its stop counts the write.
     writer.shutdown().await;
 
-    eventually("the reader clears at the stop", || async {
+    eventually("the reader clears at the stop", async || {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;

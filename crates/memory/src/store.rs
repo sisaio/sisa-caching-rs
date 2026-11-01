@@ -612,7 +612,7 @@ mod tests {
 
     /// Waits until the store's trim, which runs on the blocking pool, is done.
     async fn trimmed<C: Clock>(store: &InMemoryCacheStore<C>) {
-        eventually("the trim ends", || async {
+        eventually("the trim ends", async || {
             !store.entries.trimming.load(Ordering::Acquire)
         })
         .await;
@@ -1051,7 +1051,7 @@ mod tests {
     async fn get_or_set_loads_a_missing_value_once_for_every_caller() {
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
         let loads = AtomicUsize::new(0);
-        let load = || async {
+        let load = async || {
             loads.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_millis(10)).await;
 
@@ -1093,7 +1093,7 @@ mod tests {
             secs(1),
             store.get_or_set(
                 &key(1),
-                || async { Ok::<_, Infallible>("ada".to_owned()) },
+                async || Ok::<_, Infallible>("ada".to_owned()),
                 None,
             ),
         )
@@ -1112,7 +1112,7 @@ mod tests {
         let loaded = store
             .get_or_set(
                 &key(1),
-                || async { Ok::<_, Infallible>("ada".to_owned()) },
+                async || Ok::<_, Infallible>("ada".to_owned()),
                 None,
             )
             .await;
@@ -1129,7 +1129,7 @@ mod tests {
         let logs = Logs::default();
         let _logging = tracing::subscriber::set_default(logs.clone());
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
-        let load = || async { Ok::<_, Infallible>("ada".to_owned()) };
+        let load = async || Ok::<_, Infallible>("ada".to_owned());
         let email = |id| key(format!("ada{id}@example.com"));
 
         // Each key holds another type, so both reads of each call fail.
@@ -1165,10 +1165,10 @@ mod tests {
         let logged = |message: &str| logs.lines().iter().any(|line| line.contains(message));
 
         store.set(&key(1), 1_u32, None).await.unwrap();
-        eventually("the worker starts", || async { logged("worker started") }).await;
+        eventually("the worker starts", async || logged("worker started")).await;
         drop(store);
         drop(clone);
-        eventually("the worker stops and drops its copy", || async {
+        eventually("the worker stops and drops its copy", async || {
             logged("worker stopped") && entries.upgrade().is_none()
         })
         .await;
@@ -1196,11 +1196,7 @@ mod tests {
         );
         let user = key(1);
         let get_or_set = |loaded: Result<&'static str, &'static str>| {
-            store.get_or_set(
-                &user,
-                move || async move { loaded.map(str::to_owned) },
-                None,
-            )
+            store.get_or_set(&user, async move || loaded.map(str::to_owned), None)
         };
 
         store.set(&key(1), "old".to_owned(), None).await.unwrap();
@@ -1251,7 +1247,7 @@ mod tests {
 
             store.get_or_set(
                 &user,
-                move || async move {
+                async move || {
                     clock.advance(secs(advance));
                     Err::<String, _>("down")
                 },
@@ -1280,7 +1276,7 @@ mod tests {
         let loaded = store
             .get_or_set(
                 &user,
-                || async {
+                async || {
                     store.remove(&user).await.unwrap();
                     Err::<String, _>("down")
                 },

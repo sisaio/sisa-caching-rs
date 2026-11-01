@@ -30,7 +30,7 @@
 //!     .with_settings(settings)?;
 //!
 //! let user = cache
-//!     .get_or_set("user:v1:42", || async { Ok::<_, std::io::Error>("Ada".to_string()) }, None)
+//!     .get_or_set("user:v1:42", async || Ok::<_, std::io::Error>("Ada".to_string()), None)
 //!     .await?;
 //! # Ok(())
 //! # }

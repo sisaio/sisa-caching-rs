@@ -29,7 +29,7 @@ async fn a_store_counts_hits_misses_and_evictions() {
 
     // The 11th entry started a trim down to 9, which runs on the blocking pool: the two least
     // recently used, 0 and 1, go.
-    eventually("the trim drops two entries", || async {
+    eventually("the trim drops two entries", async || {
         metrics.value("sisa.caching.evictions", &[]) == 2
     })
     .await;

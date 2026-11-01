@@ -130,11 +130,7 @@ async fn calls_use_the_hybrid_stores_own_settings() {
 
     let loaded = tokio::time::timeout(
         secs(1),
-        node.get_or_set(
-            &user,
-            || async { Ok::<_, Infallible>("ada".to_owned()) },
-            None,
-        ),
+        node.get_or_set(&user, async || Ok::<_, Infallible>("ada".to_owned()), None),
     )
     .await
     .expect("the 20 ms lock timeout ends the wait");
@@ -212,7 +208,7 @@ async fn the_local_ttl_does_not_make_get_or_set_refresh_early() {
     let get_or_set = || {
         node.get_or_set(
             &user,
-            || async {
+            async || {
                 loads.fetch_add(1, Ordering::SeqCst);
 
                 Ok::<_, Infallible>("new".to_owned())

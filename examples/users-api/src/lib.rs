@@ -112,7 +112,7 @@ async fn count<C: CacheStore>(State(app): State<App<C>>) -> Result<Json<u64>, Ap
         .cache
         .get_or_set(
             COUNT_KEY,
-            || async move { Ok::<_, AppError>(db.count().await) },
+            async move || Ok::<_, AppError>(db.count().await),
             None,
         )
         .await?;
@@ -129,7 +129,7 @@ async fn find<C: CacheStore>(
         .cache
         .get_or_set(
             &user_key(id),
-            || async move { db.find(id).await.ok_or(AppError::NotFound) },
+            async move || db.find(id).await.ok_or(AppError::NotFound),
             None,
         )
         .await?;
@@ -143,7 +143,7 @@ async fn list<C: CacheStore>(State(app): State<App<C>>) -> Result<Json<Vec<User>
         .cache
         .get_or_set(
             LIST_KEY,
-            || async move { Ok::<_, AppError>(db.list().await) },
+            async move || Ok::<_, AppError>(db.list().await),
             None,
         )
         .await?;

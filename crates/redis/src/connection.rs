@@ -295,6 +295,9 @@ fn not_run(kind: Option<ServerErrorKind>) -> bool {
 impl SentinelConnection {
     /// Sends on the current primary. After a failover it moves, and sends once more if the first
     /// try surely didn't run.
+    ///
+    /// `send` is a closure that returns a future, not an async closure: an `AsyncFn` here makes
+    /// the boxed future its callers return need `'static` borrows, and theirs borrow the command.
     async fn send<T, Fut>(
         &self,
         send: impl Fn(ConnectionManager) -> Fut,

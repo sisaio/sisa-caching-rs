@@ -111,13 +111,15 @@ async fn a_failed_write_still_evicts_on_every_node() {
             "{write:?}: the caller sees the failure"
         );
         // A prefix's copies are removed on the blocking pool, after the call returns.
-        eventually(&format!("{write:?}: the writer drops its copy"), || async {
-            local_value(&writer, &key(1)).await.is_none()
-        })
+        eventually(
+            &format!("{write:?}: the writer drops its copy"),
+            async || local_value(&writer, &key(1)).await.is_none(),
+        )
         .await;
-        eventually(&format!("{write:?}: the reader drops its copy"), || async {
-            local_value(&reader, &key(1)).await.is_none()
-        })
+        eventually(
+            &format!("{write:?}: the reader drops its copy"),
+            async || local_value(&reader, &key(1)).await.is_none(),
+        )
         .await;
     }
 }
@@ -265,7 +267,7 @@ async fn reached(point: &Semaphore) {
 }
 
 async fn reader_sees(reader: &Reader, expected: Option<&str>) {
-    eventually("the reader drops its copy", || async {
+    eventually("the reader drops its copy", async || {
         local_value(reader, &key(1)).await.is_none()
     })
     .await;
@@ -365,7 +367,7 @@ async fn a_write_runs_to_the_end_after_its_last_handle_is_dropped() {
 
     // The writer's worker stops with its last handle. Garnet can lose a message published while
     // another subscriber disconnects, so the write goes on once the worker's connection is gone.
-    eventually("the writer's worker stops", || async {
+    eventually("the writer's worker stops", async || {
         redis.subscriptions().await == 1
     })
     .await;

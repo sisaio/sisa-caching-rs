@@ -30,7 +30,7 @@ async fn a_write_evicts_the_copy_on_another_node_and_counts_both_subscribers() {
     assert_a_write_reaches(&node(&cluster).await, &node(&cluster).await).await;
 
     // Both subscriptions sit on the node that owns the channel's slot, which took the publish.
-    eventually("the publish counts both subscribers", || async {
+    eventually("the publish counts both subscribers", async || {
         metrics.value("sisa.caching.invalidations.delivered", &[]) == 2
     })
     .await;

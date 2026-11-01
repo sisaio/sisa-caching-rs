@@ -56,7 +56,7 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
     let reader = connect().await.unwrap();
 
     for node in [&writer, &reader] {
-        eventually("connect starts the worker", || async {
+        eventually("connect starts the worker", async || {
             node.local_reads_enabled()
         })
         .await;
@@ -91,7 +91,7 @@ async fn each_store_gets_only_its_own_invalidations() {
 
     users_writer.remove(&key(1)).await.unwrap();
 
-    eventually("the users reader drops its copy", || async {
+    eventually("the users reader drops its copy", async || {
         local_value(&users_reader, &key(1)).await.is_none()
     })
     .await;
@@ -224,7 +224,7 @@ async fn a_stalled_subscription_turns_local_reads_off_until_it_is_back() {
 
     // Connections stay open but nothing answers, as on a network that drops traffic silently.
     redis.pause().await;
-    eventually("the node notices the stall", || async {
+    eventually("the node notices the stall", async || {
         !node.local_reads_enabled()
     })
     .await;
@@ -235,7 +235,7 @@ async fn a_stalled_subscription_turns_local_reads_off_until_it_is_back() {
     );
 
     redis.unpause().await;
-    eventually("the node subscribes again", || async {
+    eventually("the node subscribes again", async || {
         node.local_reads_enabled()
     })
     .await;
@@ -268,12 +268,12 @@ async fn a_closed_subscription_clears_the_copies_and_subscribes_again() {
     );
     // A node can see its connection close a while after the kill returns, so each wait is for
     // something the nodes did: clearing their copies once they see it, then subscribing again.
-    eventually("both nodes clear their copies", || async {
+    eventually("both nodes clear their copies", async || {
         local_value(&writer, &key(1)).await.is_none()
             && local_value(&reader, &key(1)).await.is_none()
     })
     .await;
-    eventually("both nodes subscribe again", || async {
+    eventually("both nodes subscribe again", async || {
         reader.local_reads_enabled() && writer.local_reads_enabled()
     })
     .await;
@@ -298,7 +298,7 @@ async fn the_stop_message_counts_a_write_that_returned_just_before_it() {
     .await
     .unwrap();
 
-    let messages = pubsub.on_message().filter_map(|message| async move {
+    let messages = pubsub.on_message().filter_map(async move |message| {
         let message: serde_json::Value =
             serde_json::from_slice(message.get_payload_bytes()).ok()?;
         let kind = message["kind"].as_str()?.to_owned();

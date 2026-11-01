@@ -80,12 +80,12 @@ async fn nodes_follow_a_failover() {
     // Demoting by hand closes no connection, like a failover on Dragonfly, which refuses the
     // command Sentinel closes them with. Each subscription asks Sentinel and finds the new
     // primary.
-    eventually("every subscription moves to the new primary", || async {
+    eventually("every subscription moves to the new primary", async || {
         subscribers_on(&sentinel, 6379).await == 0 && subscribers_on(&sentinel, 6380).await == 3
     })
     .await;
 
-    eventually("the reader copies the replicated value", || async {
+    eventually("the reader copies the replicated value", async || {
         reader.get::<String>(&key(1)).await.unwrap().as_deref() == Some("old")
             && local_value(&reader, &key(1)).await.is_some()
     })
@@ -93,7 +93,7 @@ async fn nodes_follow_a_failover() {
 
     writer.set(&key(1), "new".to_owned(), None).await.unwrap();
 
-    eventually("the reader drops its copy", || async {
+    eventually("the reader drops its copy", async || {
         local_value(&reader, &key(1)).await.is_none()
     })
     .await;
