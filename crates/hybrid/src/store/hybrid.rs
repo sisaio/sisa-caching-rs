@@ -152,7 +152,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
         let local_store = InMemoryCacheStore::new(name.as_str())?
             .with_clock(clock)
             .with_settings(settings.local.memory_settings(&settings.common))?
-            .with_max_ttl(settings.local.max_ttl());
+            .with_local_ttl(settings.local.ttl());
         let backplane = backplane.for_store(name);
         let reads = METRICS.reads(name, Layer::Hybrid);
 

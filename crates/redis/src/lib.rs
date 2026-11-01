@@ -24,7 +24,7 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut settings = RedisCacheSettings::default();
-//! settings.common.ttl_secs = Some(300);
+//! settings.common.default_ttl_secs = Some(300);
 //! let cache = RedisCacheStore::connect("app", "redis://127.0.0.1:6379")
 //!     .await?
 //!     .with_settings(settings)?;

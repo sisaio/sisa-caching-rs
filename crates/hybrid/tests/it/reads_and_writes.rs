@@ -33,10 +33,10 @@ fn on_clock(clock: &ManualClock, settings: InMemoryCacheSettings) -> InMemoryCac
         .unwrap()
 }
 
-/// Fast retries, with local copies capped at `max_ttl_secs`.
-fn with_max_ttl(max_ttl_secs: u64) -> HybridCacheSettings {
+/// Fast retries, with local copies kept for `local_ttl_secs`.
+fn with_local_ttl(local_ttl_secs: u64) -> HybridCacheSettings {
     let mut settings = fast_retries();
-    settings.local.max_ttl_secs = Some(max_ttl_secs);
+    settings.local.ttl_secs = local_ttl_secs;
     settings
 }
 
@@ -90,7 +90,7 @@ async fn calls_use_the_hybrid_stores_own_settings() {
     let distributed = on_clock(&clock, InMemoryCacheSettings::default());
     let settings = {
         let mut settings = fast_retries();
-        settings.common.ttl_secs = Some(3);
+        settings.common.default_ttl_secs = Some(3);
         settings.common.lock_timeout_ms = Some(20);
         settings
     };
@@ -140,7 +140,7 @@ async fn calls_use_the_hybrid_stores_own_settings() {
 }
 
 #[tokio::test]
-async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
+async fn a_local_copy_stays_for_the_local_ttl_and_keeps_the_entrys_metadata() {
     let redis = Redis::start().await;
     let clock = ManualClock::new();
     let distributed = on_clock(&clock, InMemoryCacheSettings::default());
@@ -148,7 +148,7 @@ async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
         HybridCacheStore::new_on_clock(
             distributed.clone(),
             backplane(&redis).await,
-            &with_max_ttl(10),
+            &with_local_ttl(10),
             clock.clone(),
         )
         .unwrap(),
@@ -169,7 +169,11 @@ async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
     );
 
     clock.advance(secs(10));
-    assert_eq!(local_value(&node, &key(1)).await, None, "the cap let it go");
+    assert_eq!(
+        local_value(&node, &key(1)).await,
+        None,
+        "the local TTL let it go"
+    );
     assert_eq!(
         node.get_entry(&key(1)).await.unwrap(),
         original,
@@ -181,12 +185,12 @@ async fn a_local_copy_stays_at_most_max_ttl_and_keeps_the_entrys_metadata() {
 }
 
 #[tokio::test]
-async fn the_local_cap_does_not_make_get_or_set_refresh_early() {
+async fn the_local_ttl_does_not_make_get_or_set_refresh_early() {
     let redis = Redis::start().await;
     let clock = ManualClock::new();
     let settings = {
-        let mut settings = with_max_ttl(10);
-        settings.common.ttl_secs = Some(100);
+        let mut settings = with_local_ttl(10);
+        settings.common.default_ttl_secs = Some(100);
         settings.common.refresh_threshold = Some(0.8);
         settings
     };
@@ -303,7 +307,7 @@ async fn new_rejects_settings_out_of_range_or_that_it_would_not_read() {
         .unwrap()
         .with_settings({
             let mut settings = InMemoryCacheSettings::default();
-            settings.common.ttl_secs = Some(60);
+            settings.common.default_ttl_secs = Some(60);
             settings
         })
         .unwrap();

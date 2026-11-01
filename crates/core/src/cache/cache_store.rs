@@ -136,9 +136,9 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     }
 
     /// Stores `entry` as it is: its creation time and TTL are kept, and it expires when the entry
-    /// does, not after this store's default TTL. A store may hold it for less, such as the memory
-    /// store with `max_ttl_secs`. `get_entry` from one store and `set_entry` into another copies
-    /// an entry without changing it.
+    /// does, not after this store's default TTL. A store may hold it for less, as a hybrid store's
+    /// local layer does for `local.ttl_secs`. `get_entry` from one store and `set_entry` into
+    /// another copies an entry without changing it.
     fn set_entry<CV: CacheValue>(
         &self,
         key: &str,
@@ -312,7 +312,7 @@ where
 
             return match load().await {
                 // The cached value only while the store still holds it: the load may have
-                // outlasted its TTL or the store's own cap, or a write may have removed it.
+                // outlasted its TTL or the store's local TTL, or a write may have removed it.
                 Err(error) => match read().await {
                     Ok(Some(entry)) => {
                         tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");

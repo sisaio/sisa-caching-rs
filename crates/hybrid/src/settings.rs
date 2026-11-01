@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use sisa_caching_core::{
     cache::CacheError,
     settings::{CacheSettings, NoUnknownFields, check_duration},
@@ -10,9 +10,9 @@ use sisa_caching_core::{
 use sisa_caching_memory::settings::InMemoryCacheSettings;
 use sisa_caching_redis::settings::{DEFAULT_SCAN_BATCH_SIZE, RedisCacheSettings};
 
-/// The default local `max_ttl_secs`: the longest a node serves a stale copy when a lost
-/// invalidation goes unnoticed.
-pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
+/// The default local `ttl_secs`: the longest a node keeps a copy, and so serves a stale one when a
+/// lost invalidation goes unnoticed.
+pub const DEFAULT_LOCAL_TTL_SECS: u64 = 60;
 
 /// Everything a hybrid store is configured with, as one config section. The shared settings sit
 /// at the top, beside the sections for the two layers and the worker, and an unknown field fails:
@@ -21,16 +21,16 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 /// # use sisa_caching_hybrid::settings::HybridCacheSettings;
 /// let settings: HybridCacheSettings = serde_json::from_str(
 ///     r#"{
-///         "ttl_secs": 300,
+///         "default_ttl_secs": 300,
 ///         "lock_timeout_ms": 5000,
-///         "local": { "max_entries": 100000, "max_ttl_secs": 60 },
+///         "local": { "ttl_secs": 60, "max_entries": 100000 },
 ///         "distributed": { "scan_batch_size": 500 },
 ///         "worker": { "heartbeat_timeout_ms": 3000 }
 ///     }"#,
 /// )?;
 ///
-/// assert_eq!(settings.common.ttl_secs, Some(300));
-/// assert_eq!(settings.local.max_ttl_secs, Some(60));
+/// assert_eq!(settings.common.default_ttl_secs, Some(300));
+/// assert_eq!(settings.local.ttl_secs, 60);
 /// assert_eq!(settings.worker.reconnect_delay_ms, 100);
 /// # Ok::<(), serde_json::Error>(())
 /// ```
@@ -38,9 +38,9 @@ pub const DEFAULT_LOCAL_MAX_TTL_SECS: u64 = 60;
 #[serde(default)]
 #[non_exhaustive]
 pub struct HybridCacheSettings {
-    /// The default TTL, refresh-ahead and the `get_or_set` lock wait of every hybrid call. Both
-    /// layers follow them: a write stores its TTL in the distributed store, and a node's local
-    /// copy keeps the entry's own TTL, capped at `local.max_ttl_secs`.
+    /// The default TTL, refresh-ahead and the `get_or_set` lock wait of every hybrid call. A write
+    /// stores its TTL in the distributed store, where an entry without one stays until removed. A
+    /// node's local copy always expires: after `local.ttl_secs`, or with the entry if sooner.
     #[serde(flatten)]
     pub common: CacheSettings,
 
@@ -73,7 +73,7 @@ impl Default for HybridCacheSettings {
 }
 
 impl HybridCacheSettings {
-    /// Fails when a setting is out of range, such as a TTL over 365 days, a local cap of 0 or a
+    /// Fails when a setting is out of range, such as a TTL over 365 days, a local TTL of 0 or a
     /// heartbeat interval of 0.
     pub fn validate(&self) -> Result<(), CacheError> {
         self.common.validate()?;
@@ -83,18 +83,18 @@ impl HybridCacheSettings {
     }
 }
 
-/// The in-memory layer of a hybrid store. It holds no TTL settings: its copies keep the TTL each
-/// entry was written with, capped at `max_ttl_secs`.
+/// The in-memory layer of a hybrid store. Its copies always expire: after `ttl_secs`, or when
+/// the entry they copy does, if that is sooner.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct LocalSettings {
-    /// The longest a node keeps a local copy, whatever the entry's TTL, and so the longest it
-    /// serves a stale one when an invalidation is lost and nothing notices:
-    /// [`DEFAULT_LOCAL_MAX_TTL_SECS`] by default, and when a config file leaves it out or sets it
-    /// to null. Only code can turn the cap off, with `None`; `validate` rejects `0`.
-    #[serde(deserialize_with = "max_ttl_secs")]
-    pub max_ttl_secs: Option<u64>,
+    /// How long a node keeps a local copy: [`DEFAULT_LOCAL_TTL_SECS`] by default. A copy never
+    /// outlives its entry, so one with a shorter TTL left expires with it. It is also the longest
+    /// a node serves a stale copy when an invalidation is lost and nothing notices, so local
+    /// copies can't be kept for good, even of an entry the distributed store keeps until
+    /// removed. `validate` rejects `0`.
+    pub ttl_secs: u64,
 
     /// The most copies a node holds, as [`InMemoryCacheSettings::max_entries`] says. `None`, the
     /// default, sets no limit.
@@ -114,7 +114,7 @@ impl Default for LocalSettings {
         let memory = InMemoryCacheSettings::default();
 
         Self {
-            max_ttl_secs: Some(DEFAULT_LOCAL_MAX_TTL_SECS),
+            ttl_secs: DEFAULT_LOCAL_TTL_SECS,
             max_entries: memory.max_entries,
             purge_interval_secs: memory.purge_interval_secs,
             shards: memory.shards,
@@ -122,24 +122,21 @@ impl Default for LocalSettings {
     }
 }
 
-/// Reads `max_ttl_secs`, keeping the default cap for a null.
-fn max_ttl_secs<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
-    Ok(Some(
-        Option::<u64>::deserialize(deserializer)?.unwrap_or(DEFAULT_LOCAL_MAX_TTL_SECS),
-    ))
-}
-
 impl LocalSettings {
-    /// Fails when a setting is 0, or `max_ttl_secs` or `purge_interval_secs` is over 365 days.
+    /// Fails when a setting is 0, or `ttl_secs` or `purge_interval_secs` is over 365 days.
     pub fn validate(&self) -> Result<(), CacheError> {
-        check_duration("max_ttl_secs", self.max_ttl(), "use None for no cap")?;
+        check_duration(
+            "ttl_secs",
+            self.ttl(),
+            "local copies need a TTL of at least 1 second",
+        )?;
 
         self.memory_settings(&CacheSettings::default()).validate()
     }
 
-    /// `max_ttl_secs` as a `Duration`, or `None` when a node keeps each copy for its whole TTL.
-    pub fn max_ttl(&self) -> Option<Duration> {
-        self.max_ttl_secs.map(Duration::from_secs)
+    /// `ttl_secs` as a `Duration`.
+    pub fn ttl(&self) -> Duration {
+        Duration::from_secs(self.ttl_secs)
     }
 
     /// The memory store's settings for the local layer, with the hybrid's `common`.
@@ -282,33 +279,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_copies_are_capped_at_60_seconds_unless_set_otherwise() {
-        let cap = |json| {
-            serde_json::from_str::<HybridCacheSettings>(json)
-                .unwrap()
-                .local
-                .max_ttl()
-        };
-        let minute = Some(Duration::from_secs(60));
+    fn local_copies_expire_after_60_seconds_unless_set_otherwise() {
+        let read = |json| serde_json::from_str::<HybridCacheSettings>(json);
+        let ttl = |json| read(json).unwrap().local.ttl();
+        let minute = Duration::from_secs(60);
 
-        assert_eq!(HybridCacheSettings::default().local.max_ttl(), minute);
-        assert_eq!(cap("{}"), minute);
-        assert_eq!(cap(r#"{ "local": { "max_entries": 1000 } }"#), minute);
-        assert_eq!(cap(r#"{ "local": { "max_ttl_secs": null } }"#), minute);
+        assert_eq!(HybridCacheSettings::default().local.ttl(), minute);
+        assert_eq!(ttl("{}"), minute);
+        assert_eq!(ttl(r#"{ "local": { "max_entries": 1000 } }"#), minute);
         assert_eq!(
-            cap(r#"{ "local": { "max_ttl_secs": 5 } }"#),
-            Some(Duration::from_secs(5))
+            ttl(r#"{ "local": { "ttl_secs": 5 } }"#),
+            Duration::from_secs(5)
+        );
+        assert!(
+            read(r#"{ "local": { "ttl_secs": null } }"#).is_err(),
+            "local copies always expire"
         );
     }
 
     #[test]
     fn a_misspelled_or_misplaced_setting_fails_to_read() {
         for json in [
-            r#"{ "ttl_sec": 300 }"#,
-            r#"{ "common": { "ttl_secs": 300 } }"#,
-            r#"{ "local": { "ttl_secs": 300 } }"#,
-            r#"{ "distributed": { "ttl_secs": 300 } }"#,
-            r#"{ "worker": { "ttl_secs": 300 } }"#,
+            r#"{ "default_ttl_sec": 300 }"#,
+            r#"{ "ttl_secs": 300 }"#,
+            r#"{ "common": { "default_ttl_secs": 300 } }"#,
+            r#"{ "local": { "default_ttl_secs": 300 } }"#,
+            r#"{ "distributed": { "default_ttl_secs": 300 } }"#,
+            r#"{ "worker": { "default_ttl_secs": 300 } }"#,
         ] {
             assert!(
                 serde_json::from_str::<HybridCacheSettings>(json).is_err(),
@@ -345,11 +342,15 @@ mod tests {
         assert!(heartbeat(1_000, year_ms).validate().is_ok());
 
         for (field, settings) in [
+            ("ttl_secs", from_json(r#"{ "local": { "ttl_secs": 0 } }"#)),
             (
-                "max_ttl_secs",
-                from_json(r#"{ "local": { "max_ttl_secs": 0 } }"#),
+                "ttl_secs",
+                from_json(r#"{ "local": { "ttl_secs": 31536001 } }"#),
             ),
-            ("ttl_secs", from_json(r#"{ "ttl_secs": 0 }"#)),
+            (
+                "default_ttl_secs",
+                from_json(r#"{ "default_ttl_secs": 0 }"#),
+            ),
             (
                 "max_entries",
                 from_json(r#"{ "local": { "max_entries": 0 } }"#),
