@@ -60,8 +60,6 @@ where
     E: Send,
 {
     let (settings, locker, clock) = (store.cache_settings(), store.locker(), store.clock());
-    // The locks go by the store's full key, built only when a call locks: a hit never needs it.
-    let full_key = || store.name().format_key(key);
     // Loads, records how long it took, and stores what it got.
     let load_and_set = async move || {
         let started = Instant::now();
@@ -102,7 +100,7 @@ where
     Box::pin(async move {
         if let Some(entry) = due_entry {
             // One caller refreshes; the rest are served the cached value meanwhile.
-            let Some(_guard) = locker.try_lock(&full_key()) else {
+            let Some(_guard) = locker.try_lock(key) else {
                 return Ok(entry.value);
             };
 
@@ -129,7 +127,7 @@ where
         }
 
         let _guard = match settings.lock_timeout() {
-            Some(timeout) => match tokio::time::timeout(timeout, locker.lock(&full_key())).await {
+            Some(timeout) => match tokio::time::timeout(timeout, locker.lock(key)).await {
                 Ok(guard) => Some(guard),
                 Err(_) => {
                     // Another caller's load is still running: this one loads too, without the lock.
@@ -138,7 +136,7 @@ where
                     None
                 }
             },
-            None => Some(locker.lock(&full_key()).await),
+            None => Some(locker.lock(key).await),
         };
 
         // Another caller may have stored the value while this one waited. On a value of another
@@ -216,7 +214,8 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     fn cache_settings(&self) -> &CacheSettings;
 
     /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are
-    /// failing. A store holds one `Locker::default()` and returns it here.
+    /// failing. A store holds a `Locker::default()` of its own, which its clones share, and
+    /// returns it here: the locks go by the key alone, so two stores never share a `Locker`.
     #[doc(hidden)]
     fn locker(&self) -> &Locker;
 
