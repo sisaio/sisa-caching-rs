@@ -66,5 +66,5 @@ pub use redis;
 
 pub use connection::{RedisConnection, SentinelConnection, connection_config};
 pub use error::RedisCacheError;
-pub use settings::RedisCacheSettings;
+pub use settings::{RedisCacheSettings, RedisSettings};
 pub use store::RedisCacheStore;

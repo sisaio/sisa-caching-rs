@@ -17,7 +17,7 @@
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Settings are built from a default, so a later release can add one without breaking this.
 //! let mut settings = InMemoryCacheSettings::default();
-//! settings.max_entries = Some(10_000);
+//! settings.memory.max_entries = Some(10_000);
 //! let cache = InMemoryCacheStore::new("app")?.with_settings(settings)?;
 //!
 //! cache.set("user:v1:42", "Ada".to_string(), CacheOptions::with_ttl(Duration::from_secs(60))).await?;
@@ -28,14 +28,14 @@
 //! ```
 //!
 //! An expired entry reads as a miss and stays until it is overwritten, a full store trims, or a
-//! purge drops it. The store purges every `purge_interval_secs` of its settings, 60 seconds by
-//! default. To purge on a schedule of your own, turn that off and call `purge`:
+//! purge drops it. The store purges every `memory.purge_interval_secs` of its settings, 60
+//! seconds by default. To purge on a schedule of your own, turn that off and call `purge`:
 //!
 //! ```
 //! use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
 //!
 //! let mut settings = InMemoryCacheSettings::default();
-//! settings.purge_interval_secs = None;
+//! settings.memory.purge_interval_secs = None;
 //! let cache = InMemoryCacheStore::new("app")?.with_settings(settings)?;
 //!
 //! // From your own scheduler:
@@ -51,5 +51,5 @@
 pub mod settings;
 pub mod store;
 
-pub use settings::InMemoryCacheSettings;
+pub use settings::{InMemoryCacheSettings, MemorySettings};
 pub use store::InMemoryCacheStore;

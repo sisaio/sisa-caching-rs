@@ -15,7 +15,7 @@ async fn a_store_counts_hits_misses_and_evictions() {
         .unwrap()
         .with_settings({
             let mut settings = InMemoryCacheSettings::default();
-            settings.max_entries = Some(10);
+            settings.memory.max_entries = Some(10);
             settings
         })
         .unwrap();

@@ -52,8 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut settings = InMemoryCacheSettings::default();
             settings.common.default_ttl_secs = Some(300);
             settings.common.lock_timeout_ms = Some(5_000);
-            settings.max_entries = Some(10_000);
-            settings.purge_interval_secs = Some(60);
+            settings.memory.max_entries = Some(10_000);
+            settings.memory.purge_interval_secs = Some(60);
 
             users_api::router(InMemoryCacheStore::new("example")?.with_settings(settings)?)
         }
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings.common.default_ttl_secs = Some(600);
             settings.common.refresh_threshold = Some(0.8);
             settings.common.lock_timeout_ms = Some(5_000);
-            settings.local.max_entries = Some(10_000);
+            settings.local.memory.max_entries = Some(10_000);
             settings.local.ttl_secs = 60;
 
             // The local layer, the Redis store, the backplane, and the worker that applies other

@@ -47,7 +47,7 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
     let settings = {
         let mut settings = HybridCacheSettings::default();
         settings.common.default_ttl_secs = Some(300);
-        settings.local.max_entries = Some(1_000);
+        settings.local.memory.max_entries = Some(1_000);
         settings.distributed.scan_batch_size = 500;
         settings
     };
@@ -63,8 +63,14 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
     }
 
     assert_eq!(reader.cache_settings(), &settings.common);
-    assert_eq!(reader.local_store().settings().max_entries, Some(1_000));
-    assert_eq!(reader.distributed_store().settings().scan_batch_size, 500);
+    assert_eq!(
+        reader.local_store().settings().memory.max_entries,
+        Some(1_000)
+    );
+    assert_eq!(
+        reader.distributed_store().settings().redis.scan_batch_size,
+        500
+    );
 
     assert_a_write_reaches(&writer, &reader).await;
 

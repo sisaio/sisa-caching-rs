@@ -114,7 +114,7 @@ async fn remove_prefix_removes_whole_levels_on_every_scan_page() {
         .await
         .with_settings({
             let mut settings = RedisCacheSettings::default();
-            settings.scan_batch_size = 5;
+            settings.redis.scan_batch_size = 5;
             settings
         })
         .unwrap();
