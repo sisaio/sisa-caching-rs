@@ -46,6 +46,36 @@ fn escape_glob(text: &str) -> String {
     escaped
 }
 
+/// The entry a hash's fields and its `PTTL` reply hold, counting its time left from
+/// `requested_at`, or `None` when the key is missing or has expired.
+fn stored_entry<CV: CacheValue>(
+    (encoded_value, created_at_ms, ttl_ms): StoredFields,
+    pttl_ms: i64,
+    requested_at: SystemTime,
+) -> serde_json::Result<Option<CacheEntry<CV>>> {
+    // PTTL is -1 for a key without expiry and -2 for a missing one.
+    let Some(encoded_value) = encoded_value.filter(|_| pttl_ms >= -1) else {
+        return Ok(None);
+    };
+    // No expiry, or a deadline past what the platform's clock can hold, which never comes.
+    let expires_at = u64::try_from(pttl_ms)
+        .ok()
+        .and_then(|ms| requested_at.checked_add(Duration::from_millis(ms)));
+    // A creation time past what the platform's clock can hold, which only another writer can
+    // store, reads as the epoch, as a missing one does.
+    let created_at = created_at_ms
+        .and_then(|ms| SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let entry = CacheEntry::new(
+        serde_json::from_slice(&encoded_value)?,
+        created_at,
+        ttl_ms.map(Duration::from_millis),
+    )
+    .with_expires_at(expires_at);
+
+    Ok((!entry.is_expired(SystemClock.now())).then_some(entry))
+}
+
 /// A store on a Redis-family server. One store holds values of every type as JSON; `get::<User>`
 /// and `set(&key, user, None)` name the type per call. Reads decode the JSON into the type you
 /// name, and nothing in Redis records a Rust type, so other languages can share the keys.
@@ -252,7 +282,7 @@ where
         let mut conn = self.conn.clone();
         // The countdown starts before the request, so a slow reply can only shorten it.
         let requested_at = SystemClock.now();
-        let ((encoded_value, created_at_ms, ttl_ms), pttl_ms): (StoredFields, i64) = redis::pipe()
+        let (fields, pttl_ms): (StoredFields, i64) = redis::pipe()
             .atomic()
             .cmd("HMGET")
             .arg(&redis_key)
@@ -263,42 +293,12 @@ where
             .arg(&redis_key)
             .query_async(&mut conn)
             .await?;
-
-        let Some(encoded_value) = encoded_value else {
-            self.reads.record(false);
-
-            return Ok(None);
-        };
-        // PTTL is -1 for a key without expiry and -2 for a missing one.
-        let expires_at = match pttl_ms {
-            -1 => None,
-            ms if ms < 0 => {
-                self.reads.record(false);
-
-                return Ok(None);
-            }
-            // A deadline past what the platform's clock can hold never comes.
-            ms => requested_at.checked_add(Duration::from_millis(ms as u64)),
-        };
-        // A creation time past what the platform's clock can hold, which only another writer can
-        // store, reads as the epoch, as a missing one does.
-        let created_at = created_at_ms
-            .and_then(|ms| SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-        let value = serde_json::from_slice(&encoded_value);
+        let entry = stored_entry(fields, pttl_ms, requested_at);
 
         // Data that doesn't decode is a miss too: the caller gets no value.
-        if value.is_err() {
-            self.reads.record(false);
-        }
+        self.reads.record(matches!(entry, Ok(Some(_))));
 
-        let entry = CacheEntry::new(value?, created_at, ttl_ms.map(Duration::from_millis))
-            .with_expires_at(expires_at);
-
-        let entry = (!entry.is_expired(SystemClock.now())).then_some(entry);
-        self.reads.record(entry.is_some());
-
-        Ok(entry)
+        Ok(entry?)
     }
 
     #[tracing::instrument(level = "debug", name = "redis set", skip_all, fields(key = %self.name.format_key(key)), err(level = "debug"))]

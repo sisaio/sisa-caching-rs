@@ -87,7 +87,7 @@ where
     };
     let needs_refresh = |entry: &CacheEntry<CV>| {
         settings
-            .refresh_threshold()
+            .refresh_threshold
             .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
     };
 

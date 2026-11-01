@@ -131,11 +131,6 @@ impl CacheSettings {
     pub fn lock_timeout(&self) -> Option<Duration> {
         self.lock_timeout_ms.map(Duration::from_millis)
     }
-
-    /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off.
-    pub fn refresh_threshold(&self) -> Option<f64> {
-        self.refresh_threshold
-    }
 }
 
 #[cfg(test)]
@@ -148,7 +143,7 @@ mod tests {
 
         assert_eq!(settings.lock_timeout(), Some(Duration::from_secs(30)));
         assert_eq!(settings.default_ttl(), None);
-        assert_eq!(settings.refresh_threshold(), None);
+        assert_eq!(settings.refresh_threshold, None);
     }
 
     #[test]
