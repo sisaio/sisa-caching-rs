@@ -8,7 +8,7 @@ use sisa_caching_core::{
     settings::{CacheSettings, NoUnknownFields, check_duration},
 };
 use sisa_caching_memory::settings::InMemoryCacheSettings;
-use sisa_caching_redis::settings::{DEFAULT_SCAN_BATCH_SIZE, RedisCacheSettings};
+use sisa_caching_redis::settings::RedisCacheSettings;
 
 /// The default local `ttl_secs`: the longest a node keeps a copy, and so serves a stale one when a
 /// lost invalidation goes unnoticed.
@@ -157,14 +157,14 @@ impl LocalSettings {
 #[non_exhaustive]
 pub struct DistributedSettings {
     /// How many keys each `SCAN` asks for, as [`RedisCacheSettings::scan_batch_size`] says:
-    /// [`DEFAULT_SCAN_BATCH_SIZE`] by default.
+    /// 1,000 by default.
     pub scan_batch_size: u32,
 }
 
 impl Default for DistributedSettings {
     fn default() -> Self {
         Self {
-            scan_batch_size: DEFAULT_SCAN_BATCH_SIZE,
+            scan_batch_size: RedisCacheSettings::default().scan_batch_size,
         }
     }
 }

@@ -6,9 +6,6 @@ use sisa_caching_core::{
     settings::{CacheSettings, NoUnknownFields},
 };
 
-/// The default [`RedisCacheSettings::scan_batch_size`].
-pub const DEFAULT_SCAN_BATCH_SIZE: u32 = 1000;
-
 /// Settings for a [`RedisCacheStore`](crate::store::RedisCacheStore). In a config file the
 /// shared settings sit beside the Redis store's own, and an unknown field fails, so a misspelled
 /// setting can't silently keep its default:
@@ -31,8 +28,8 @@ pub struct RedisCacheSettings {
     pub common: CacheSettings,
 
     /// How many keys each `SCAN` asks for while `remove_prefix` or `clear` walks the store's
-    /// keys. Redis treats it as a hint and may return more or fewer. A larger batch means fewer
-    /// round trips but more server work per call. `validate` rejects `0`.
+    /// keys: 1,000 by default. Redis treats it as a hint and may return more or fewer. A larger
+    /// batch means fewer round trips but more server work per call. `validate` rejects `0`.
     pub scan_batch_size: u32,
 
     // Last, so it sees only the fields no other one took, and fails on them.
@@ -44,7 +41,8 @@ impl Default for RedisCacheSettings {
     fn default() -> Self {
         Self {
             common: CacheSettings::default(),
-            scan_batch_size: DEFAULT_SCAN_BATCH_SIZE,
+            // A hundred times Redis's own `COUNT` default of 10, so a walk takes few round trips.
+            scan_batch_size: 1_000,
             unknown_fields: NoUnknownFields,
         }
     }
