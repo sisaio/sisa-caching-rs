@@ -253,6 +253,42 @@ async fn one_store_serves_many_value_types() {
     );
 }
 
+/// A value that counts how many times it was cloned, in all.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Counted(String);
+
+static CLONES: AtomicUsize = AtomicUsize::new(0);
+
+// Counts each clone, so a test can tell how many copies a read made.
+impl Clone for Counted {
+    fn clone(&self) -> Self {
+        CLONES.fetch_add(1, Ordering::SeqCst);
+        Self(self.0.clone())
+    }
+}
+
+#[tokio::test]
+async fn a_read_with_local_reads_off_makes_no_copy_for_the_local_layer() {
+    let redis = Redis::start().await;
+    let distributed = memory("users");
+    let node = node(&distributed, &redis).await;
+
+    distributed
+        .set(&key(1), Counted("ada".to_owned()), None)
+        .await
+        .unwrap();
+    node.shutdown().await;
+
+    let before = CLONES.load(Ordering::SeqCst);
+
+    assert!(node.get::<Counted>(&key(1)).await.unwrap().is_some());
+    assert_eq!(
+        CLONES.load(Ordering::SeqCst) - before,
+        1,
+        "only the distributed memory store's own clone"
+    );
+}
+
 #[tokio::test]
 async fn clones_share_both_layers() {
     let redis = Redis::start().await;
