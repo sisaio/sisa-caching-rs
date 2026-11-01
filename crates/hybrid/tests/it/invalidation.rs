@@ -28,8 +28,9 @@ use sisa_caching_testing::{Logs, Redis, eventually};
 use tokio::sync::Notify;
 
 #[tokio::test]
-async fn every_write_evicts_the_copy_on_other_nodes() {
+async fn every_write_evicts_only_the_copies_it_changes_on_other_nodes() {
     let redis = Redis::start().await;
+    let team = CacheKey::new("team", "1").unwrap();
 
     for write in WRITES {
         let distributed = memory("users");
@@ -40,7 +41,14 @@ async fn every_write_evicts_the_copy_on_other_nodes() {
             .set(&key(1), "old".to_owned(), None)
             .await
             .unwrap();
+        distributed
+            .set(&team, "core".to_owned(), None)
+            .await
+            .unwrap();
         reader.get::<String>(&key(1)).await.unwrap();
+        reader.get::<String>(&team).await.unwrap();
+        assert_eq!(local_value(&reader, &key(1)).await.as_deref(), Some("old"));
+        assert_eq!(local_value(&reader, &team).await.as_deref(), Some("core"));
 
         write.run(&writer).await.unwrap();
 
@@ -54,35 +62,13 @@ async fn every_write_evicts_the_copy_on_other_nodes() {
             write.result(),
             "{write:?}"
         );
+        // Nothing but a clear touches `team:1`, and a clear empties the local layer at once.
+        assert_eq!(
+            local_value(&reader, &team).await.as_deref(),
+            (!matches!(write, Write::Clear)).then_some("core"),
+            "{write:?}: only a clear evicts another prefix"
+        );
     }
-}
-
-#[tokio::test]
-async fn a_prefix_removal_keeps_the_copies_under_other_prefixes() {
-    let redis = Redis::start().await;
-    let distributed = memory("users");
-    let writer = node(&distributed, &redis).await;
-    let reader = node(&distributed, &redis).await;
-    let team = CacheKey::new("team", "1").unwrap();
-
-    distributed
-        .set(&key(1), "ada".to_owned(), None)
-        .await
-        .unwrap();
-    distributed
-        .set(&team, "core".to_owned(), None)
-        .await
-        .unwrap();
-    reader.get::<String>(&key(1)).await.unwrap();
-    reader.get::<String>(&team).await.unwrap();
-
-    writer.remove_prefix("user").await.unwrap();
-
-    eventually("the reader drops the prefix", async || {
-        local_value(&reader, &key(1)).await.is_none()
-    })
-    .await;
-    assert_eq!(local_value(&reader, &team).await.as_deref(), Some("core"));
 }
 
 #[tokio::test]
