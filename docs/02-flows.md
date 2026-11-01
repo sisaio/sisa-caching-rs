@@ -102,7 +102,7 @@ sequenceDiagram
     App->>Store: set_entry(key, entry)
     Store->>Store: encode the value as JSON
     Store->>Redis: MULTI, DEL key, HSET key value created_at ttl_ms, PEXPIRE key remaining_ms, EXEC
-    Note over Store,Redis: An already expired entry only sends DEL; one that never expires gets no PEXPIRE.
+    Note over Store,Redis: An already expired entry only sends DEL, and one that never expires gets no PEXPIRE.
     Redis-->>Store: OK
     Store-->>App: Ok
 
