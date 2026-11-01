@@ -66,16 +66,16 @@ pub use sisa_caching_core::{
 };
 
 #[cfg(feature = "memory")]
-pub use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore};
+pub use sisa_caching_memory::{InMemoryCacheSettings, InMemoryCacheStore, MemorySettings};
 
 #[cfg(feature = "redis")]
 pub use sisa_caching_redis::{
-    RedisCacheError, RedisCacheSettings, RedisCacheStore, RedisConnection, SentinelConnection,
-    connection_config, redis,
+    RedisCacheError, RedisCacheSettings, RedisCacheStore, RedisConnection, RedisSettings,
+    SentinelConnection, connection_config, redis,
 };
 
 #[cfg(feature = "hybrid")]
 pub use sisa_caching_hybrid::{
     HybridCacheError, HybridCacheSettings, HybridCacheStore, RedisBackplane, RedisHybridCacheStore,
-    settings::{BackplaneWorkerSettings, DistributedSettings, LocalSettings},
+    settings::{BackplaneWorkerSettings, LocalSettings},
 };

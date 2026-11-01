@@ -23,7 +23,7 @@ fn store(shards: usize) -> InMemoryCacheStore {
         .unwrap()
         .with_settings({
             let mut settings = InMemoryCacheSettings::default();
-            settings.shards = Some(shards);
+            settings.memory.shards = Some(shards);
             settings
         })
         .unwrap()
@@ -182,7 +182,7 @@ fn large(c: &mut Criterion) {
         .unwrap()
         .with_settings({
             let mut settings = InMemoryCacheSettings::default();
-            settings.max_entries = Some(ENTRIES as usize);
+            settings.memory.max_entries = Some(ENTRIES as usize);
             settings
         })
         .unwrap();

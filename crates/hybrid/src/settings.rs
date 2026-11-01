@@ -7,8 +7,8 @@ use sisa_caching_core::{
     cache::CacheError,
     settings::{CacheSettings, NoUnknownFields, check_duration},
 };
-use sisa_caching_memory::settings::InMemoryCacheSettings;
-use sisa_caching_redis::settings::RedisCacheSettings;
+use sisa_caching_memory::settings::{InMemoryCacheSettings, MemorySettings};
+use sisa_caching_redis::settings::{RedisCacheSettings, RedisSettings};
 
 /// Everything a hybrid store is configured with, as one config section. The shared settings sit
 /// at the top, beside the sections for the two layers and the worker, and an unknown field fails:
@@ -43,10 +43,11 @@ pub struct HybridCacheSettings {
     /// The in-memory layer on each node.
     pub local: LocalSettings,
 
-    /// The Redis store that [`connect`](crate::store::HybridCacheStore::connect) builds. A store
-    /// built with [`new`](crate::store::HybridCacheStore::new) takes the distributed store as it
-    /// was built, so this goes unread there.
-    pub distributed: DistributedSettings,
+    /// The Redis store's own settings, for the one
+    /// [`connect`](crate::store::HybridCacheStore::connect) builds. It holds no TTL settings: the
+    /// hybrid store's own apply. A store built with [`new`](crate::store::HybridCacheStore::new)
+    /// takes the distributed store as it was built, so this goes unread there.
+    pub distributed: RedisSettings,
 
     /// The backplane worker's settings: how it subscribes again and checks heartbeats.
     pub worker: BackplaneWorkerSettings,
@@ -61,7 +62,7 @@ impl Default for HybridCacheSettings {
         Self {
             common: CacheSettings::default(),
             local: LocalSettings::default(),
-            distributed: DistributedSettings::default(),
+            distributed: RedisSettings::default(),
             worker: BackplaneWorkerSettings::default(),
             unknown_fields: NoUnknownFields,
         }
@@ -77,12 +78,31 @@ impl HybridCacheSettings {
         self.distributed.validate()?;
         self.worker.validate()
     }
+
+    /// The memory store's settings for the local layer: the hybrid's `common` and `local`.
+    pub(crate) fn memory_settings(&self) -> InMemoryCacheSettings {
+        let mut settings = InMemoryCacheSettings::default();
+        settings.common = self.common.clone();
+        settings.memory = self.local.memory.clone();
+
+        settings
+    }
+
+    /// The Redis store's settings for the distributed layer. Its TTL settings stay unset, as
+    /// hybrid calls read the hybrid store's.
+    pub(crate) fn redis_settings(&self) -> RedisCacheSettings {
+        let mut settings = RedisCacheSettings::default();
+        settings.redis = self.distributed.clone();
+
+        settings
+    }
 }
 
-/// The in-memory layer of a hybrid store. Its copies always expire: after `ttl_secs`, or when
-/// the entry they copy does, if that is sooner.
+/// The in-memory layer of a hybrid store: how long its copies live, and the memory store's own
+/// settings beside it. Its copies always expire: after `ttl_secs`, or when the entry they copy
+/// does, if that is sooner.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 #[non_exhaustive]
 pub struct LocalSettings {
     /// How long a node keeps a local copy: 60 seconds by default. A copy never outlives its
@@ -92,35 +112,30 @@ pub struct LocalSettings {
     /// rejects `0`.
     pub ttl_secs: u64,
 
-    /// The most copies a node holds, as [`InMemoryCacheSettings::max_entries`] says. `None`, the
-    /// default, sets no limit.
-    pub max_entries: Option<usize>,
+    /// The memory store's own settings for the copies: `max_entries`, `purge_interval_secs` and
+    /// `shards`, which sit beside `ttl_secs` in a config file.
+    #[serde(flatten)]
+    pub memory: MemorySettings,
 
-    /// How often a node drops its expired copies, as
-    /// [`InMemoryCacheSettings::purge_interval_secs`] says: 60 seconds by default.
-    pub purge_interval_secs: Option<u64>,
-
-    /// How many maps the copies are split over, as [`InMemoryCacheSettings::shards`] says: 16 by
-    /// default.
-    pub shards: Option<usize>,
+    // Last, so it sees only the fields no other one took, and fails on them.
+    #[serde(flatten, skip_serializing)]
+    pub(crate) unknown_fields: NoUnknownFields,
 }
 
+// A minute bounds how long a lost invalidation leaves a node serving a stale copy.
 impl Default for LocalSettings {
     fn default() -> Self {
-        let memory = InMemoryCacheSettings::default();
-
         Self {
-            // A minute bounds how long a lost invalidation leaves a node serving a stale copy.
             ttl_secs: 60,
-            max_entries: memory.max_entries,
-            purge_interval_secs: memory.purge_interval_secs,
-            shards: memory.shards,
+            memory: MemorySettings::default(),
+            unknown_fields: NoUnknownFields,
         }
     }
 }
 
 impl LocalSettings {
-    /// Fails when a setting is 0, or `ttl_secs` or `purge_interval_secs` is over 365 days.
+    /// Fails when `ttl_secs` is 0 or over 365 days, or a memory setting is out of range, as
+    /// [`MemorySettings::validate`] says.
     pub fn validate(&self) -> Result<(), CacheError> {
         check_duration(
             "ttl_secs",
@@ -128,57 +143,12 @@ impl LocalSettings {
             "local copies need a TTL of at least 1 second",
         )?;
 
-        self.memory_settings(&CacheSettings::default()).validate()
+        self.memory.validate()
     }
 
     /// `ttl_secs` as a `Duration`.
     pub fn ttl(&self) -> Duration {
         Duration::from_secs(self.ttl_secs)
-    }
-
-    /// The memory store's settings for the local layer, with the hybrid's `common`.
-    pub(crate) fn memory_settings(&self, common: &CacheSettings) -> InMemoryCacheSettings {
-        let mut memory = InMemoryCacheSettings::default();
-        memory.common = common.clone();
-        memory.max_entries = self.max_entries;
-        memory.purge_interval_secs = self.purge_interval_secs;
-        memory.shards = self.shards;
-
-        memory
-    }
-}
-
-/// The Redis store of a hybrid store. It holds no TTL settings: the hybrid store's own apply.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-#[non_exhaustive]
-pub struct DistributedSettings {
-    /// How many keys each `SCAN` asks for, as [`RedisCacheSettings::scan_batch_size`] says:
-    /// 1,000 by default.
-    pub scan_batch_size: u32,
-}
-
-impl Default for DistributedSettings {
-    fn default() -> Self {
-        Self {
-            scan_batch_size: RedisCacheSettings::default().scan_batch_size,
-        }
-    }
-}
-
-impl DistributedSettings {
-    /// Fails when `scan_batch_size` is 0.
-    pub fn validate(&self) -> Result<(), CacheError> {
-        self.redis_settings().validate()
-    }
-
-    /// The Redis store's settings for the distributed layer. Its own TTL settings stay unset:
-    /// hybrid calls read the hybrid store's.
-    pub(crate) fn redis_settings(&self) -> RedisCacheSettings {
-        let mut redis = RedisCacheSettings::default();
-        redis.scan_batch_size = self.scan_batch_size;
-
-        redis
     }
 }
 

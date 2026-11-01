@@ -130,9 +130,9 @@ impl StoredEntry {
 /// None)` name the type per call, and a read with the wrong type fails with
 /// [`CacheError::TypeMismatch`].
 ///
-/// The store drops its expired entries every `purge_interval_secs` of its settings, on a task it
-/// starts on its first write inside a tokio runtime. The task stops when the store's last clone
-/// drops. Inside a runtime, its purges, the trims of a full store and the freeing of what `clear`
+/// The store drops its expired entries every `memory.purge_interval_secs` of its settings, on a
+/// task it starts on its first write inside a tokio runtime. The task stops when the store's last
+/// clone drops. Inside a runtime, its purges, the trims of a full store and the freeing of what `clear`
 /// took run on the blocking pool, so they hold up no async thread.
 ///
 /// `C` is the clock the store reads the time from, [`SystemClock`] unless
@@ -174,7 +174,7 @@ impl InMemoryCacheStore {
             reads: METRICS.reads(&name, Layer::Memory),
             name,
             clock: SystemClock,
-            entries: Arc::new(Entries::new(settings.shards())),
+            entries: Arc::new(Entries::new(settings.memory.shards())),
             local_ttl: None,
             settings,
             locker: Arc::default(),
@@ -205,7 +205,7 @@ impl<C: Clock> InMemoryCacheStore<C> {
     /// over `shards` maps.
     pub fn with_settings(mut self, settings: InMemoryCacheSettings) -> Result<Self, CacheError> {
         settings.validate()?;
-        self.entries = Arc::new(Entries::new(settings.shards()));
+        self.entries = Arc::new(Entries::new(settings.memory.shards()));
         // New entries need a purge of their own; the store this came from keeps its own.
         self.worker = Worker::new();
         self.settings = settings;
@@ -258,7 +258,7 @@ impl<C: Clock> InMemoryCacheStore<C> {
         entry: CacheEntry<CV>,
     ) -> impl Send + use<C, CV> {
         // Entries only come in here, so the purge starts with the first one.
-        if let Some(interval) = self.settings.purge_interval() {
+        if let Some(interval) = self.settings.memory.purge_interval() {
             self.worker
                 .start("in-memory-cache-purge-worker", &self.name, || {
                     purge_every(self.for_worker(), interval)
@@ -297,7 +297,7 @@ impl<C: Clock> InMemoryCacheStore<C> {
         // Unlock before the caller frees the value that was replaced (see `write`).
         drop(entries);
 
-        if let Some(max) = self.settings.max_entries
+        if let Some(max) = self.settings.memory.max_entries
             && self.entries.len.load(Ordering::Relaxed) > max
         {
             self.start_trim(max);
@@ -555,6 +555,7 @@ mod tests {
     use sisa_caching_testing::{Logs, ManualClock, SlowDrop, eventually};
 
     use super::*;
+    use crate::settings::MemorySettings;
 
     fn key(key: impl Display) -> CacheKey {
         CacheKey::new("user", key).unwrap()
@@ -592,7 +593,10 @@ mod tests {
 
     fn with_limit(max_entries: usize) -> InMemoryCacheSettings {
         InMemoryCacheSettings {
-            max_entries: Some(max_entries),
+            memory: MemorySettings {
+                max_entries: Some(max_entries),
+                ..MemorySettings::default()
+            },
             ..InMemoryCacheSettings::default()
         }
     }
@@ -863,7 +867,10 @@ mod tests {
         let store = store(
             &ManualClock::new(),
             InMemoryCacheSettings {
-                purge_interval_secs: None,
+                memory: MemorySettings {
+                    purge_interval_secs: None,
+                    ..MemorySettings::default()
+                },
                 ..InMemoryCacheSettings::default()
             },
         );
@@ -985,8 +992,11 @@ mod tests {
         let store = store(
             &clock,
             InMemoryCacheSettings {
-                max_entries: Some(10),
-                shards: Some(4),
+                memory: MemorySettings {
+                    max_entries: Some(10),
+                    shards: Some(4),
+                    ..MemorySettings::default()
+                },
                 ..InMemoryCacheSettings::default()
             },
         );
@@ -1388,8 +1398,11 @@ mod tests {
         let store = store(
             &clock,
             InMemoryCacheSettings {
-                max_entries: Some(2),
-                shards: Some(4),
+                memory: MemorySettings {
+                    max_entries: Some(2),
+                    shards: Some(4),
+                    ..MemorySettings::default()
+                },
                 ..InMemoryCacheSettings::default()
             },
         );
