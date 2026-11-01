@@ -11,8 +11,8 @@ use std::{
 };
 
 use crate::common::{
-    Node, WRITES, Write, backplane, fast_heartbeats, key, local_value, memory, node, publish,
-    publish_removal, start, start_with,
+    Node, WRITES, Write, backplane, fast_heartbeats, hybrid, key, local_value, memory, node,
+    publish, publish_removal, start,
 };
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
@@ -20,7 +20,7 @@ use sisa_caching_core::{
     settings::CacheSettings,
 };
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane, settings::BackplaneWorkerSettings, store::HybridCacheStore,
+    backplane::RedisBackplane, settings::HybridCacheSettings, store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::{Logs, Redis, eventually};
@@ -110,9 +110,9 @@ async fn a_node_skips_its_own_invalidations() {
 /// A node over `distributed` that sends fast heartbeats, with its backplane on `url`.
 async fn heartbeating_node(distributed: &InMemoryCacheStore, url: &str) -> Node {
     let backplane = RedisBackplane::connect(url).await.unwrap();
-    let store = HybridCacheStore::new(memory("users"), distributed.clone(), backplane).unwrap();
+    let store = HybridCacheStore::new(distributed.clone(), backplane, &fast_heartbeats()).unwrap();
 
-    start_with(store, fast_heartbeats()).await
+    start(store).await
 }
 
 /// A writer whose publishes the test can refuse, and a reader holding copies of `user:1` = `old`
@@ -324,16 +324,15 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
     let _logging = tracing::subscriber::set_default(logs.clone());
     let redis = Redis::start().await;
     // A lost subscription would read through for a minute.
-    let node = start_with(
-        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap(),
-        {
-            let mut settings = BackplaneWorkerSettings::default();
-            settings.reconnect_delay_ms = 60_000;
-            settings.max_reconnect_delay_ms = 60_000;
-            settings
-        },
-    )
-    .await;
+    let settings = {
+        let mut settings = HybridCacheSettings::default();
+        settings.worker.reconnect_delay_ms = 60_000;
+        settings.worker.max_reconnect_delay_ms = 60_000;
+        settings
+    };
+    let node =
+        start(HybridCacheStore::new(memory("users"), backplane(&redis).await, &settings).unwrap())
+            .await;
 
     for payload in [
         "not json",
@@ -367,10 +366,8 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
 #[tokio::test]
 async fn the_first_read_or_write_starts_the_worker() {
     let redis = Redis::start().await;
-    let reader =
-        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
-    let writer =
-        HybridCacheStore::new(memory("users"), memory("users"), backplane(&redis).await).unwrap();
+    let reader = hybrid(memory("users"), backplane(&redis).await).unwrap();
+    let writer = hybrid(memory("users"), backplane(&redis).await).unwrap();
 
     assert!(!reader.local_reads_enabled(), "no worker yet");
     assert!(!writer.local_reads_enabled(), "no worker yet");
@@ -568,11 +565,7 @@ async fn pausing_node(redis: &Redis) -> (HybridCacheStore<PausingStore>, Pausing
         .await
         .unwrap();
 
-    let node = start(
-        HybridCacheStore::new(memory("users"), distributed.clone(), backplane(redis).await)
-            .unwrap(),
-    )
-    .await;
+    let node = start(hybrid(distributed.clone(), backplane(redis).await).unwrap()).await;
 
     (node, distributed)
 }
@@ -743,15 +736,7 @@ async fn a_shutdown_whose_callers_give_up_still_stops_the_store() {
 async fn a_shutdown_that_gives_up_on_a_write_makes_the_other_nodes_clear() {
     let redis = Redis::start().await;
     let (writer, distributed) = pausing_node(&redis).await;
-    let reader = start(
-        HybridCacheStore::new(
-            memory("users"),
-            distributed.clone(),
-            backplane(&redis).await,
-        )
-        .unwrap(),
-    )
-    .await;
+    let reader = start(hybrid(distributed.clone(), backplane(&redis).await).unwrap()).await;
 
     reader.get::<String>(&key(1)).await.unwrap();
     distributed.pause(true);

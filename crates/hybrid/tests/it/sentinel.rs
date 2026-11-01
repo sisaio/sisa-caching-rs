@@ -1,10 +1,9 @@
 //! Hybrid nodes behind Sentinel, through a failover. Each test starts a primary, a replica and a
 //! Sentinel in Docker.
 
-use crate::common::{fast_heartbeats, key, local_value, start_with};
+use crate::common::{fast_heartbeats, key, local_value, start};
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
-use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_redis::{connection::SentinelConnection, store::RedisCacheStore};
 use sisa_caching_testing::{RedisSentinel, eventually};
 
@@ -23,14 +22,13 @@ async fn node(sentinel: &RedisSentinel) -> Node {
 }
 
 async fn node_on(conn: SentinelConnection) -> Node {
-    start_with(
+    start(
         HybridCacheStore::new(
-            InMemoryCacheStore::new("users").unwrap(),
             RedisCacheStore::new("users", conn.clone()).unwrap(),
             RedisBackplane::sentinel(conn),
+            &fast_heartbeats(),
         )
         .unwrap(),
-        fast_heartbeats(),
     )
     .await
 }

@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use redis::IntoConnectionInfo;
 use sisa_caching_core::{
-    cache::{CacheEntry, CacheStore, CacheValue, KeyPrefix},
-    clock::Clock,
+    cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
+    clock::{Clock, SystemClock},
     locker::Locker,
     metrics::{Layer, METRICS, Reads},
     settings::CacheSettings,
@@ -16,7 +16,7 @@ use tracing::Instrument;
 use crate::{
     backplane::{BackplaneMessage, Invalidation, NodeId, RedisBackplane},
     error::{HybridCacheError, Result},
-    settings::{BackplaneWorkerSettings, HybridCacheSettings, check_local_common},
+    settings::{BackplaneWorkerSettings, HybridCacheSettings},
     worker::BackplaneWorker,
 };
 
@@ -51,6 +51,8 @@ pub struct HybridCacheStore<D: CacheStore + 'static> {
     distributed_store: Arc<D>,
     state: Arc<State>,
     backplane: Arc<RedisBackplane>,
+    /// The store's own TTL, refresh and lock settings, which both layers follow.
+    cache_settings: CacheSettings,
     worker_settings: BackplaneWorkerSettings,
     /// The backplane worker. It holds `state` but not this, so it doesn't keep itself running.
     worker: Worker,
@@ -63,6 +65,7 @@ impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
             distributed_store: Arc::clone(&self.distributed_store),
             state: Arc::clone(&self.state),
             backplane: Arc::clone(&self.backplane),
+            cache_settings: self.cache_settings.clone(),
             worker_settings: self.worker_settings.clone(),
             worker: self.worker.clone(),
             reads: self.reads,
@@ -83,40 +86,34 @@ impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
 }
 
 impl<D: CacheStore + 'static> HybridCacheStore<D> {
-    /// Builds the store from its three parts, keeping their settings. The two stores' names must
-    /// match, and the local store's `common` settings must stay unset, since hybrid calls use the
-    /// distributed store's.
-    ///
-    /// The local store's `max_ttl_secs` is the longest a node serves a copy whose invalidation
-    /// never arrived. `InMemoryCacheStore::new` leaves it off, so build the local store with the
-    /// hybrid default of 60 seconds, as `settings.local` does below. The backplane worker runs with
-    /// the default [`BackplaneWorkerSettings`] unless
-    /// [`with_worker_settings`](Self::with_worker_settings) gives others.
+    /// Builds the store over `distributed_store`, with its invalidations on `backplane`, and the
+    /// local layer on each node from `settings.local`, named as the distributed store is.
+    /// `settings` also gives the store's TTL, refresh and lock settings and the backplane
+    /// worker's; `settings.distributed` is for [`connect`](Self::connect), which builds the Redis
+    /// store, so set those on the store you pass here. Fails when a setting is out of range, or
+    /// when `distributed_store` has TTL, refresh or lock settings of its own, which hybrid calls
+    /// wouldn't read.
     ///
     /// On a Redis Cluster, the store takes a cluster connection and the backplane the cluster
     /// client, on RESP3 for its sharded pub/sub:
     ///
     /// ```no_run
     /// use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore, RedisBackplane};
-    /// use sisa_caching_memory::InMemoryCacheStore;
     /// use sisa_caching_redis::{
     ///     RedisCacheStore,
     ///     redis::{ProtocolVersion, cluster::ClusterClientBuilder},
     /// };
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let settings = HybridCacheSettings::default();
     /// let client = ClusterClientBuilder::new(vec!["redis://10.0.0.1:6379"])
     ///     .use_protocol(ProtocolVersion::RESP3)
     ///     .build()?;
     ///
     /// let cache = HybridCacheStore::new(
-    ///     InMemoryCacheStore::new("app")?.with_settings(settings.local)?,
-    ///     RedisCacheStore::new("app", client.get_async_connection().await?)?
-    ///         .with_settings(settings.distributed)?,
+    ///     RedisCacheStore::new("app", client.get_async_connection().await?)?,
     ///     RedisBackplane::cluster(client).await?,
-    /// )?
-    /// .with_worker_settings(settings.worker)?;
+    ///     &HybridCacheSettings::default(),
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -124,41 +121,50 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// Behind Sentinel, [`RedisBackplane::sentinel`] shows the setup. On one server,
     /// [`connect`](Self::connect) builds every part from a URL.
     pub fn new(
-        local_store: InMemoryCacheStore,
         distributed_store: D,
         backplane: RedisBackplane,
+        settings: &HybridCacheSettings,
     ) -> Result<Self> {
-        check_local_common(local_store.settings())?;
+        Self::new_on_clock(distributed_store, backplane, settings, SystemClock)
+    }
 
-        if local_store.name() != distributed_store.name() {
-            return Err(HybridCacheError::StoreNameMismatch {
-                local: local_store.name().clone(),
-                distributed: distributed_store.name().clone(),
-            });
+    /// Builds the store as [`new`](Self::new) does, with its local layer on `clock`, so tests can
+    /// move time.
+    #[doc(hidden)]
+    pub fn new_on_clock(
+        distributed_store: D,
+        backplane: RedisBackplane,
+        settings: &HybridCacheSettings,
+        clock: impl Clock,
+    ) -> Result<Self> {
+        settings.validate()?;
+
+        if distributed_store.cache_settings() != &CacheSettings::default() {
+            return Err(CacheError::invalid_settings(
+                "distributed_store",
+                "has TTL, refresh or lock settings of its own, which hybrid calls don't read; \
+                 set them in HybridCacheSettings instead",
+            )
+            .into());
         }
 
-        let backplane = backplane.for_store(local_store.name());
-        let reads = METRICS.reads(local_store.name(), Layer::Hybrid);
+        let name = distributed_store.name();
+        let local_store = InMemoryCacheStore::new(name.as_str())?
+            .with_clock(clock)
+            .with_settings(settings.local.memory_settings(&settings.common))?
+            .with_max_ttl(settings.local.max_ttl());
+        let backplane = backplane.for_store(name);
+        let reads = METRICS.reads(name, Layer::Hybrid);
 
         Ok(Self {
             distributed_store: Arc::new(distributed_store),
             state: Arc::new(State::new(local_store)),
             backplane: Arc::new(backplane),
-            worker_settings: BackplaneWorkerSettings::default(),
+            cache_settings: settings.common.clone(),
+            worker_settings: settings.worker.clone(),
             worker: Worker::new(),
             reads,
         })
-    }
-
-    /// Sets how the backplane worker waits before subscribing again, and how it tells that
-    /// invalidations were lost; `connect` takes these from `settings.worker`. Fails when a setting
-    /// is out of range, as [`BackplaneWorkerSettings::validate`] says. Set it before the store's
-    /// first call: the worker reads it once, when it starts.
-    pub fn with_worker_settings(mut self, settings: BackplaneWorkerSettings) -> Result<Self> {
-        settings.validate()?;
-        self.worker_settings = settings;
-
-        Ok(self)
     }
 
     /// Starts the backplane worker now instead of on the store's first call, as `connect` does,
@@ -389,16 +395,14 @@ impl RedisHybridCacheStore {
         let info = info
             .into_connection_info()
             .map_err(HybridCacheError::distributed)?;
-        let local = InMemoryCacheStore::new(name)?.with_settings(settings.local.clone())?;
         let distributed = RedisCacheStore::connect(name, info.clone())
             .await
             .map_err(HybridCacheError::distributed)?
-            .with_settings(settings.distributed.clone())?;
+            .with_settings(settings.distributed.redis_settings())?;
         let backplane = RedisBackplane::connect(info)
             .await
             .map_err(HybridCacheError::distributed)?;
-        let store = Self::new(local, distributed, backplane)?
-            .with_worker_settings(settings.worker.clone())?;
+        let store = Self::new(distributed, backplane, settings)?;
 
         store.start_worker();
         Ok(store)
@@ -415,7 +419,7 @@ impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
     }
 
     fn cache_settings(&self) -> &CacheSettings {
-        self.distributed_store.cache_settings()
+        &self.cache_settings
     }
 
     fn locker(&self) -> &Locker {

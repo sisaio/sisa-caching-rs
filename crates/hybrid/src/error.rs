@@ -1,6 +1,6 @@
 //! The hybrid store's errors.
 
-use sisa_caching_core::cache::{CacheError, KeyPrefix};
+use sisa_caching_core::cache::CacheError;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -13,16 +13,6 @@ pub enum HybridCacheError {
     /// errors are `Distributed`.
     #[error(transparent)]
     Cache(#[from] CacheError),
-
-    /// `HybridCacheStore::new` was given a local and a distributed store with different names.
-    #[error("local store `{local}` and distributed store `{distributed}` must have the same name")]
-    #[non_exhaustive]
-    StoreNameMismatch {
-        /// The local store's name.
-        local: KeyPrefix,
-        /// The distributed store's name.
-        distributed: KeyPrefix,
-    },
 
     /// An error from the distributed store, boxed. For a
     /// [`RedisHybridCacheStore`](crate::RedisHybridCacheStore), downcast it to reach the Redis

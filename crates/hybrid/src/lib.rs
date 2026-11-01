@@ -18,7 +18,7 @@
 //! // Local copies live at most 60 seconds, whatever their TTL, unless `local.max_ttl_secs` says
 //! // otherwise.
 //! let mut settings = HybridCacheSettings::default();
-//! settings.distributed.common.ttl_secs = Some(300);
+//! settings.common.ttl_secs = Some(300);
 //!
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
 //!
@@ -27,12 +27,10 @@
 //! # }
 //! ```
 //!
-//! For a Redis Cluster, Sentinel or another distributed store, build the three parts and compose
-//! them with [`HybridCacheStore::new`], which says how to keep the 60-second cap on local copies,
-//! then give it `settings.worker` with
-//! [`with_worker_settings`](HybridCacheStore::with_worker_settings). On a cluster, give the store
-//! a `ClusterConnection` and the backplane the cluster client ([`RedisBackplane::cluster`]),
-//! which uses sharded pub/sub.
+//! For a Redis Cluster, Sentinel or another distributed store, build the distributed store and the
+//! backplane, and give them to [`HybridCacheStore::new`] with the settings; it builds the local
+//! layer. On a cluster, give the store a `ClusterConnection` and the backplane the cluster client
+//! ([`RedisBackplane::cluster`]), which uses sharded pub/sub.
 //!
 //! Each store publishes and listens on its own pub/sub channel, `<store>:backplane`. One store
 //! holds values of every type, so one per application is usually enough. Run a second one when
@@ -77,9 +75,8 @@
 //!
 //! The local `max_ttl_secs` bounds what nothing shows, such as a Redis write that timed out on the
 //! client but was applied later, or a writer in another language that sends no sequence numbers.
-//! `HybridCacheSettings` sets it to 60 seconds; a local store built without those settings has
-//! none, and `None` removes it. It doesn't change freshness: an entry with a 100-second TTL still
-//! refreshes at 80 seconds with a `refresh_threshold` of `0.8`.
+//! It is 60 seconds by default, and `None` removes it. It doesn't change freshness: an entry with a
+//! 100-second TTL still refreshes at 80 seconds with a `refresh_threshold` of `0.8`.
 //!
 //! # Invalidations from other languages
 //!

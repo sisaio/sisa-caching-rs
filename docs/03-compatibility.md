@@ -25,9 +25,9 @@ Point every store and backplane at the primary. Reads stay on the primary too: a
 behind, so a node reading from one could copy a value that was just replaced back into its local
 layer.
 
-A hybrid store on a cluster or behind Sentinel is put together with `HybridCacheStore::new`. Build
-its local store with `HybridCacheSettings::default().local` to keep the 60-second cap on stale
-copies; `InMemoryCacheStore::new` alone has none.
+A hybrid store on a cluster or behind Sentinel is put together with `HybridCacheStore::new`, from
+the Redis store, the backplane and the settings; it builds the local layer, with the 60-second cap
+on stale copies.
 
 ### Cluster
 

@@ -9,8 +9,9 @@ use std::{
 use criterion::{Criterion, criterion_group, criterion_main};
 use sisa_caching_benches::{User, key, meter_provider, user};
 use sisa_caching_core::cache::CacheStore;
-use sisa_caching_hybrid::{backplane::RedisBackplane, store::HybridCacheStore};
-use sisa_caching_memory::store::InMemoryCacheStore;
+use sisa_caching_hybrid::{
+    backplane::RedisBackplane, settings::HybridCacheSettings, store::HybridCacheStore,
+};
 use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Redis, eventually};
 use tokio::runtime::Runtime;
@@ -25,9 +26,9 @@ fn hybrid(c: &mut Criterion) {
     let store = runtime.block_on(async {
         let backplane = RedisBackplane::connect(redis.url()).await.unwrap();
         let store = HybridCacheStore::new(
-            InMemoryCacheStore::new("app").unwrap(),
             RedisCacheStore::new("app", redis.connection().await).unwrap(),
             backplane,
+            &HybridCacheSettings::default(),
         )
         .unwrap();
 

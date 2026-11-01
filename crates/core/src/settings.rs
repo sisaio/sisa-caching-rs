@@ -1,17 +1,21 @@
 //! The settings every store has, and the 365-day limit on durations.
 
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{self, MapAccess, Visitor},
+};
 
 use crate::cache::CacheError;
 
 /// The longest any duration setting, or a write's TTL, may be: 365 days.
 pub const MAX_TTL_SECS: u64 = 365 * 24 * 60 * 60;
 
-/// Settings every store has.
+/// Settings every store has. Each store's settings flatten them, so in a config file they sit
+/// beside the store's own: `{ "ttl_secs": 300, "max_entries": 10000 }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 #[non_exhaustive]
 pub struct CacheSettings {
     /// The TTL of a write that doesn't set one. `None` keeps values until removed or evicted;
@@ -76,6 +80,36 @@ impl CacheSettings {
     /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off.
     pub fn refresh_threshold(&self) -> Option<f64> {
         self.refresh_threshold
+    }
+}
+
+/// The last field of a settings type that flattens [`CacheSettings`]: it takes whatever fields
+/// no other field did, and fails on the first, so a misspelled setting can't silently keep its
+/// default. Serde's `deny_unknown_fields` doesn't work beside `flatten`.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct NoUnknownFields;
+
+// Fails at the first field it is given: every known one was taken before it.
+impl<'de> Deserialize<'de> for NoUnknownFields {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(NoUnknownFields)
+    }
+}
+
+// Reads the fields left over, as a map, and fails at the first one.
+impl<'de> Visitor<'de> for NoUnknownFields {
+    type Value = Self;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("no fields other than the known settings")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self, A::Error> {
+        match map.next_key::<String>()? {
+            Some(field) => Err(de::Error::custom(format!("unknown field `{field}`"))),
+            None => Ok(self),
+        }
     }
 }
 

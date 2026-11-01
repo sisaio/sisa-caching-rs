@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime};
 
 use crate::common::{
-    assert_a_write_reaches, fast_heartbeats, fast_retries, key, local_value, start_with,
+    assert_a_write_reaches, fast_heartbeats, fast_retries, key, local_value, start,
 };
 use futures_util::StreamExt;
 use sisa_caching_core::{
@@ -13,7 +13,7 @@ use sisa_caching_core::{
 };
 use sisa_caching_hybrid::{
     backplane::RedisBackplane,
-    settings::{BackplaneWorkerSettings, HybridCacheSettings},
+    settings::HybridCacheSettings,
     store::{HybridCacheStore, RedisHybridCacheStore},
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -24,16 +24,15 @@ use sisa_caching_testing::{Redis, eventually};
 async fn node_with(
     redis: &Redis,
     store: &str,
-    settings: BackplaneWorkerSettings,
+    settings: HybridCacheSettings,
 ) -> RedisHybridCacheStore {
-    start_with(
+    start(
         HybridCacheStore::new(
-            InMemoryCacheStore::new(store).unwrap(),
             RedisCacheStore::new(store, redis.connection().await).unwrap(),
             RedisBackplane::connect(redis.url()).await.unwrap(),
+            &settings,
         )
         .unwrap(),
-        settings,
     )
     .await
 }
@@ -47,8 +46,9 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
     let redis = Redis::start().await;
     let settings = {
         let mut settings = HybridCacheSettings::default();
-        settings.local.max_ttl_secs = Some(60);
-        settings.distributed.common.ttl_secs = Some(300);
+        settings.common.ttl_secs = Some(300);
+        settings.local.max_entries = Some(1_000);
+        settings.distributed.scan_batch_size = 500;
         settings
     };
     let connect = || HybridCacheStore::connect("users", redis.url(), &settings);
@@ -62,8 +62,9 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
         .await;
     }
 
-    assert_eq!(reader.local_store().settings(), &settings.local);
-    assert_eq!(reader.distributed_store().settings(), &settings.distributed);
+    assert_eq!(reader.cache_settings(), &settings.common);
+    assert_eq!(reader.local_store().settings().max_entries, Some(1_000));
+    assert_eq!(reader.distributed_store().settings().scan_batch_size, 500);
 
     assert_a_write_reaches(&writer, &reader).await;
 

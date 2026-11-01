@@ -21,8 +21,9 @@ crate with the store's feature; none is on by default.
   stores keeps its deadline.
 - **Settings**: a default TTL (`ttl_secs`), when to refresh a value ahead of expiry
   (`refresh_threshold`), and how long `get_or_set` waits for another caller's load
-  (`lock_timeout_ms`). The memory store adds an entry limit and a residency cap
-  (`max_entries`, `max_ttl_secs`).
+  (`lock_timeout_ms`), at the top level of each store's settings. The memory store adds an entry
+  limit (`max_entries`), and a hybrid store a cap on how long a node keeps a local copy
+  (`local.max_ttl_secs`).
 - **Worker**: a background task a store runs for itself. The memory store's purge worker drops
   expired entries; the hybrid store's backplane worker applies other nodes' invalidations.
 - **Backplane** and **invalidation**: after a hybrid write, the writing node publishes an

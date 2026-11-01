@@ -9,7 +9,7 @@ use sisa_caching_core::{
     clock::{Clock, SystemClock},
 };
 use sisa_caching_hybrid::{
-    backplane::RedisBackplane, error::HybridCacheError, settings::BackplaneWorkerSettings,
+    backplane::RedisBackplane, error::HybridCacheError, settings::HybridCacheSettings,
     store::HybridCacheStore,
 };
 use sisa_caching_memory::store::InMemoryCacheStore;
@@ -30,37 +30,34 @@ pub fn memory(store: &str) -> InMemoryCacheStore {
     InMemoryCacheStore::new(store).unwrap()
 }
 
-/// Retries quickly, so tests that break the subscription recover fast.
-pub fn fast_retries() -> BackplaneWorkerSettings {
-    let mut settings = BackplaneWorkerSettings::default();
-    settings.reconnect_delay_ms = 1;
-    settings.max_reconnect_delay_ms = 10;
+/// Hybrid settings whose worker retries quickly, so tests that break the subscription recover
+/// fast.
+pub fn fast_retries() -> HybridCacheSettings {
+    let mut settings = HybridCacheSettings::default();
+    settings.worker.reconnect_delay_ms = 1;
+    settings.worker.max_reconnect_delay_ms = 10;
     settings
 }
 
 /// Fast retries, and a heartbeat every 20 ms that is missed after 1 s, so a slow CI runner doesn't
 /// miss one that is on time.
-pub fn fast_heartbeats() -> BackplaneWorkerSettings {
+pub fn fast_heartbeats() -> HybridCacheSettings {
     let mut settings = fast_retries();
-    settings.heartbeat_interval_ms = 20;
-    settings.heartbeat_timeout_ms = 1_000;
+    settings.worker.heartbeat_interval_ms = 20;
+    settings.worker.heartbeat_timeout_ms = 1_000;
     settings
 }
 
-/// Starts the store's backplane worker with fast retries, unless it already runs, and waits until
-/// it has subscribed.
-pub async fn start<D: CacheStore + 'static>(store: HybridCacheStore<D>) -> HybridCacheStore<D> {
-    start_with(store, fast_retries()).await
+/// A hybrid store over `distributed`, with its invalidations on `backplane` and fast retries.
+pub fn hybrid<D: CacheStore + 'static>(
+    distributed: D,
+    backplane: RedisBackplane,
+) -> Result<HybridCacheStore<D>, HybridCacheError> {
+    HybridCacheStore::new(distributed, backplane, &fast_retries())
 }
 
-/// Starts the store's backplane worker with `settings`, unless it already runs, and waits until it
-/// has subscribed.
-pub async fn start_with<D: CacheStore + 'static>(
-    store: HybridCacheStore<D>,
-    settings: BackplaneWorkerSettings,
-) -> HybridCacheStore<D> {
-    let store = store.with_worker_settings(settings).unwrap();
-
+/// Starts the store's backplane worker, unless it already runs, and waits until it has subscribed.
+pub async fn start<D: CacheStore + 'static>(store: HybridCacheStore<D>) -> HybridCacheStore<D> {
     store.start_worker();
     eventually("the backplane worker subscribes", || async {
         store.local_reads_enabled()
@@ -77,9 +74,7 @@ pub async fn backplane(redis: &Redis) -> RedisBackplane {
 
 /// A node with a fresh local layer over `distributed`, started.
 pub async fn node(distributed: &InMemoryCacheStore, redis: &Redis) -> Node {
-    let local = InMemoryCacheStore::new(distributed.name().as_str()).unwrap();
-
-    start(HybridCacheStore::new(local, distributed.clone(), backplane(redis).await).unwrap()).await
+    start(hybrid(distributed.clone(), backplane(redis).await).unwrap()).await
 }
 
 pub async fn local_value<D: CacheStore + 'static>(

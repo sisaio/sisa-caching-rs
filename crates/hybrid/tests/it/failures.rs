@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::common::{WRITES, Write, backplane, key, local_value, memory, node, start};
+use crate::common::{WRITES, Write, backplane, hybrid, key, local_value, memory, node, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     locker::Locker,
@@ -92,15 +92,8 @@ async fn a_failed_write_still_evicts_on_every_node() {
 
     for write in WRITES {
         let shared = memory("users");
-        let writer = start(
-            HybridCacheStore::new(
-                memory("users"),
-                LostReplies(shared.clone()),
-                backplane(&redis).await,
-            )
-            .unwrap(),
-        )
-        .await;
+        let writer =
+            start(hybrid(LostReplies(shared.clone()), backplane(&redis).await).unwrap()).await;
         let reader = node(&shared, &redis).await;
 
         shared.set(&key(1), "old".to_owned(), None).await.unwrap();
@@ -242,12 +235,8 @@ async fn writer_and_reader(gate: &Arc<Gate>, redis: &Redis) -> (GatedNode, Reade
         inner: shared.clone(),
         gate: gate.clone(),
     };
-    let writer =
-        start(HybridCacheStore::new(memory("users"), distributed, backplane(redis).await).unwrap())
-            .await;
-    let reader =
-        start(HybridCacheStore::new(memory("users"), shared, backplane(redis).await).unwrap())
-            .await;
+    let writer = start(hybrid(distributed, backplane(redis).await).unwrap()).await;
+    let reader = start(hybrid(shared, backplane(redis).await).unwrap()).await;
 
     writer.get::<String>(&key(1)).await.unwrap();
     reader.get::<String>(&key(1)).await.unwrap();
