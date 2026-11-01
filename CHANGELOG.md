@@ -6,6 +6,66 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.2.0...sisa-caching-core-v0.3.0) - 2026-11-01
+
+### Added
+
+- *(hybrid)* tell the other nodes when a hybrid store shuts down
+- *(hybrid)* count local clears in sisa.caching.local.clears
+- *(hybrid)* [**breaking**] give each hybrid store its own backplane channel
+
+### Changed
+
+- *(core)* lock get_or_set's loads by the key alone
+- [**breaking**] read the clock through a type parameter, not dyn
+- *(core)* build a CacheKey in one string
+- box the slow paths of get_or_set and a hybrid read
+- *(memory)* keep entries in 16 maps by default
+- *(core)* inline the key prefix check into the stores' walks
+- count hits and misses without an SDK call per read
+- *(memory)* write over a held key without allocating its key
+- *(memory)* pick the map with a multiply instead of SipHash
+- *(memory)* read no clock to store an entry that never expires
+- *(memory)* let a read copy the use counter instead of bumping it
+- *(hybrid)* clone no distributed hit while local reads are off
+- *(hybrid)* remove the writer's prefix copies on the blocking pool
+- *(hybrid)* hash a key once on a local hit
+
+### Fixed
+
+- *(core)* refresh an entry once when another caller just did
+- cap every duration setting at 365 days
+- *(core)* serve a failed refresh's value only while the store holds it
+- *(hybrid)* free a replaced copy after the promotion's turn
+- *(redis)* read a creation time past the platform's clock as the epoch
+- *(redis)* name both causes of a JSON error without a position
+- keep cached values and keys out of warnings
+- *(hybrid)* drop a value a promotion turns down after its turn
+- *(hybrid)* finish a shutdown whose caller gives up
+- *(hybrid)* wait for and count the writes still running at shutdown
+- *(hybrid)* stop the worker only once the stop message is out
+- *(hybrid)* let each backplane ping run to its timeout
+- *(hybrid)* count a write's invalidation in a shutdown right after it
+- *(hybrid)* keep a cancelled prefix removal from hiding its keys
+- *(hybrid)* bound the sequence numbers a backplane worker tracks
+- *(hybrid)* hide a prefix's local copies until their walk is done
+
+### Refactor
+
+- [**breaking**] count each Redis read once, and drop repeated code
+- [**breaking**] rename ttl_secs and make the hybrid's local TTL required
+- [**breaking**] flatten the shared settings and give the hybrid its own
+- [**breaking**] make the settings structs non_exhaustive
+- [**breaking**] seal CacheStore and hide what only the store crates use
+- *(core)* [**breaking**] move CacheCodec into the Redis crate
+- [**breaking**] give each store's own settings a type the hybrid reuses
+- *(hybrid)* [**breaking**] drop the backplane pings and the cluster slot check
+- [**breaking**] drop two settings getters that return a public field
+- [**breaking**] drop DEFAULT_SCAN_BATCH_SIZE for a default in the settings
+- *(hybrid)* [**breaking**] drop DEFAULT_LOCAL_TTL_SECS for a settings default
+- *(hybrid)* [**breaking**] keep the backplane message format at version 1
+- *(hybrid)* [**breaking**] drop the store name from backplane messages
+
 ## [0.2.0](https://github.com/sisaio/sisa-caching-rs/compare/v0.1.1...v0.2.0) - 2026-10-29
 
 ### Added
