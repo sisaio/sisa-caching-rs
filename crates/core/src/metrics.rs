@@ -62,73 +62,39 @@ use opentelemetry::{
 
 use crate::cache::KeyPrefix;
 
-/// The instruments every store records into.
-#[doc(hidden)]
-pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
-    let meter = global::meter("sisa-caching");
+/// How many stripes a read count is split over.
+const STRIPES: usize = 16;
 
-    // An SDK update per read would cost more than the read, so the stores count their reads and
-    // these report the counts when the meter provider collects.
-    for (name, description, hits) in [
-        ("sisa.caching.hits", "Reads that found a live entry", true),
-        ("sisa.caching.misses", "Reads that returned no value", false),
-    ] {
-        meter
-            .u64_observable_counter(name)
-            .with_description(description)
-            .with_callback(move |observer| {
-                for reads in READS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
-                    let count = if hits { &reads.hits } else { &reads.misses };
+/// One stripe of a count, 128 bytes, as some CPUs fetch cache lines in pairs.
+#[derive(Debug, Default)]
+#[repr(align(128))]
+struct Stripe(AtomicU64);
 
-                    observer.observe(count.sum(), &reads.attributes);
-                }
-            })
-            .build();
+/// A count split over `STRIPES` cache lines, so threads that count at once rarely share one.
+/// Each thread adds to the stripe it was given on its first count.
+#[derive(Debug, Default)]
+struct Striped([Stripe; STRIPES]);
+
+impl Striped {
+    fn add(&self) {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        thread_local! {
+            static STRIPE: usize = NEXT.fetch_add(1, Ordering::Relaxed) % STRIPES;
+        }
+
+        let stripe = STRIPE.with(|stripe| *stripe);
+
+        self.0[stripe].0.fetch_add(1, Ordering::Relaxed);
     }
 
-    CacheMetrics {
-        load_duration: meter
-            .f64_histogram("sisa.caching.load.duration")
-            .with_unit("s")
-            .with_description("How long each get_or_set loader ran")
-            .with_boundaries(vec![
-                0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-            ])
-            .build(),
-        errors: meter
-            .u64_counter("sisa.caching.errors")
-            .with_description("Store calls inside get_or_set that failed")
-            .build(),
-        evictions: meter
-            .u64_counter("sisa.caching.evictions")
-            .with_description("Entries a full memory store dropped to make room")
-            .build(),
-        invalidations_received: meter
-            .u64_counter("sisa.caching.invalidations.received")
-            .with_description("Invalidations from other nodes that a hybrid store applied")
-            .build(),
-        invalidations_delivered: meter
-            .u64_counter("sisa.caching.invalidations.delivered")
-            .with_description("Subscribers the server delivered a hybrid store's invalidations to")
-            .build(),
-        publish_failures: meter
-            .u64_counter("sisa.caching.publish.failures")
-            .with_description("Invalidations a hybrid store could not publish after every retry")
-            .build(),
-        backplane_connected: meter
-            .u64_gauge("sisa.caching.backplane.connected")
-            .with_description("1 while a hybrid store's backplane is subscribed, else 0")
-            .build(),
-        backplane_unreadable: meter
-            .u64_counter("sisa.caching.backplane.unreadable")
-            .with_description("Backplane messages a hybrid store could not read")
-            .build(),
-        local_clears: meter
-            .u64_counter("sisa.caching.local.clears")
-            .with_description("Times a hybrid store cleared its local layer, as it may have missed an invalidation")
-            .build(),
+    fn sum(&self) -> u64 {
+        self.0
+            .iter()
+            .map(|stripe| stripe.0.load(Ordering::Relaxed))
+            .sum()
     }
-});
+}
 
 /// Which part of a store a hit or miss was counted in.
 #[doc(hidden)]
@@ -150,9 +116,6 @@ impl Layer {
         }
     }
 }
-
-/// The read counts of every store layer, which the hit and miss counters report.
-static READS: Mutex<Vec<&'static Reads>> = Mutex::new(Vec::new());
 
 /// One store layer's hits and misses, with the attributes they are reported under.
 #[doc(hidden)]
@@ -177,37 +140,12 @@ impl Reads {
     }
 }
 
-const STRIPES: usize = 16;
+/// The read counts of every store layer, which the hit and miss counters report.
+static READS: Mutex<Vec<&'static Reads>> = Mutex::new(Vec::new());
 
-/// A count split over `STRIPES` cache lines, so threads that count at once rarely share one.
-/// Each thread adds to the stripe it was given on its first count.
-#[derive(Debug, Default)]
-struct Striped([Stripe; STRIPES]);
-
-/// 128 bytes, as some CPUs fetch cache lines in pairs.
-#[derive(Debug, Default)]
-#[repr(align(128))]
-struct Stripe(AtomicU64);
-
-impl Striped {
-    fn add(&self) {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-
-        thread_local! {
-            static STRIPE: usize = NEXT.fetch_add(1, Ordering::Relaxed) % STRIPES;
-        }
-
-        let stripe = STRIPE.with(|stripe| *stripe);
-
-        self.0[stripe].0.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn sum(&self) -> u64 {
-        self.0
-            .iter()
-            .map(|stripe| stripe.0.load(Ordering::Relaxed))
-            .sum()
-    }
+/// The `store` attribute, sharing the name's string rather than copying it on every update.
+fn store_attribute(store: &KeyPrefix) -> KeyValue {
+    KeyValue::new("store", Value::String(store.shared().into()))
 }
 
 /// The instruments, each recorded through one method so the attribute names are written once.
@@ -326,7 +264,70 @@ impl CacheMetrics {
     }
 }
 
-/// The `store` attribute, sharing the name's string rather than copying it on every update.
-fn store_attribute(store: &KeyPrefix) -> KeyValue {
-    KeyValue::new("store", Value::String(store.shared().into()))
-}
+/// The instruments every store records into.
+#[doc(hidden)]
+pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
+    let meter = global::meter("sisa-caching");
+
+    // An SDK update per read would cost more than the read, so the stores count their reads and
+    // these report the counts when the meter provider collects.
+    for (name, description, hits) in [
+        ("sisa.caching.hits", "Reads that found a live entry", true),
+        ("sisa.caching.misses", "Reads that returned no value", false),
+    ] {
+        meter
+            .u64_observable_counter(name)
+            .with_description(description)
+            .with_callback(move |observer| {
+                for reads in READS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+                    let count = if hits { &reads.hits } else { &reads.misses };
+
+                    observer.observe(count.sum(), &reads.attributes);
+                }
+            })
+            .build();
+    }
+
+    CacheMetrics {
+        load_duration: meter
+            .f64_histogram("sisa.caching.load.duration")
+            .with_unit("s")
+            .with_description("How long each get_or_set loader ran")
+            .with_boundaries(vec![
+                0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+            ])
+            .build(),
+        errors: meter
+            .u64_counter("sisa.caching.errors")
+            .with_description("Store calls inside get_or_set that failed")
+            .build(),
+        evictions: meter
+            .u64_counter("sisa.caching.evictions")
+            .with_description("Entries a full memory store dropped to make room")
+            .build(),
+        invalidations_received: meter
+            .u64_counter("sisa.caching.invalidations.received")
+            .with_description("Invalidations from other nodes that a hybrid store applied")
+            .build(),
+        invalidations_delivered: meter
+            .u64_counter("sisa.caching.invalidations.delivered")
+            .with_description("Subscribers the server delivered a hybrid store's invalidations to")
+            .build(),
+        publish_failures: meter
+            .u64_counter("sisa.caching.publish.failures")
+            .with_description("Invalidations a hybrid store could not publish after every retry")
+            .build(),
+        backplane_connected: meter
+            .u64_gauge("sisa.caching.backplane.connected")
+            .with_description("1 while a hybrid store's backplane is subscribed, else 0")
+            .build(),
+        backplane_unreadable: meter
+            .u64_counter("sisa.caching.backplane.unreadable")
+            .with_description("Backplane messages a hybrid store could not read")
+            .build(),
+        local_clears: meter
+            .u64_counter("sisa.caching.local.clears")
+            .with_description("Times a hybrid store cleared its local layer, as it may have missed an invalidation")
+            .build(),
+    }
+});

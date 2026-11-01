@@ -9,16 +9,6 @@ use tokio::task::AbortHandle;
 
 use crate::cache::KeyPrefix;
 
-/// The background task a store runs for itself, such as its purge, shared by the store's clones.
-/// It starts once, on the store's first call inside a tokio runtime, and runs on that runtime
-/// until the store's last clone drops, or for good on [`stop`](Self::stop). So that runtime must
-/// outlive the store: a task whose runtime shut down is gone, and doesn't start again.
-///
-/// A task that holds a copy of its store gives that copy [`none`](Self::none), so the task
-/// doesn't keep itself running.
-#[derive(Clone, Debug)]
-pub struct Worker(Option<Arc<OnceLock<Option<Running>>>>);
-
 /// The running task, which is aborted when the store's last clone drops this.
 #[derive(Debug)]
 struct Running(AbortHandle);
@@ -28,6 +18,41 @@ impl Drop for Running {
         self.0.abort();
     }
 }
+
+/// A worker's name and store, which log its stop when dropped, or its panic while unwinding.
+struct Stopped(&'static str, KeyPrefix);
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        let Self(name, store) = self;
+
+        if std::thread::panicking() {
+            tracing::error!(worker = *name, %store, "worker panicked");
+        } else {
+            tracing::info!(worker = *name, %store, "worker stopped");
+        }
+    }
+}
+
+/// Runs `task`, and logs its start, its stop and a panic under `name` and `store`.
+async fn logged(name: &'static str, store: KeyPrefix, task: impl Future<Output = ()>) {
+    tracing::info!(worker = name, %store, "worker started");
+
+    // Logs the stop on every exit: the task ending, the store's last clone dropping, or a panic.
+    let _stopped = Stopped(name, store);
+
+    task.await;
+}
+
+/// The background task a store runs for itself, such as its purge, shared by the store's clones.
+/// It starts once, on the store's first call inside a tokio runtime, and runs on that runtime
+/// until the store's last clone drops, or for good on [`stop`](Self::stop). So that runtime must
+/// outlive the store: a task whose runtime shut down is gone, and doesn't start again.
+///
+/// A task that holds a copy of its store gives that copy [`none`](Self::none), so the task
+/// doesn't keep itself running.
+#[derive(Clone, Debug)]
+pub struct Worker(Option<Arc<OnceLock<Option<Running>>>>);
 
 impl Worker {
     pub fn new() -> Self {
@@ -80,30 +105,6 @@ impl Worker {
 impl Default for Worker {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Runs `task`, and logs its start, its stop and a panic under `name` and `store`.
-async fn logged(name: &'static str, store: KeyPrefix, task: impl Future<Output = ()>) {
-    tracing::info!(worker = name, %store, "worker started");
-
-    // Logs the stop on every exit: the task ending, the store's last clone dropping, or a panic.
-    let _stopped = Stopped(name, store);
-
-    task.await;
-}
-
-struct Stopped(&'static str, KeyPrefix);
-
-impl Drop for Stopped {
-    fn drop(&mut self) {
-        let Self(name, store) = self;
-
-        if std::thread::panicking() {
-            tracing::error!(worker = *name, %store, "worker panicked");
-        } else {
-            tracing::info!(worker = *name, %store, "worker stopped");
-        }
     }
 }
 
