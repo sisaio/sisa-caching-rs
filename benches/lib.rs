@@ -1,15 +1,19 @@
 //! What the benchmarks store: a small user record under `user:{id}`, the meter provider they
-//! record their metrics with, and a timer for calls that need the store set up before each one.
+//! record their metrics with, a timer for calls that need the store set up before each one, and
+//! the calls every store has, timed the same way on each.
 
 use std::{
+    hint::black_box,
     sync::OnceLock,
     time::{Duration, Instant},
 };
 
+use criterion::{BenchmarkGroup, measurement::WallTime};
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::{ManualReader, SdkMeterProvider};
 use serde::{Deserialize, Serialize};
-use sisa_caching_core::cache::CacheKey;
+use sisa_caching_core::cache::{CacheKey, CacheStore};
+use tokio::runtime::Runtime;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct User {
@@ -64,4 +68,70 @@ pub async fn time_after(
         total += start.elapsed();
     }
     total
+}
+
+/// Times the calls every store has, in `group`: `get` hit and miss, `set`, `remove`, and
+/// `get_or_set` hit and miss. `hit` names the hits, such as `local hit` on the hybrid. It caches
+/// `user:1` first; `user:2` stays missing, and `user:3` is the key the writes use.
+pub fn time_every_call<S: CacheStore>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    runtime: &Runtime,
+    store: &S,
+    hit: &str,
+) {
+    // Built before timing, so the times leave out formatting a key.
+    let (cached, missing, written) = (key(1), key(2), key(3));
+
+    runtime.block_on(store.set(&cached, user(1), None)).unwrap();
+
+    group.bench_function(format!("get {hit}"), |bencher| {
+        bencher
+            .to_async(runtime)
+            .iter(async || store.get::<User>(black_box(&cached)).await.unwrap());
+    });
+    group.bench_function("get miss", |bencher| {
+        bencher
+            .to_async(runtime)
+            .iter(async || store.get::<User>(black_box(&missing)).await.unwrap());
+    });
+    group.bench_function("set", |bencher| {
+        bencher
+            .to_async(runtime)
+            .iter(async || store.set(black_box(&written), user(3), None).await.unwrap());
+    });
+    group.bench_function("remove", |bencher| {
+        bencher.to_async(runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || store.set(&written, user(3), None).await.unwrap(),
+                async || assert!(store.remove(black_box(&written)).await.unwrap()),
+            )
+            .await
+        });
+    });
+    group.bench_function(format!("get_or_set {hit}"), |bencher| {
+        bencher.to_async(runtime).iter(async || {
+            store
+                .get_or_set(black_box(&cached), async || Ok::<_, ()>(user(1)), None)
+                .await
+                .unwrap()
+        });
+    });
+    group.bench_function("get_or_set miss", |bencher| {
+        bencher.to_async(runtime).iter_custom(async |iters| {
+            time_after(
+                iters,
+                async || _ = store.remove(&written).await.unwrap(),
+                async || {
+                    black_box(
+                        store
+                            .get_or_set(black_box(&written), async || Ok::<_, ()>(user(3)), None)
+                            .await
+                            .unwrap(),
+                    );
+                },
+            )
+            .await
+        });
+    });
 }
