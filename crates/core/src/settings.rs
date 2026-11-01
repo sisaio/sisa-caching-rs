@@ -68,12 +68,13 @@ pub fn check_duration(
 #[serde(default)]
 #[non_exhaustive]
 pub struct CacheSettings {
-    /// The TTL of a write that doesn't set one. `None` keeps values until removed or evicted;
-    /// `validate` rejects `0`, which would expire every write at once.
+    /// The TTL of a write that doesn't set one: none by default. `None` keeps values until
+    /// removed or evicted; `validate` rejects `0`, which would expire every write at once.
     pub default_ttl_secs: Option<u64>,
 
     /// The share of an entry's TTL after which `get_or_set` reloads it ahead of expiry, such as
-    /// `0.8`. `None` turns refresh-ahead off; `validate` rejects a value outside `(0, 1)`.
+    /// `0.8`: off by default. `None` turns refresh-ahead off; `validate` rejects a value outside
+    /// `(0, 1)`.
     pub refresh_threshold: Option<f64>,
 
     /// How long `get_or_set` waits for another caller's load of the same key before it loads the

@@ -60,7 +60,7 @@ directly.
 | `get_entry::<CV>(key)` | The one read path: the live entry with its creation time and TTL, or `None` |
 | `set_entry(key, entry)` | The one write path: stores the entry until its deadline |
 | `get`, `set` | Wrappers over the two paths that take and return the bare value |
-| `get_or_set(key, loader)` | Reads, else loads once per key per process and stores the result |
+| `get_or_set(key, loader)` | Reads, else loads once per key across the store and its clones, and stores the result |
 | `remove`, `remove_prefix`, `clear` | Drop one key, every key under a prefix, or the whole store |
 
 Rules every store follows:
@@ -94,8 +94,9 @@ that drops expired entries, then the least recently used ones down to 90% of the
 next writes don't trim again. Values are freed after the lock is released. Expired entries read as
 misses and go when they are overwritten, trimmed, or purged. The store purges every
 `purge_interval_secs` on its worker. Inside a tokio runtime the trims, the purges and the freeing
-of what `clear` took run on the blocking pool, so a store of a million entries holds up no async
-thread; `remove_prefix` and `purge` called by the application run on the caller's thread.
+of what `remove_prefix` and `clear` took run on the blocking pool, so a store of a million entries
+holds up no async thread; the walks of `remove_prefix` and `purge` called by the application run on
+the caller's thread.
 
 ### Redis
 
@@ -347,22 +348,22 @@ Settled; reopen only with new evidence.
 
 ## Rules that hold the design together
 
-- A store starts its worker through its `Worker`, once, inside a tokio runtime: the memory store
-  its purge worker on its first write, the hybrid store its backplane worker on its first call
-  or in `connect`. That worker holds the store's entries or state but never its `Worker`, so the
-  store's last clone dropping stops it.
+- A store starts its worker through its `Worker`, once, inside a tokio runtime: the memory store its
+  purge worker on its first write, the hybrid store its backplane worker on its first call, in
+  `connect` or in `start_worker`. That worker holds the store's entries or state but never its
+  `Worker`, so the store's last clone dropping stops it.
 - One `CacheEntry<CV>` type for every store; the value type parameter is `CV` everywhere.
 - No trait with one implementation: values are JSON, through `serde_json` directly.
 - The Redis hash and the backplane message are formats other languages write, so they change only
   with a version bump.
 - Durations in settings are `u64` seconds or milliseconds. A setting that can be off is an `Option`,
-  off with `None`, and `validate` rejects `0` in every setting and a duration over 365 days,
-  naming the field. Each store's settings and `HybridCacheSettings` have one `validate`, and
-  `with_settings` and `HybridCacheStore::new` return a `Result`.
-  A store's shared `CacheSettings` sit at the top level of its settings, through serde's
-  `flatten`, and a hybrid's parts under `local`, `distributed` and `worker`, which hold no TTL
-  settings: a hybrid's own apply to both layers. An unknown field fails to deserialize, so a
-  misspelled setting can't silently keep its default; `deny_unknown_fields` doesn't work beside
+  off with `None`, and `validate` rejects `0` in every setting and a duration over 365 days, naming
+  the field. Each store's settings and `HybridCacheSettings` have one `validate`, and
+  `with_settings` and `HybridCacheStore::new` return a `Result`. A store's shared `CacheSettings`
+  sit at the top level of its settings, through serde's `flatten`, and a hybrid's parts under
+  `local`, `distributed` and `worker`, which hold none of the shared settings: the hybrid's own
+  default TTL, refresh and lock wait apply to both layers. An unknown field fails to deserialize, so
+  a misspelled setting can't silently keep its default; `deny_unknown_fields` doesn't work beside
   `flatten`, so a last flattened field fails on whatever fields the others didn't take.
 - Info spans and warnings carry the store and the invalidation kind, never a key or a value; only
   debug spans and events carry keys. Stores warn only about the errors they swallow. Their info

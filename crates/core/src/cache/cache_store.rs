@@ -215,7 +215,8 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
 
     /// The per-key locks `get_or_set` loads under, which also keep whether its store calls are
     /// failing. A store holds a `Locker::default()` of its own, which its clones share, and
-    /// returns it here: the locks go by the key alone, so two stores never share a `Locker`.
+    /// returns it here: the locks go by the key alone, so a store must never share its `Locker`
+    /// with another.
     #[doc(hidden)]
     fn locker(&self) -> &Locker;
 

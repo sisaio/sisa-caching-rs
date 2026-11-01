@@ -24,7 +24,8 @@ pub struct MemorySettings {
     /// The most entries the store holds. Past it, an insert starts a trim that drops expired
     /// entries, then the least recently used, down to about nine tenths of the limit. Inside a
     /// tokio runtime the trim runs on the blocking pool and inserts go on meanwhile, so the store
-    /// can go over the limit while it runs. `None` sets no limit; `validate` rejects `0`.
+    /// can go over the limit while it runs. `None`, the default, sets no limit; `validate` rejects
+    /// `0`.
     pub max_entries: Option<usize>,
 
     /// How many maps the entries are split over, each with its own lock: 16 by default. More maps
