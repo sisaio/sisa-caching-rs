@@ -22,8 +22,32 @@ use sisa_caching_core::{
 
 use crate::settings::InMemoryCacheSettings;
 
+/// Runs `work` on the blocking pool inside a tokio runtime, so a walk of every entry or the freeing
+/// of many values holds up no async thread, and here outside one.
+fn off_async_thread(work: impl FnOnce() + Send + 'static) {
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => drop(runtime.spawn_blocking(work)),
+        Err(_) => work(),
+    }
+}
+
 /// A stored value of any type. A read asks for the type it expects and gets it back, or an error.
 type Erased = Arc<dyn Any + Send + Sync>;
+
+/// An entry plus when the store lets it go, on the monotonic clock so wall-clock changes don't
+/// move it, and when it was last stored or read, so a full store drops the least recently used.
+struct StoredEntry {
+    entry: CacheEntry<Erased>,
+    deadline: Option<Instant>,
+    last_used: AtomicU64,
+}
+
+impl StoredEntry {
+    fn is_expired(&self, now: Instant) -> bool {
+        self.deadline.is_some_and(|deadline| now >= deadline)
+    }
+}
+
 type EntryMap = HashMap<String, StoredEntry>;
 
 /// The entries of a store and its clones, split over `shards` maps by key hash, plus how many
@@ -87,15 +111,6 @@ fn write(shard: &RwLock<EntryMap>) -> RwLockWriteGuard<'_, EntryMap> {
     shard.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Runs `work` on the blocking pool inside a tokio runtime, so a walk of every entry or the freeing
-/// of many values holds up no async thread, and here outside one.
-fn off_async_thread(work: impl FnOnce() + Send + 'static) {
-    match tokio::runtime::Handle::try_current() {
-        Ok(runtime) => drop(runtime.spawn_blocking(work)),
-        Err(_) => work(),
-    }
-}
-
 /// The store's purge task: drops `store`'s expired entries every `interval`, on the blocking pool,
 /// as a purge walks every entry. A panic there stops the task.
 async fn purge_every<C: Clock>(store: InMemoryCacheStore<C>, interval: Duration) {
@@ -112,17 +127,13 @@ async fn purge_every<C: Clock>(store: InMemoryCacheStore<C>, interval: Duration)
     }
 }
 
-/// An entry plus when the store lets it go, on the monotonic clock so wall-clock changes don't
-/// move it, and when it was last stored or read, so a full store drops the least recently used.
-struct StoredEntry {
-    entry: CacheEntry<Erased>,
-    deadline: Option<Instant>,
-    last_used: AtomicU64,
-}
+/// A started trim. Dropping it lets the next one start, even if it never ran, as when its runtime
+/// shut down first.
+struct Trimming<C>(InMemoryCacheStore<C>);
 
-impl StoredEntry {
-    fn is_expired(&self, now: Instant) -> bool {
-        self.deadline.is_some_and(|deadline| now >= deadline)
+impl<C> Drop for Trimming<C> {
+    fn drop(&mut self) {
+        self.0.entries.trimming.store(false, Ordering::Release);
     }
 }
 
@@ -403,16 +414,6 @@ impl<C: Clock> InMemoryCacheStore<C> {
         }
 
         taken
-    }
-}
-
-/// A started trim. Dropping it lets the next one start, even if it never ran, as when its runtime
-/// shut down first.
-struct Trimming<C>(InMemoryCacheStore<C>);
-
-impl<C> Drop for Trimming<C> {
-    fn drop(&mut self) {
-        self.0.entries.trimming.store(false, Ordering::Release);
     }
 }
 

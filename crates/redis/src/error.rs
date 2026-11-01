@@ -3,6 +3,25 @@
 use serde_json::error::Category;
 use sisa_caching_core::cache::CacheError;
 
+/// What went wrong with the JSON, without quoting it.
+fn json_message(error: &serde_json::Error) -> String {
+    let (line, column) = (error.line(), error.column());
+
+    // An encoding error has no position, and neither has a decoding error that the type raises
+    // itself, such as an untagged enum that no variant fits.
+    if line == 0 {
+        return "the value couldn't be encoded as JSON, or the stored JSON doesn't fit the requested type"
+            .to_owned();
+    }
+
+    match error.classify() {
+        Category::Data => {
+            format!("the stored JSON doesn't fit the requested type at line {line} column {column}")
+        }
+        _ => format!("the stored data isn't valid JSON at line {line} column {column}"),
+    }
+}
+
 /// Errors from Redis-backed cache operations: the shared [`CacheError`]s, plus Redis and JSON
 /// failures.
 #[derive(Debug, thiserror::Error)]
@@ -26,25 +45,6 @@ pub enum RedisCacheError {
 
 /// A `Result` whose error is a [`RedisCacheError`].
 pub type Result<T> = std::result::Result<T, RedisCacheError>;
-
-/// What went wrong with the JSON, without quoting it.
-fn json_message(error: &serde_json::Error) -> String {
-    let (line, column) = (error.line(), error.column());
-
-    // An encoding error has no position, and neither has a decoding error that the type raises
-    // itself, such as an untagged enum that no variant fits.
-    if line == 0 {
-        return "the value couldn't be encoded as JSON, or the stored JSON doesn't fit the requested type"
-            .to_owned();
-    }
-
-    match error.classify() {
-        Category::Data => {
-            format!("the stored JSON doesn't fit the requested type at line {line} column {column}")
-        }
-        _ => format!("the stored data isn't valid JSON at line {line} column {column}"),
-    }
-}
 
 #[cfg(test)]
 mod tests {

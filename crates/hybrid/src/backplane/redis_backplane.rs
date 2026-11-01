@@ -24,6 +24,121 @@ use super::BackplaneMessage;
 /// How many unread messages a subscription holds, as [`RedisBackplane`] says.
 const QUEUE_LIMIT: usize = 8192;
 
+/// The server the backplane publishes and subscribes on.
+#[derive(Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one per backplane, and which variant is larger depends on redis-rs's features"
+)]
+enum Server {
+    /// One server, with or without replicas. A node of a cluster also works, with classic pub/sub.
+    Standalone {
+        client: Client,
+        conn: ConnectionManager,
+    },
+    /// The primary that Sentinel names when the backplane publishes or subscribes.
+    Sentinel(SentinelConnection),
+    /// A cluster, which routes each command to the node it belongs on.
+    Cluster {
+        client: ClusterClient,
+        conn: ClusterConnection,
+    },
+}
+
+fn io_error(kind: ErrorKind, reason: &'static str) -> RedisCacheError {
+    RedisError::from(std::io::Error::new(kind, reason)).into()
+}
+
+/// The next message's payload.
+async fn message(pushes: &mut Receiver<PushInfo>) -> Result<Vec<u8>> {
+    let closed = || io_error(ErrorKind::ConnectionAborted, "connection closed");
+
+    loop {
+        let push = match pushes.recv().await {
+            Ok(push) => push,
+            Err(RecvError::Lagged(_)) => {
+                return Err(io_error(ErrorKind::Other, "the worker fell too far behind"));
+            }
+            Err(RecvError::Closed) => return Err(closed()),
+        };
+
+        match (push.kind, push.data.into_iter().nth(1)) {
+            // Garnet hands a sharded subscription's messages over as `message`.
+            (PushKind::Message | PushKind::SMessage, Some(Value::BulkString(payload))) => {
+                return Ok(payload);
+            }
+            // A cluster connection subscribes again by itself, but messages sent in the gap are
+            // lost. On Redis, a slot that moves unsubscribes its channel.
+            (PushKind::Disconnection | PushKind::SUnsubscribe, _) => return Err(closed()),
+            _ => {}
+        }
+    }
+}
+
+/// One subscribed connection. One that stops delivering without closing shows as the node's own
+/// heartbeats no longer coming back, which the worker checks. Behind Sentinel, a task of its own
+/// watches the primary, so a failover ends the subscription however often the worker stops
+/// waiting for a message.
+pub(crate) struct RedisSubscription {
+    /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
+    pushes: Receiver<PushInfo>,
+    /// The subscribed connection, open as long as this is.
+    _connection: Box<dyn Send>,
+    /// Behind Sentinel, the task that ends the subscription once the primary moves.
+    primary: Option<JoinHandle<RedisCacheError>>,
+}
+
+impl Drop for RedisSubscription {
+    fn drop(&mut self) {
+        if let Some(primary) = &self.primary {
+            primary.abort();
+        }
+    }
+}
+
+impl RedisSubscription {
+    /// The next message's payload, in order, with none missing. An error means messages may have
+    /// been lost and this subscription is done; open a new one. Dropping an unfinished call loses
+    /// no message.
+    pub(crate) async fn next(&mut self) -> Result<Vec<u8>> {
+        let Some(primary) = &mut self.primary else {
+            return message(&mut self.pushes).await;
+        };
+
+        tokio::select! {
+            biased;
+            moved = primary => {
+                Err(moved.unwrap_or_else(|_| io_error(ErrorKind::Other, "watching the primary stopped")))
+            }
+            message = message(&mut self.pushes) => message,
+        }
+    }
+}
+
+/// Asks Sentinel for the primary every `interval`, which also moves the shared connection there,
+/// so the store stops writing to a demoted primary. Returns once the primary is no longer
+/// `subscribed`, or asking fails or takes longer than `interval`.
+async fn watch_primary(
+    sentinel: SentinelConnection,
+    subscribed: ConnectionAddr,
+    interval: Duration,
+) -> RedisCacheError {
+    let mut checks = tokio::time::interval_at(Instant::now() + interval, interval);
+
+    checks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        checks.tick().await;
+
+        match tokio::time::timeout(interval, sentinel.primary_client()).await {
+            Ok(Ok(primary)) if *primary.get_connection_info().addr() == subscribed => {}
+            Ok(Ok(_)) => return io_error(ErrorKind::ConnectionReset, "the primary moved"),
+            Ok(Err(error)) => return error.into(),
+            Err(_) => return io_error(ErrorKind::TimedOut, "asking Sentinel timed out"),
+        }
+    }
+}
+
 /// A backplane over Redis pub/sub. Each hybrid store has its own channel, `<store>:backplane`, such
 /// as `catalog:backplane`, so a node gets only its own stores' messages. Publishing shares one
 /// connection. Each subscription opens its own connection, on RESP3, and holds up to 8,192
@@ -44,27 +159,6 @@ pub struct RedisBackplane {
     server: Server,
     /// The store's channel. [`for_store`](Self::for_store) sets it when the store is built.
     channel: Arc<str>,
-}
-
-/// The server the backplane publishes and subscribes on.
-#[derive(Clone)]
-#[allow(
-    clippy::large_enum_variant,
-    reason = "one per backplane, and which variant is larger depends on redis-rs's features"
-)]
-enum Server {
-    /// One server, with or without replicas. A node of a cluster also works, with classic pub/sub.
-    Standalone {
-        client: Client,
-        conn: ConnectionManager,
-    },
-    /// The primary that Sentinel names when the backplane publishes or subscribes.
-    Sentinel(SentinelConnection),
-    /// A cluster, which routes each command to the node it belongs on.
-    Cluster {
-        client: ClusterClient,
-        conn: ClusterConnection,
-    },
 }
 
 impl std::fmt::Debug for RedisBackplane {
@@ -250,100 +344,6 @@ impl RedisBackplane {
                 .map(|(sentinel, primary)| tokio::spawn(watch_primary(sentinel, primary, timeout))),
         })
     }
-}
-
-/// One subscribed connection. One that stops delivering without closing shows as the node's own
-/// heartbeats no longer coming back, which the worker checks. Behind Sentinel, a task of its own
-/// watches the primary, so a failover ends the subscription however often the worker stops
-/// waiting for a message.
-pub(crate) struct RedisSubscription {
-    /// The connection's pushes, messages among them, up to `QUEUE_LIMIT`.
-    pushes: Receiver<PushInfo>,
-    /// The subscribed connection, open as long as this is.
-    _connection: Box<dyn Send>,
-    /// Behind Sentinel, the task that ends the subscription once the primary moves.
-    primary: Option<JoinHandle<RedisCacheError>>,
-}
-
-impl Drop for RedisSubscription {
-    fn drop(&mut self) {
-        if let Some(primary) = &self.primary {
-            primary.abort();
-        }
-    }
-}
-
-/// The next message's payload.
-async fn message(pushes: &mut Receiver<PushInfo>) -> Result<Vec<u8>> {
-    let closed = || io_error(ErrorKind::ConnectionAborted, "connection closed");
-
-    loop {
-        let push = match pushes.recv().await {
-            Ok(push) => push,
-            Err(RecvError::Lagged(_)) => {
-                return Err(io_error(ErrorKind::Other, "the worker fell too far behind"));
-            }
-            Err(RecvError::Closed) => return Err(closed()),
-        };
-
-        match (push.kind, push.data.into_iter().nth(1)) {
-            // Garnet hands a sharded subscription's messages over as `message`.
-            (PushKind::Message | PushKind::SMessage, Some(Value::BulkString(payload))) => {
-                return Ok(payload);
-            }
-            // A cluster connection subscribes again by itself, but messages sent in the gap are
-            // lost. On Redis, a slot that moves unsubscribes its channel.
-            (PushKind::Disconnection | PushKind::SUnsubscribe, _) => return Err(closed()),
-            _ => {}
-        }
-    }
-}
-
-/// Asks Sentinel for the primary every `interval`, which also moves the shared connection there,
-/// so the store stops writing to a demoted primary. Returns once the primary is no longer
-/// `subscribed`, or asking fails or takes longer than `interval`.
-async fn watch_primary(
-    sentinel: SentinelConnection,
-    subscribed: ConnectionAddr,
-    interval: Duration,
-) -> RedisCacheError {
-    let mut checks = tokio::time::interval_at(Instant::now() + interval, interval);
-
-    checks.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-    loop {
-        checks.tick().await;
-
-        match tokio::time::timeout(interval, sentinel.primary_client()).await {
-            Ok(Ok(primary)) if *primary.get_connection_info().addr() == subscribed => {}
-            Ok(Ok(_)) => return io_error(ErrorKind::ConnectionReset, "the primary moved"),
-            Ok(Err(error)) => return error.into(),
-            Err(_) => return io_error(ErrorKind::TimedOut, "asking Sentinel timed out"),
-        }
-    }
-}
-
-impl RedisSubscription {
-    /// The next message's payload, in order, with none missing. An error means messages may have
-    /// been lost and this subscription is done; open a new one. Dropping an unfinished call loses
-    /// no message.
-    pub(crate) async fn next(&mut self) -> Result<Vec<u8>> {
-        let Some(primary) = &mut self.primary else {
-            return message(&mut self.pushes).await;
-        };
-
-        tokio::select! {
-            biased;
-            moved = primary => {
-                Err(moved.unwrap_or_else(|_| io_error(ErrorKind::Other, "watching the primary stopped")))
-            }
-            message = message(&mut self.pushes) => message,
-        }
-    }
-}
-
-fn io_error(kind: ErrorKind, reason: &'static str) -> RedisCacheError {
-    RedisError::from(std::io::Error::new(kind, reason)).into()
 }
 
 #[cfg(test)]

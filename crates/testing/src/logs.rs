@@ -12,17 +12,17 @@ use tracing::{
     subscriber::NoSubscriber,
 };
 
-/// Every event at the info level or above, one line each with its level and fields, such as
-/// `INFO message=worker started worker="in-memory-cache-purge-worker" store=app`. Install it on
-/// the test's thread with `tracing::subscriber::set_default`.
-#[derive(Clone)]
-pub struct Logs(Arc<Mutex<Vec<String>>>);
-
 /// A dispatcher that lives as long as the process. While a test's `Logs` is the only other one,
 /// `tracing` decides whether a line logs from the default of the thread that logs it first, so a
 /// line another test logged first would stay off for good. With this one beside it, every live
 /// dispatcher decides.
 static ALONGSIDE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+
+/// Every event at the info level or above, one line each with its level and fields, such as
+/// `INFO message=worker started worker="in-memory-cache-purge-worker" store=app`. Install it on
+/// the test's thread with `tracing::subscriber::set_default`.
+#[derive(Clone)]
+pub struct Logs(Arc<Mutex<Vec<String>>>);
 
 impl Default for Logs {
     fn default() -> Self {

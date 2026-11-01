@@ -24,6 +24,120 @@ const GENERATION_SLOTS: usize = 64;
 /// Prefixes being removed at once, past which another prefix clears the local layer instead.
 const REMOVING_LIMIT: usize = 16;
 
+/// The prefixes whose local copies are being removed. A walk that never finishes, as when the
+/// runtime shuts down, leaves its keys reading as misses, which is safe.
+#[derive(Default)]
+struct Removing {
+    /// How many prefixes there are, so a read checks the list only while one is being removed.
+    count: AtomicUsize,
+    prefixes: Mutex<Vec<KeyPrefix>>,
+}
+
+impl Removing {
+    fn prefixes(&self) -> MutexGuard<'_, Vec<KeyPrefix>> {
+        self.prefixes.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn covers(&self, key: &str) -> bool {
+        self.count.load(Ordering::SeqCst) > 0
+            && self.prefixes().iter().any(|prefix| prefix.matches(key))
+    }
+
+    /// Adds `prefix`, unless `REMOVING_LIMIT` prefixes are already being removed.
+    fn add(&self, prefix: &KeyPrefix) -> bool {
+        let mut prefixes = self.prefixes();
+
+        if prefixes.len() >= REMOVING_LIMIT {
+            return false;
+        }
+
+        prefixes.push(prefix.clone());
+        self.count.fetch_add(1, Ordering::SeqCst);
+
+        true
+    }
+
+    fn done(&self, prefix: &KeyPrefix) {
+        let mut prefixes = self.prefixes();
+
+        if let Some(index) = prefixes.iter().position(|removing| removing == prefix) {
+            prefixes.swap_remove(index);
+            self.count.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[derive(Default)]
+struct Numbers {
+    last: u64,
+    publishing: BTreeSet<u64>,
+}
+
+/// One number being written or published.
+pub(crate) struct Publishing {
+    sequence: Arc<Sequence>,
+    pub(crate) seq: u64,
+}
+
+impl Drop for Publishing {
+    fn drop(&mut self) {
+        self.sequence
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publishing
+            .remove(&self.seq);
+    }
+}
+
+/// Hands out this node's sequence numbers, one to each write as it starts, and tracks which are
+/// still being written or published, so a heartbeat only vouches for numbers whose publish is
+/// over. Those were sent before the heartbeat, so every subscriber that gets them gets them first.
+#[derive(Default)]
+pub(crate) struct Sequence(Mutex<Numbers>);
+
+impl Sequence {
+    /// The next number, counted as publishing until the returned guard drops.
+    pub(crate) fn start(self: &Arc<Self>) -> Publishing {
+        let mut numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+
+        numbers.last += 1;
+
+        let seq = numbers.last;
+
+        numbers.publishing.insert(seq);
+
+        Publishing {
+            sequence: Arc::clone(self),
+            seq,
+        }
+    }
+
+    /// Whether no publish is in progress.
+    pub(crate) fn idle(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publishing
+            .is_empty()
+    }
+
+    /// The highest number up to which every publish is over.
+    pub(crate) fn finished(&self) -> u64 {
+        let numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+
+        numbers
+            .publishing
+            .first()
+            .map_or(numbers.last, |first| first - 1)
+    }
+
+    /// The last number handed out.
+    pub(crate) fn last(&self) -> u64 {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).last
+    }
+}
+
 /// The local layer, the `get_or_set` lock, a generation number per slot of keys, and the sequence
 /// numbers of the store's invalidations. Every invalidation bumps the generations it covers before
 /// it evicts, so a reader that saw an older generation knows its distributed value may be stale
@@ -188,120 +302,6 @@ impl<C: Clock> State<C> {
         self.local_reads_enabled.store(false, Ordering::SeqCst);
         self.invalidate(&Invalidation::Clear).await;
         self.local_reads_enabled.store(connected, Ordering::SeqCst);
-    }
-}
-
-/// The prefixes whose local copies are being removed. A walk that never finishes, as when the
-/// runtime shuts down, leaves its keys reading as misses, which is safe.
-#[derive(Default)]
-struct Removing {
-    /// How many prefixes there are, so a read checks the list only while one is being removed.
-    count: AtomicUsize,
-    prefixes: Mutex<Vec<KeyPrefix>>,
-}
-
-impl Removing {
-    fn prefixes(&self) -> MutexGuard<'_, Vec<KeyPrefix>> {
-        self.prefixes.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn covers(&self, key: &str) -> bool {
-        self.count.load(Ordering::SeqCst) > 0
-            && self.prefixes().iter().any(|prefix| prefix.matches(key))
-    }
-
-    /// Adds `prefix`, unless `REMOVING_LIMIT` prefixes are already being removed.
-    fn add(&self, prefix: &KeyPrefix) -> bool {
-        let mut prefixes = self.prefixes();
-
-        if prefixes.len() >= REMOVING_LIMIT {
-            return false;
-        }
-
-        prefixes.push(prefix.clone());
-        self.count.fetch_add(1, Ordering::SeqCst);
-
-        true
-    }
-
-    fn done(&self, prefix: &KeyPrefix) {
-        let mut prefixes = self.prefixes();
-
-        if let Some(index) = prefixes.iter().position(|removing| removing == prefix) {
-            prefixes.swap_remove(index);
-            self.count.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
-/// Hands out this node's sequence numbers, one to each write as it starts, and tracks which are
-/// still being written or published, so a heartbeat only vouches for numbers whose publish is
-/// over. Those were sent before the heartbeat, so every subscriber that gets them gets them first.
-#[derive(Default)]
-pub(crate) struct Sequence(Mutex<Numbers>);
-
-#[derive(Default)]
-struct Numbers {
-    last: u64,
-    publishing: BTreeSet<u64>,
-}
-
-impl Sequence {
-    /// The next number, counted as publishing until the returned guard drops.
-    pub(crate) fn start(self: &Arc<Self>) -> Publishing {
-        let mut numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
-
-        numbers.last += 1;
-
-        let seq = numbers.last;
-
-        numbers.publishing.insert(seq);
-
-        Publishing {
-            sequence: Arc::clone(self),
-            seq,
-        }
-    }
-
-    /// Whether no publish is in progress.
-    pub(crate) fn idle(&self) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .publishing
-            .is_empty()
-    }
-
-    /// The highest number up to which every publish is over.
-    pub(crate) fn finished(&self) -> u64 {
-        let numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
-
-        numbers
-            .publishing
-            .first()
-            .map_or(numbers.last, |first| first - 1)
-    }
-
-    /// The last number handed out.
-    pub(crate) fn last(&self) -> u64 {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).last
-    }
-}
-
-/// One number being written or published.
-pub(crate) struct Publishing {
-    sequence: Arc<Sequence>,
-    pub(crate) seq: u64,
-}
-
-impl Drop for Publishing {
-    fn drop(&mut self) {
-        self.sequence
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .publishing
-            .remove(&self.seq);
     }
 }
 

@@ -7,6 +7,15 @@ use testcontainers::{
 
 use crate::server::{Server, image, wait_for_ping};
 
+/// Whether a `CLIENT LIST` line is a Pub/Sub connection: its flags include `P`.
+fn is_subscriber(client: &str) -> bool {
+    client.split(' ').any(|field| {
+        field
+            .strip_prefix("flags=")
+            .is_some_and(|flags| flags.contains('P'))
+    })
+}
+
 /// A Redis server of its own for one test, in Docker. It is removed when this value drops.
 ///
 /// `REDIS_IMAGE` picks the image, such as `valkey/valkey:8-alpine`; the default is
@@ -175,13 +184,4 @@ impl Redis {
             .await
             .unwrap();
     }
-}
-
-/// Whether a `CLIENT LIST` line is a Pub/Sub connection: its flags include `P`.
-fn is_subscriber(client: &str) -> bool {
-    client.split(' ').any(|field| {
-        field
-            .strip_prefix("flags=")
-            .is_some_and(|flags| flags.contains('P'))
-    })
 }

@@ -12,6 +12,56 @@ use crate::cache::CacheError;
 /// The longest any duration setting, or a write's TTL, may be: 365 days.
 pub const MAX_TTL_SECS: u64 = 365 * 24 * 60 * 60;
 
+/// The last field of a settings type that flattens [`CacheSettings`]: it takes whatever fields
+/// no other field did, and fails on the first, so a misspelled setting can't silently keep its
+/// default. Serde's `deny_unknown_fields` doesn't work beside `flatten`.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct NoUnknownFields;
+
+// Fails at the first field it is given: every known one was taken before it.
+impl<'de> Deserialize<'de> for NoUnknownFields {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(NoUnknownFields)
+    }
+}
+
+// Reads the fields left over, as a map, and fails at the first one.
+impl<'de> Visitor<'de> for NoUnknownFields {
+    type Value = Self;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("no fields other than the known settings")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self, A::Error> {
+        match map.next_key::<String>()? {
+            Some(field) => Err(de::Error::custom(format!("unknown field `{field}`"))),
+            None => Ok(self),
+        }
+    }
+}
+
+/// Fails when a duration setting is 0, with `if_zero` as the fix, or over [`MAX_TTL_SECS`]. A
+/// setting that `None` turns off passes `None` through.
+#[doc(hidden)]
+pub fn check_duration(
+    field: &'static str,
+    duration: impl Into<Option<Duration>>,
+    if_zero: &str,
+) -> Result<(), CacheError> {
+    match duration.into() {
+        Some(duration) if duration.is_zero() => Err(CacheError::invalid_settings(
+            field,
+            format!("is 0; {if_zero}"),
+        )),
+        Some(duration) if duration > Duration::from_secs(MAX_TTL_SECS) => {
+            Err(CacheError::too_long(field, duration))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Settings every store has. Each store's settings flatten them, so in a config file they sit
 /// beside the store's own: `{ "default_ttl_secs": 300, "max_entries": 10000 }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,56 +134,6 @@ impl CacheSettings {
     /// `refresh_threshold` when refresh-ahead is on, or `None` when it is off.
     pub fn refresh_threshold(&self) -> Option<f64> {
         self.refresh_threshold
-    }
-}
-
-/// The last field of a settings type that flattens [`CacheSettings`]: it takes whatever fields
-/// no other field did, and fails on the first, so a misspelled setting can't silently keep its
-/// default. Serde's `deny_unknown_fields` doesn't work beside `flatten`.
-#[doc(hidden)]
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct NoUnknownFields;
-
-// Fails at the first field it is given: every known one was taken before it.
-impl<'de> Deserialize<'de> for NoUnknownFields {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_map(NoUnknownFields)
-    }
-}
-
-// Reads the fields left over, as a map, and fails at the first one.
-impl<'de> Visitor<'de> for NoUnknownFields {
-    type Value = Self;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("no fields other than the known settings")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self, A::Error> {
-        match map.next_key::<String>()? {
-            Some(field) => Err(de::Error::custom(format!("unknown field `{field}`"))),
-            None => Ok(self),
-        }
-    }
-}
-
-/// Fails when a duration setting is 0, with `if_zero` as the fix, or over [`MAX_TTL_SECS`]. A
-/// setting that `None` turns off passes `None` through.
-#[doc(hidden)]
-pub fn check_duration(
-    field: &'static str,
-    duration: impl Into<Option<Duration>>,
-    if_zero: &str,
-) -> Result<(), CacheError> {
-    match duration.into() {
-        Some(duration) if duration.is_zero() => Err(CacheError::invalid_settings(
-            field,
-            format!("is 0; {if_zero}"),
-        )),
-        Some(duration) if duration > Duration::from_secs(MAX_TTL_SECS) => {
-            Err(CacheError::too_long(field, duration))
-        }
-        _ => Ok(()),
     }
 }
 

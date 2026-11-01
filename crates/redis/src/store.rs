@@ -32,6 +32,20 @@ const MAX_TTL_MS: u64 = i64::MAX as u64 / 2;
 /// The JSON value and origin metadata of one entry's hash.
 type StoredFields = (Option<Vec<u8>>, Option<u64>, Option<u64>);
 
+/// Escapes the characters that `SCAN MATCH` reads as a pattern.
+fn escape_glob(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+
+    for c in text.chars() {
+        if "*?[]\\".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+
+    escaped
+}
+
 /// A store on a Redis-family server. One store holds values of every type as JSON; `get::<User>`
 /// and `set(&key, user, None)` name the type per call. Reads decode the JSON into the type you
 /// name, and nothing in Redis records a Rust type, so other languages can share the keys.
@@ -363,20 +377,6 @@ where
 
         Ok(())
     }
-}
-
-/// Escapes the characters that `SCAN MATCH` reads as a pattern.
-fn escape_glob(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-
-    for c in text.chars() {
-        if "*?[]\\".contains(c) {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-
-    escaped
 }
 
 #[cfg(test)]

@@ -32,6 +32,91 @@ const PUBLISH_ATTEMPTS: u32 = 3;
 /// How long `shutdown` waits for the writes still running and their invalidations.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 
+/// Publishes `message` on `store`'s channel in up to `PUBLISH_ATTEMPTS` tries, and returns how
+/// many subscribers it reached.
+async fn send(
+    backplane: &RedisBackplane,
+    store: &KeyPrefix,
+    message: &BackplaneMessage,
+) -> sisa_caching_redis::error::Result<usize> {
+    let mut delay = Duration::from_millis(50);
+    let mut attempt = 1;
+
+    loop {
+        match backplane.publish(message).await {
+            Err(error) if attempt < PUBLISH_ATTEMPTS => {
+                tracing::debug!(%store, %error, attempt, "publish failed; retrying");
+
+                tokio::time::sleep(delay).await;
+                delay *= 2;
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
+/// The rest of `shutdown`, once heartbeats have stopped: waits for the writes still running, sends
+/// the stop message, and stops the worker.
+async fn stop<C: Clock>(state: Arc<State<C>>, backplane: Arc<RedisBackplane>, worker: Worker) {
+    let store = state.local_store.name();
+    let sequence = &state.sequence;
+    let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
+        while !sequence.idle() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+
+    if published.is_err() {
+        tracing::warn!(%store, "invalidations were still being published at shutdown; other nodes may clear once");
+    }
+
+    let stopping = BackplaneMessage::accounting(
+        state.node_id.clone(),
+        sequence.last(),
+        Invalidation::Stopping,
+    );
+
+    match send(&backplane, store, &stopping).await {
+        Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
+        Err(error) => {
+            tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
+        }
+    }
+
+    // Only now: until here the worker keeps the local copies current, and on Garnet a
+    // subscription closing while a message is published can lose that message for the others.
+    worker.stop();
+    state.disable_local_reads();
+    _ = state.shut_down.set(());
+}
+
+/// Publishes one invalidation under its sequence number, retrying with a growing wait. When every
+/// try fails, the other nodes see the number missing at this node's next heartbeat and clear their
+/// local layers.
+async fn publish(
+    publishing: Publishing,
+    backplane: Arc<RedisBackplane>,
+    store: KeyPrefix,
+    mut message: BackplaneMessage,
+) {
+    message.seq = Some(publishing.seq);
+
+    match send(&backplane, &store, &message).await {
+        Ok(subscribers) => METRICS.invalidation_delivered(&store, subscribers),
+        Err(error) => {
+            METRICS.publish_failed(&store);
+            tracing::warn!(
+                %store,
+                %error,
+                kind = message.invalidation.kind(),
+                "could not publish an invalidation; other nodes clear their local layers at the next heartbeat"
+            );
+        }
+    }
+}
+
 /// An in-memory layer in front of a distributed store, with invalidations carried by a
 /// [`RedisBackplane`].
 /// One store holds values of every type: `get::<User>` and `set(&key, user, None)` name the type
@@ -295,127 +380,6 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
     }
 }
 
-/// The rest of `shutdown`, once heartbeats have stopped: waits for the writes still running, sends
-/// the stop message, and stops the worker.
-async fn stop<C: Clock>(state: Arc<State<C>>, backplane: Arc<RedisBackplane>, worker: Worker) {
-    let store = state.local_store.name();
-    let sequence = &state.sequence;
-    let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
-        while !sequence.idle() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await;
-
-    if published.is_err() {
-        tracing::warn!(%store, "invalidations were still being published at shutdown; other nodes may clear once");
-    }
-
-    let stopping = BackplaneMessage::accounting(
-        state.node_id.clone(),
-        sequence.last(),
-        Invalidation::Stopping,
-    );
-
-    match send(&backplane, store, &stopping).await {
-        Ok(_) => tracing::info!(%store, "told the other nodes this one is stopping"),
-        Err(error) => {
-            tracing::warn!(%store, %error, "could not publish the stop; other nodes clear once its heartbeats stop")
-        }
-    }
-
-    // Only now: until here the worker keeps the local copies current, and on Garnet a
-    // subscription closing while a message is published can lose that message for the others.
-    worker.stop();
-    state.disable_local_reads();
-    _ = state.shut_down.set(());
-}
-
-/// Publishes one invalidation under its sequence number, retrying with a growing wait. When every
-/// try fails, the other nodes see the number missing at this node's next heartbeat and clear their
-/// local layers.
-async fn publish(
-    publishing: Publishing,
-    backplane: Arc<RedisBackplane>,
-    store: KeyPrefix,
-    mut message: BackplaneMessage,
-) {
-    message.seq = Some(publishing.seq);
-
-    match send(&backplane, &store, &message).await {
-        Ok(subscribers) => METRICS.invalidation_delivered(&store, subscribers),
-        Err(error) => {
-            METRICS.publish_failed(&store);
-            tracing::warn!(
-                %store,
-                %error,
-                kind = message.invalidation.kind(),
-                "could not publish an invalidation; other nodes clear their local layers at the next heartbeat"
-            );
-        }
-    }
-}
-
-/// Publishes `message` on `store`'s channel in up to `PUBLISH_ATTEMPTS` tries, and returns how
-/// many subscribers it reached.
-async fn send(
-    backplane: &RedisBackplane,
-    store: &KeyPrefix,
-    message: &BackplaneMessage,
-) -> sisa_caching_redis::error::Result<usize> {
-    let mut delay = Duration::from_millis(50);
-    let mut attempt = 1;
-
-    loop {
-        match backplane.publish(message).await {
-            Err(error) if attempt < PUBLISH_ATTEMPTS => {
-                tracing::debug!(%store, %error, attempt, "publish failed; retrying");
-
-                tokio::time::sleep(delay).await;
-                delay *= 2;
-                attempt += 1;
-            }
-            result => return result,
-        }
-    }
-}
-
-impl RedisHybridCacheStore {
-    /// Connects every part to one Redis server, such as `redis://127.0.0.1:6379` (`rediss://`
-    /// with the `tls-rustls` or `tls-native-tls` feature): the local layer, the Redis store and
-    /// the backplane, each with its part of `settings`, and starts the backplane worker with
-    /// `settings.worker`. `info` is a URL or a `redis::ConnectionInfo`. Its connections use
-    /// `connection_config`: while Redis is down a call fails at once. For other timeouts, a client
-    /// built by hand, a cluster or Sentinel, build the parts and use `new`.
-    pub async fn connect(
-        name: &str,
-        info: impl IntoConnectionInfo,
-        settings: &HybridCacheSettings,
-    ) -> Result<Self> {
-        settings.validate()?;
-
-        let info = info
-            .into_connection_info()
-            .map_err(HybridCacheError::distributed)?;
-        let distributed = RedisCacheStore::connect(name, info.clone())
-            .await
-            .map_err(HybridCacheError::distributed)?
-            .with_settings(settings.redis_settings())?;
-        let backplane = RedisBackplane::connect(info)
-            .await
-            .map_err(HybridCacheError::distributed)?;
-        let store = Self::new(distributed, backplane, settings)?;
-
-        store.start_worker();
-        Ok(store)
-    }
-}
-
-impl<D: CacheStore + 'static, C: Clock> sisa_caching_core::sealed::Sealed
-    for HybridCacheStore<D, C>
-{
-}
-
 impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
     type Error = HybridCacheError;
     // The local layer's clock, which the store's writes and refresh checks read.
@@ -503,4 +467,40 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
         })
         .await
     }
+}
+
+impl RedisHybridCacheStore {
+    /// Connects every part to one Redis server, such as `redis://127.0.0.1:6379` (`rediss://`
+    /// with the `tls-rustls` or `tls-native-tls` feature): the local layer, the Redis store and
+    /// the backplane, each with its part of `settings`, and starts the backplane worker with
+    /// `settings.worker`. `info` is a URL or a `redis::ConnectionInfo`. Its connections use
+    /// `connection_config`: while Redis is down a call fails at once. For other timeouts, a client
+    /// built by hand, a cluster or Sentinel, build the parts and use `new`.
+    pub async fn connect(
+        name: &str,
+        info: impl IntoConnectionInfo,
+        settings: &HybridCacheSettings,
+    ) -> Result<Self> {
+        settings.validate()?;
+
+        let info = info
+            .into_connection_info()
+            .map_err(HybridCacheError::distributed)?;
+        let distributed = RedisCacheStore::connect(name, info.clone())
+            .await
+            .map_err(HybridCacheError::distributed)?
+            .with_settings(settings.redis_settings())?;
+        let backplane = RedisBackplane::connect(info)
+            .await
+            .map_err(HybridCacheError::distributed)?;
+        let store = Self::new(distributed, backplane, settings)?;
+
+        store.start_worker();
+        Ok(store)
+    }
+}
+
+impl<D: CacheStore + 'static, C: Clock> sisa_caching_core::sealed::Sealed
+    for HybridCacheStore<D, C>
+{
 }
