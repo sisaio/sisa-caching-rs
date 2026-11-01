@@ -12,6 +12,7 @@ use std::{
 use crate::common::{WRITES, Write, backplane, hybrid, key, local_value, memory, node, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
+    clock::SystemClock,
     locker::Locker,
     settings::CacheSettings,
 };
@@ -37,6 +38,7 @@ impl sisa_caching_core::sealed::Sealed for LostReplies {}
 
 impl CacheStore for LostReplies {
     type Error = LostReply;
+    type Clock = SystemClock;
 
     fn name(&self) -> &KeyPrefix {
         self.0.name()
@@ -48,6 +50,10 @@ impl CacheStore for LostReplies {
 
     fn locker(&self) -> &Locker {
         self.0.locker()
+    }
+
+    fn clock(&self) -> &SystemClock {
+        self.0.clock()
     }
 
     async fn get_entry<CV: CacheValue>(
@@ -180,6 +186,7 @@ impl sisa_caching_core::sealed::Sealed for GatedStore {}
 
 impl CacheStore for GatedStore {
     type Error = CacheError;
+    type Clock = SystemClock;
 
     fn name(&self) -> &KeyPrefix {
         self.inner.name()
@@ -191,6 +198,10 @@ impl CacheStore for GatedStore {
 
     fn locker(&self) -> &Locker {
         self.inner.locker()
+    }
+
+    fn clock(&self) -> &SystemClock {
+        self.inner.clock()
     }
 
     async fn get_entry<CV: CacheValue>(

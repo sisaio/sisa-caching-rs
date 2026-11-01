@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use sisa_caching_core::{cache::CacheStore, metrics::METRICS};
+use sisa_caching_core::{cache::CacheStore, clock::Clock, metrics::METRICS};
 use tokio::{
     task::JoinSet,
     time::{Instant, MissedTickBehavior},
@@ -27,15 +27,15 @@ use crate::{
 /// when a message can't be read, when another node's heartbeat shows a sequence number this node
 /// never received, or when that node's heartbeats stop for `heartbeat_timeout_ms`. When its own
 /// heartbeats stop arriving, it treats the subscription as lost.
-pub(crate) struct BackplaneWorker {
-    state: Arc<State>,
+pub(crate) struct BackplaneWorker<C: Clock> {
+    state: Arc<State<C>>,
     backplane: Arc<RedisBackplane>,
     settings: BackplaneWorkerSettings,
 }
 
-impl BackplaneWorker {
+impl<C: Clock> BackplaneWorker<C> {
     pub(crate) fn new(
-        state: Arc<State>,
+        state: Arc<State<C>>,
         backplane: Arc<RedisBackplane>,
         settings: BackplaneWorkerSettings,
     ) -> Self {
@@ -221,7 +221,11 @@ impl<'a> Backoff<'a> {
 
 /// Publishes a heartbeat every `interval`, one at a time, so they arrive in order. The first goes
 /// out after one interval.
-async fn send_heartbeats(state: Arc<State>, backplane: Arc<RedisBackplane>, interval: Duration) {
+async fn send_heartbeats<C: Clock>(
+    state: Arc<State<C>>,
+    backplane: Arc<RedisBackplane>,
+    interval: Duration,
+) {
     let store = state.local_store.name();
     let mut ticks = tokio::time::interval_at(Instant::now() + interval, interval);
 
@@ -396,7 +400,7 @@ impl Peers {
 /// `run` owns the worker, so this runs however it ends: the store's last clone dropping, its
 /// runtime shutting down, or a panic. A store runs one worker, so no other worker's reads are
 /// turned off.
-impl Drop for BackplaneWorker {
+impl<C: Clock> Drop for BackplaneWorker<C> {
     fn drop(&mut self) {
         self.state.disable_local_reads();
         METRICS.backplane_connected(self.state.local_store.name(), false);

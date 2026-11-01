@@ -16,6 +16,7 @@ use crate::common::{
 };
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
+    clock::SystemClock,
     locker::Locker,
     settings::CacheSettings,
 };
@@ -507,6 +508,7 @@ impl sisa_caching_core::sealed::Sealed for PausingStore {}
 
 impl CacheStore for PausingStore {
     type Error = CacheError;
+    type Clock = SystemClock;
 
     fn name(&self) -> &KeyPrefix {
         self.inner.name()
@@ -518,6 +520,10 @@ impl CacheStore for PausingStore {
 
     fn locker(&self) -> &Locker {
         self.inner.locker()
+    }
+
+    fn clock(&self) -> &SystemClock {
+        self.inner.clock()
     }
 
     async fn get_entry<CV: CacheValue>(

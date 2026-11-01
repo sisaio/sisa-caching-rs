@@ -47,9 +47,9 @@ const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 /// inside a tokio runtime, or in `connect`, and stops when its last clone drops. Until that worker
 /// has subscribed, and while the subscription is lost, the store reads through to the distributed
 /// store.
-pub struct HybridCacheStore<D: CacheStore + 'static> {
+pub struct HybridCacheStore<D: CacheStore + 'static, C: Clock = SystemClock> {
     distributed_store: Arc<D>,
-    state: Arc<State>,
+    state: Arc<State<C>>,
     backplane: Arc<RedisBackplane>,
     /// The store's own TTL, refresh and lock settings, which both layers follow.
     cache_settings: CacheSettings,
@@ -59,7 +59,7 @@ pub struct HybridCacheStore<D: CacheStore + 'static> {
     reads: &'static Reads,
 }
 
-impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
+impl<D: CacheStore + 'static, C: Clock> Clone for HybridCacheStore<D, C> {
     fn clone(&self) -> Self {
         Self {
             distributed_store: Arc::clone(&self.distributed_store),
@@ -74,7 +74,7 @@ impl<D: CacheStore + 'static> Clone for HybridCacheStore<D> {
 }
 
 /// The name, the node id and whether local reads are on; never a value.
-impl<D: CacheStore + 'static> std::fmt::Debug for HybridCacheStore<D> {
+impl<D: CacheStore + 'static, C: Clock> std::fmt::Debug for HybridCacheStore<D, C> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("HybridCacheStore")
@@ -127,15 +127,17 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     ) -> Result<Self> {
         Self::new_on_clock(distributed_store, backplane, settings, SystemClock)
     }
+}
 
-    /// Builds the store as [`new`](Self::new) does, with its local layer on `clock`, so tests can
-    /// move time.
+impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
+    /// Builds the store as [`new`](HybridCacheStore::new) does, with its local layer on `clock`, so
+    /// tests can move time.
     #[doc(hidden)]
     pub fn new_on_clock(
         distributed_store: D,
         backplane: RedisBackplane,
         settings: &HybridCacheSettings,
-        clock: impl Clock,
+        clock: C,
     ) -> Result<Self> {
         settings.validate()?;
 
@@ -189,7 +191,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
     /// The local layer, for inspection. Writing through it skips the distributed store and the
     /// backplane.
     #[doc(hidden)]
-    pub fn local_store(&self) -> &InMemoryCacheStore {
+    pub fn local_store(&self) -> &InMemoryCacheStore<C> {
         &self.state.local_store
     }
 
@@ -295,7 +297,7 @@ impl<D: CacheStore + 'static> HybridCacheStore<D> {
 
 /// The rest of `shutdown`, once heartbeats have stopped: waits for the writes still running, sends
 /// the stop message, and stops the worker.
-async fn stop(state: Arc<State>, backplane: Arc<RedisBackplane>, worker: Worker) {
+async fn stop<C: Clock>(state: Arc<State<C>>, backplane: Arc<RedisBackplane>, worker: Worker) {
     let store = state.local_store.name();
     let sequence = &state.sequence;
     let published = tokio::time::timeout(SHUTDOWN_WAIT, async {
@@ -409,10 +411,15 @@ impl RedisHybridCacheStore {
     }
 }
 
-impl<D: CacheStore + 'static> sisa_caching_core::sealed::Sealed for HybridCacheStore<D> {}
+impl<D: CacheStore + 'static, C: Clock> sisa_caching_core::sealed::Sealed
+    for HybridCacheStore<D, C>
+{
+}
 
-impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
+impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
     type Error = HybridCacheError;
+    // The local layer's clock, which the store's writes and refresh checks read.
+    type Clock = C;
 
     fn name(&self) -> &KeyPrefix {
         self.distributed_store.name()
@@ -426,7 +433,7 @@ impl<D: CacheStore + 'static> CacheStore for HybridCacheStore<D> {
         &self.state.locker
     }
 
-    fn clock(&self) -> &dyn Clock {
+    fn clock(&self) -> &C {
         self.local_store().clock()
     }
 

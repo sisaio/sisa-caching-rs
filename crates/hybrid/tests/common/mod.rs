@@ -57,7 +57,9 @@ pub fn hybrid<D: CacheStore + 'static>(
 }
 
 /// Starts the store's backplane worker, unless it already runs, and waits until it has subscribed.
-pub async fn start<D: CacheStore + 'static>(store: HybridCacheStore<D>) -> HybridCacheStore<D> {
+pub async fn start<D: CacheStore + 'static, C: Clock>(
+    store: HybridCacheStore<D, C>,
+) -> HybridCacheStore<D, C> {
     store.start_worker();
     eventually("the backplane worker subscribes", || async {
         store.local_reads_enabled()
@@ -77,8 +79,8 @@ pub async fn node(distributed: &InMemoryCacheStore, redis: &Redis) -> Node {
     start(hybrid(distributed.clone(), backplane(redis).await).unwrap()).await
 }
 
-pub async fn local_value<D: CacheStore + 'static>(
-    node: &HybridCacheStore<D>,
+pub async fn local_value<D: CacheStore + 'static, C: Clock>(
+    node: &HybridCacheStore<D, C>,
     key: &str,
 ) -> Option<String> {
     node.local_store().get(key).await.unwrap()

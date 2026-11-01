@@ -208,6 +208,8 @@ where
     Conn: RedisConnection,
 {
     type Error = RedisCacheError;
+    // Redis counts the TTL itself, so the store has no clock to swap.
+    type Clock = SystemClock;
 
     fn name(&self) -> &KeyPrefix {
         &self.name
@@ -219,6 +221,10 @@ where
 
     fn locker(&self) -> &Locker {
         &self.locker
+    }
+
+    fn clock(&self) -> &SystemClock {
+        &SystemClock
     }
 
     #[tracing::instrument(level = "debug", name = "redis get", skip_all, fields(key = %self.name.format_key(key)), err(level = "debug"))]

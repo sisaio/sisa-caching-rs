@@ -25,7 +25,10 @@ fn ttl(ttl_secs: u64) -> CacheOptions {
     CacheOptions::with_ttl(secs(ttl_secs))
 }
 
-fn on_clock(clock: &ManualClock, settings: InMemoryCacheSettings) -> InMemoryCacheStore {
+fn on_clock(
+    clock: &ManualClock,
+    settings: InMemoryCacheSettings,
+) -> InMemoryCacheStore<ManualClock> {
     InMemoryCacheStore::new("users")
         .unwrap()
         .with_clock(clock.clone())
