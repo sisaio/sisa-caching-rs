@@ -15,7 +15,7 @@ leaves that cost out of the previous release's column.
 
 | Group | Benchmark | What it times |
 | --- | --- | --- |
-| memory | get hit, get miss, set, remove | One call on a store with one shard. `set` writes over the same key each time; `remove` takes out a key written just before it, untimed |
+| memory | get hit, get miss, set, remove | One call on a store with one shard. `set` builds a new value and writes it over the same key each time; `remove` takes out a key written just before it, untimed |
 | memory | get_or_set hit | `get_or_set` when the value is cached, so the loader never runs |
 | memory | get_or_set miss | `get_or_set` when the key is missing: a read, the key's lock, a second read, the loader and the write. The key is removed before each call, untimed |
 | memory 8 tasks | get hit, shards 1 and 16 | Eight tasks reading different keys at once, through one map or sixteen |
@@ -40,8 +40,8 @@ Each `memory 1M entries` call walks every entry without yielding, and calls on t
 walking wait for it. Inside a tokio runtime, the store runs its trims and its purge worker's purges
 on the blocking pool, and a hybrid node walks every prefix invalidation there too, its own or
 another node's, so those hold up no async thread. A memory store's `remove_prefix` and `purge`
-called by the application walk on the caller's thread; `remove_prefix` frees what it removed on
-the blocking pool.
+called by the application walk on the caller's thread; inside a runtime, `remove_prefix` frees
+what it removed on the blocking pool.
 
 ## Reading the numbers
 
