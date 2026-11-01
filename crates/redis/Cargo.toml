@@ -14,6 +14,9 @@ exclude = ["tests/"]
 keywords = ["cache", "redis", "valkey"]
 categories = ["caching", "database", "asynchronous"]
 
+[lints]
+workspace = true
+
 [features]
 # `rediss://` URLs: TLS through rustls, trusting the system's root certificates. redis-rs picks
 # no crypto provider, so this picks aws-lc-rs, rustls's own default.

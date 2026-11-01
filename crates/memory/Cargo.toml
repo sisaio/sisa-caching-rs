@@ -11,6 +11,9 @@ readme.workspace = true
 keywords = ["cache", "caching", "in-memory", "async"]
 categories = ["caching", "asynchronous"]
 
+[lints]
+workspace = true
+
 [dependencies]
 # The shared contracts that this crate implements.
 sisa-caching-core = { workspace = true }

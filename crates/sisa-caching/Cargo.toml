@@ -11,6 +11,9 @@ readme.workspace = true
 keywords = ["cache", "redis", "valkey", "hybrid-cache", "async"]
 categories = ["caching", "asynchronous"]
 
+[lints]
+workspace = true
+
 [features]
 # No default: an application names the stores it uses.
 default = []

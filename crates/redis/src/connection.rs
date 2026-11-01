@@ -164,7 +164,7 @@ fn failover(error: &RedisError) -> Option<Failover> {
     let read_only = error
         .clone()
         .into_server_errors()
-        .is_some_and(|errors| errors.iter().any(|(_, error)| not_run(error.kind())));
+        .is_some_and(|errors| errors.iter().any(|(_, aborted)| not_run(aborted.kind())));
 
     if read_only || error.is_connection_refusal() {
         Some(Failover::NotRun)

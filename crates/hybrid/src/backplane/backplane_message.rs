@@ -171,8 +171,7 @@ mod tests {
     #[test]
     fn published_invalidations_and_heartbeats_carry_a_sequence_number() {
         let mut invalidation = message(Invalidation::Key("42".to_owned()));
-        let accounting =
-            |invalidation| BackplaneMessage::accounting(NodeId::new("node-a"), 7, invalidation);
+        let accounting = |kind| BackplaneMessage::accounting(NodeId::new("node-a"), 7, kind);
         let heartbeat = accounting(Invalidation::Heartbeat);
         let stopping = accounting(Invalidation::Stopping);
 

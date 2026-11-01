@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn numbers_above_a_stalled_heartbeat_are_held_up_to_a_limit() {
         let mut peers = Peers::new();
-        let held = |peers: &Peers| peers.nodes[&NodeId::new("peer")].received.len();
+        let held = |tracked: &Peers| tracked.nodes[&NodeId::new("peer")].received.len();
 
         peers.receive(&heartbeat(0));
 

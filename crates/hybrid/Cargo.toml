@@ -14,6 +14,9 @@ exclude = ["tests/"]
 keywords = ["cache", "hybrid-cache", "two-level-cache", "invalidation", "async"]
 categories = ["caching", "asynchronous"]
 
+[lints]
+workspace = true
+
 [features]
 # `rediss://` URLs for the store and the backplane.
 tls-rustls = ["sisa-caching-redis/tls-rustls", "sisa-caching-testing/rustls"]

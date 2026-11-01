@@ -170,7 +170,7 @@ async fn an_entry_copies_unchanged_between_memory_redis_and_hybrid() {
         Some(Duration::from_secs(3600)),
     );
     let fields =
-        |entry: &CacheEntry<String>| (entry.value.clone(), entry.created_at(), entry.ttl());
+        |stored: &CacheEntry<String>| (stored.value.clone(), stored.created_at(), stored.ttl());
 
     memory.set_entry(&key(1), entry.clone()).await.unwrap();
 
