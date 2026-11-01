@@ -149,8 +149,8 @@ mod tests {
 
         let ids: Vec<u64> = database.users().into_keys().collect();
 
-        for path in [path.clone(), path.with_extension("lock")] {
-            _ = fs::remove_file(path);
+        for file in [path.clone(), path.with_extension("lock")] {
+            _ = fs::remove_file(file);
         }
         assert_eq!(ids, Vec::from_iter(100..132));
     }

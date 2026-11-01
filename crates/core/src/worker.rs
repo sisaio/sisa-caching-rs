@@ -135,8 +135,8 @@ mod tests {
         let (stopped, done) = oneshot::channel::<()>();
         let mut stopped = Some(stopped);
 
-        for worker in [&worker, &clone, &worker] {
-            worker.start("waiting", &store(), || {
+        for handle in [&worker, &clone, &worker] {
+            handle.start("waiting", &store(), || {
                 starts.fetch_add(1, Ordering::SeqCst);
 
                 let stopped = stopped.take().unwrap();
@@ -155,9 +155,9 @@ mod tests {
         drop(worker);
         drop(clone);
 
-        let stopped = tokio::time::timeout(Duration::from_secs(1), done).await;
+        let closed = tokio::time::timeout(Duration::from_secs(1), done).await;
 
-        assert!(stopped.unwrap().is_err(), "the task's future was dropped");
+        assert!(closed.unwrap().is_err(), "the task's future was dropped");
     }
 
     #[tokio::test]
@@ -172,9 +172,9 @@ mod tests {
         });
         running.clone().stop();
 
-        let stopped = tokio::time::timeout(Duration::from_secs(1), done).await;
+        let closed = tokio::time::timeout(Duration::from_secs(1), done).await;
 
-        assert!(stopped.unwrap().is_err(), "the task's future was dropped");
+        assert!(closed.unwrap().is_err(), "the task's future was dropped");
 
         let unstarted = Worker::new();
         let starts = AtomicUsize::new(0);

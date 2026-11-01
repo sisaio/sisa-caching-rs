@@ -11,6 +11,9 @@ readme.workspace = true
 keywords = ["cache", "caching", "async"]
 categories = ["caching", "asynchronous"]
 
+[lints]
+workspace = true
+
 [dependencies]
 # The error types' `Display` and `Error` implementations.
 thiserror = { workspace = true }

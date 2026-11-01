@@ -9,6 +9,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 # `RedisTls::client`, which needs redis-rs's rustls to show a client certificate.
 rustls = ["redis/tokio-rustls-comp"]

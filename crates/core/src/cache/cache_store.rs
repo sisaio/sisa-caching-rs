@@ -107,20 +107,20 @@ where
             };
 
             // Another caller may have refreshed it between this one's read and its lock.
-            if let Ok(Some(entry)) = read().await
-                && !needs_refresh(&entry)
+            if let Ok(Some(current)) = read().await
+                && !needs_refresh(&current)
             {
-                return Ok(entry.value);
+                return Ok(current.value);
             }
 
             return match load_and_set().await {
                 // The cached value only while the store still holds it: the load may have
                 // outlasted its TTL or the store's local TTL, or a write may have removed it.
                 Err(error) => match read().await {
-                    Ok(Some(entry)) => {
+                    Ok(Some(cached)) => {
                         tracing::warn!(store = %store.name(), "refresh failed; serving the cached value");
 
-                        Ok(entry.value)
+                        Ok(cached.value)
                     }
                     _ => Err(error),
                 },

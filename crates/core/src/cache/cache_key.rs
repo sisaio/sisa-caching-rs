@@ -125,11 +125,11 @@ impl CacheKey {
 
         // Formatted once, then checked: the key is what follows the prefix and its `:`.
         let full = format!("{prefix}{KEY_SEPARATOR}{key}");
-        let key = &full[prefix.len() + KEY_SEPARATOR.len_utf8()..];
+        let suffix = &full[prefix.len() + KEY_SEPARATOR.len_utf8()..];
 
-        if key.is_empty() || key.contains(KEY_SEPARATOR) {
+        if suffix.is_empty() || suffix.contains(KEY_SEPARATOR) {
             return Err(CacheError::InvalidKey(format!(
-                "key `{key}` must be non-empty, without `{KEY_SEPARATOR}`"
+                "key `{suffix}` must be non-empty, without `{KEY_SEPARATOR}`"
             )));
         }
 
