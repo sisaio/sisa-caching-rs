@@ -421,7 +421,12 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
                         .await
                         .map_err(HybridCacheError::distributed)?;
 
-                    if let Some(entry) = &entry {
+                    // No copy while local reads are off, as when the store is stopped or its
+                    // backplane is down: `promote` would only drop it. It checks again under its
+                    // turn.
+                    if let Some(entry) = &entry
+                        && self.state.local_reads_enabled()
+                    {
                         self.state.promote(key, generation, entry.clone()).await;
                     }
 
