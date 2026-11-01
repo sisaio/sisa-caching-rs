@@ -256,7 +256,7 @@ impl CacheMetrics {
     }
 
     /// Records how long one `get_or_set` loader ran, with `outcome` `ok` or `error`.
-    pub fn load(&self, store: &KeyPrefix, duration: Duration, ok: bool) {
+    pub fn loaded(&self, store: &KeyPrefix, duration: Duration, ok: bool) {
         self.load_duration.record(
             duration.as_secs_f64(),
             &[
