@@ -73,16 +73,6 @@ impl BackplaneWorkerSettings {
         Ok(())
     }
 
-    /// `heartbeat_interval_ms` as a `Duration`.
-    pub fn heartbeat_interval(&self) -> Duration {
-        Duration::from_millis(self.heartbeat_interval_ms)
-    }
-
-    /// `heartbeat_timeout_ms` as a `Duration`.
-    pub fn heartbeat_timeout(&self) -> Duration {
-        Duration::from_millis(self.heartbeat_timeout_ms)
-    }
-
     /// `reconnect_delay_ms` as a `Duration`.
     pub fn reconnect_delay(&self) -> Duration {
         Duration::from_millis(self.reconnect_delay_ms)
@@ -91,5 +81,15 @@ impl BackplaneWorkerSettings {
     /// `max_reconnect_delay_ms` as a `Duration`.
     pub fn max_reconnect_delay(&self) -> Duration {
         Duration::from_millis(self.max_reconnect_delay_ms)
+    }
+
+    /// `heartbeat_interval_ms` as a `Duration`.
+    pub fn heartbeat_interval(&self) -> Duration {
+        Duration::from_millis(self.heartbeat_interval_ms)
+    }
+
+    /// `heartbeat_timeout_ms` as a `Duration`.
+    pub fn heartbeat_timeout(&self) -> Duration {
+        Duration::from_millis(self.heartbeat_timeout_ms)
     }
 }

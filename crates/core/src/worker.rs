@@ -57,6 +57,7 @@ async fn logged(name: &'static str, store: KeyPrefix, task: impl Future<Output =
 pub struct Worker(Option<Arc<OnceLock<Option<Running>>>>);
 
 impl Worker {
+    /// A worker whose task starts on the first [`start`](Self::start) inside a tokio runtime.
     pub fn new() -> Self {
         Self(Some(Arc::default()))
     }

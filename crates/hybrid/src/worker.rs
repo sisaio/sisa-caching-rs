@@ -396,10 +396,10 @@ impl<C: Clock> BackplaneWorker<C> {
     }
 }
 
-/// A stopped worker can't apply invalidations, so the store must stop trusting its local layer.
-/// `run` owns the worker, so this runs however it ends: the store's last clone dropping, its
-/// runtime shutting down, or a panic. A store runs one worker, so no other worker's reads are
-/// turned off.
+// A stopped worker can't apply invalidations, so the store must stop trusting its local layer.
+// `run` owns the worker, so this runs however it ends: the store's last clone dropping, its
+// runtime shutting down, or a panic. A store runs one worker, so no other worker's reads are
+// turned off.
 impl<C: Clock> Drop for BackplaneWorker<C> {
     fn drop(&mut self) {
         self.state.disable_local_reads();

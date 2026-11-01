@@ -35,7 +35,7 @@ struct Removing {
 
 impl Removing {
     fn prefixes(&self) -> MutexGuard<'_, Vec<KeyPrefix>> {
-        self.prefixes.lock().unwrap_or_else(|e| e.into_inner())
+        self.prefixes.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn covers(&self, key: &str) -> bool {
@@ -506,6 +506,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct HookClock(Arc<Mutex<Option<Hook>>>);
 
+    // Runs the hook once, then reads the system clock.
     impl Clock for HookClock {
         fn now(&self) -> std::time::SystemTime {
             let hook = self.0.lock().unwrap().take();

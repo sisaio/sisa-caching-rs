@@ -36,11 +36,11 @@ type StoredFields = (Option<Vec<u8>>, Option<u64>, Option<u64>);
 fn escape_glob(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
 
-    for c in text.chars() {
-        if "*?[]\\".contains(c) {
+    for character in text.chars() {
+        if "*?[]\\".contains(character) {
             escaped.push('\\');
         }
-        escaped.push(c);
+        escaped.push(character);
     }
 
     escaped
@@ -96,7 +96,7 @@ where
     reads: &'static Reads,
 }
 
-/// The name and the settings; never the connection or a value.
+// Shows the name and the settings; never the connection or a value.
 impl<Conn: RedisConnection> std::fmt::Debug for RedisCacheStore<Conn> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -156,7 +156,7 @@ where
     async fn unlink(&self, prefix: Option<&str>) -> crate::error::Result<usize> {
         let scope = escape_glob(&self.name.format_scope());
         let pattern = match prefix {
-            Some(p) => format!("{scope}{}{KEY_SEPARATOR}*", escape_glob(p)),
+            Some(prefix) => format!("{scope}{}{KEY_SEPARATOR}*", escape_glob(prefix)),
             None => format!("{scope}*"),
         };
 
@@ -366,14 +366,14 @@ where
         Ok(removed > 0)
     }
 
-    #[tracing::instrument(level = "debug", name = "redis remove_prefix", skip_all, fields(store = %self.name(), %prefix), err(level = "debug"))]
+    #[tracing::instrument(level = "debug", name = "redis remove_prefix", skip_all, fields(store = %self.name, %prefix), err(level = "debug"))]
     async fn remove_prefix(&self, prefix: &str) -> crate::error::Result<usize> {
         KeyPrefix::validate(prefix)?;
 
         self.unlink(Some(prefix)).await
     }
 
-    #[tracing::instrument(level = "debug", name = "redis clear", skip_all, fields(store = %self.name()), err(level = "debug"))]
+    #[tracing::instrument(level = "debug", name = "redis clear", skip_all, fields(store = %self.name), err(level = "debug"))]
     async fn clear(&self) -> crate::error::Result<()> {
         self.unlink(None).await?;
 
