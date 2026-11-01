@@ -139,9 +139,9 @@ pub struct InMemoryCacheStore {
     name: KeyPrefix,
     clock: Arc<dyn Clock>,
     settings: InMemoryCacheSettings,
-    /// The longest the store holds an entry, whatever its TTL: a hybrid store's cap on its local
+    /// The longest the store holds an entry, whatever its TTL: a hybrid store's TTL for its local
     /// copies. `None`, the default, holds each entry for its whole TTL.
-    max_ttl: Option<Duration>,
+    local_ttl: Option<Duration>,
     entries: Arc<Entries>,
     locker: Arc<Locker>,
     worker: Worker,
@@ -172,7 +172,7 @@ impl InMemoryCacheStore {
             name,
             clock: Arc::new(SystemClock),
             entries: Arc::new(Entries::new(settings.shards())),
-            max_ttl: None,
+            local_ttl: None,
             settings,
             locker: Arc::default(),
             worker: Worker::new(),
@@ -200,12 +200,13 @@ impl InMemoryCacheStore {
         Ok(self)
     }
 
-    /// Holds each entry for at most `max_ttl`, whatever its TTL; the entry keeps its own creation
-    /// time and TTL. The hybrid store sets it on its local layer, to bound how long a node serves a
-    /// copy whose invalidation was lost; a store on its own has nothing to invalidate.
+    /// Holds each entry for `ttl`, or until it expires if that is sooner; the entry keeps its own
+    /// creation time and TTL. The hybrid store sets it on its local layer, so a copy whose
+    /// invalidation was lost goes stale for at most `ttl`; a store on its own has nothing to
+    /// invalidate.
     #[doc(hidden)]
-    pub fn with_max_ttl(mut self, max_ttl: Option<Duration>) -> Self {
-        self.max_ttl = max_ttl;
+    pub fn with_local_ttl(mut self, ttl: Duration) -> Self {
+        self.local_ttl = Some(ttl);
 
         self
     }
@@ -251,17 +252,18 @@ impl InMemoryCacheStore {
                 });
         }
 
-        let max_ttl = self.max_ttl;
-        // An entry that never expires, in a store that caps nothing, needs no clock. Otherwise the
-        // monotonic clock goes first: measured, the other order slows writes with a TTL.
-        let now = (entry.expires_at().is_some() || max_ttl.is_some()).then(|| self.clock.instant());
-        // The store holds an entry for its remaining lifetime, or `max_ttl` if that is shorter.
+        let local_ttl = self.local_ttl;
+        // An entry that never expires, in a store without a local TTL, needs no clock. Otherwise
+        // the monotonic clock goes first: measured, the other order slows writes with a TTL.
+        let now =
+            (entry.expires_at().is_some() || local_ttl.is_some()).then(|| self.clock.instant());
+        // The store holds an entry for its remaining lifetime, or `local_ttl` if that is shorter.
         let remaining = entry
             .expires_at()
             .and_then(|_| entry.remaining_ttl(self.clock.now()));
-        let ttl = match (remaining, max_ttl) {
-            (Some(remaining), Some(cap)) => Some(remaining.min(cap)),
-            (remaining, cap) => remaining.or(cap),
+        let ttl = match (remaining, local_ttl) {
+            (Some(remaining), Some(local_ttl)) => Some(remaining.min(local_ttl)),
+            (remaining, local_ttl) => remaining.or(local_ttl),
         };
 
         let mut entries = write(self.entries.shard(key));
@@ -564,7 +566,7 @@ mod tests {
         InMemoryCacheSettings {
             common: {
                 let mut settings = CacheSettings::default();
-                settings.ttl_secs = Some(ttl_secs);
+                settings.default_ttl_secs = Some(ttl_secs);
                 settings
             },
             ..InMemoryCacheSettings::default()
@@ -712,12 +714,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn max_ttl_caps_how_long_an_entry_stays_but_keeps_its_metadata() {
+    async fn a_local_ttl_shortens_how_long_an_entry_stays_but_keeps_its_metadata() {
         let clock = ManualClock::new();
-        let store = store(&clock, InMemoryCacheSettings::default()).with_max_ttl(Some(secs(10)));
+        let store = store(&clock, InMemoryCacheSettings::default()).with_local_ttl(secs(10));
 
         store.set(&key(1), 1_u32, ttl(60)).await.unwrap();
-        // One that never expires is capped too.
+        // One that never expires goes too.
         store.set(&key(2), 2_u32, None).await.unwrap();
 
         let entry = store.get_entry::<u32>(&key(1)).await.unwrap().unwrap();
@@ -1168,7 +1170,7 @@ mod tests {
             InMemoryCacheSettings {
                 common: {
                     let mut settings = CacheSettings::default();
-                    settings.ttl_secs = Some(10);
+                    settings.default_ttl_secs = Some(10);
                     settings.refresh_threshold = Some(0.8);
                     settings
                 },
@@ -1218,14 +1220,14 @@ mod tests {
             InMemoryCacheSettings {
                 common: {
                     let mut settings = CacheSettings::default();
-                    settings.ttl_secs = Some(10);
+                    settings.default_ttl_secs = Some(10);
                     settings.refresh_threshold = Some(0.5);
                     settings
                 },
                 ..InMemoryCacheSettings::default()
             },
         )
-        .with_max_ttl(Some(secs(8)));
+        .with_local_ttl(secs(8));
         let user = key(1);
         let refresh = |advance: u64| {
             let clock = clock.clone();
@@ -1245,7 +1247,7 @@ mod tests {
         clock.advance(secs(6));
         assert_eq!(refresh(0).await.as_deref(), Ok("old"));
 
-        // The store's 8-second cap passes during the load, though the entry's TTL is 10 seconds.
+        // The 8-second local TTL passes during the load, though the entry's TTL is 10 seconds.
         assert_eq!(refresh(3).await, Err("down"));
         assert_eq!(store.get::<String>(&user).await.unwrap(), None);
 
@@ -1303,7 +1305,7 @@ mod tests {
             .with_settings(InMemoryCacheSettings {
                 common: {
                     let mut settings = CacheSettings::default();
-                    settings.ttl_secs = Some(10);
+                    settings.default_ttl_secs = Some(10);
                     settings.refresh_threshold = Some(0.5);
                     settings
                 },

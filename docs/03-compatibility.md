@@ -26,8 +26,8 @@ behind, so a node reading from one could copy a value that was just replaced bac
 layer.
 
 A hybrid store on a cluster or behind Sentinel is put together with `HybridCacheStore::new`, from
-the Redis store, the backplane and the settings; it builds the local layer, with the 60-second cap
-on stale copies.
+the Redis store, the backplane and the settings; it builds the local layer, whose copies expire
+after 60 seconds by default.
 
 ### Cluster
 
@@ -99,7 +99,7 @@ Connect through a `SentinelConnection` and share it between the store and the ba
 
 A write the primary acknowledges just before a failover can be lost. The new primary then serves
 the older value until it expires, and hybrid nodes keep their copy of it for at most the local
-`max_ttl_secs`.
+`ttl_secs`.
 
 ### TLS
 

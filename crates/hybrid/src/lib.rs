@@ -15,10 +15,10 @@
 //! use sisa_caching_hybrid::{HybridCacheSettings, HybridCacheStore};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Local copies live at most 60 seconds, whatever their TTL, unless `local.max_ttl_secs` says
-//! // otherwise.
+//! // Entries live 5 minutes in Redis, and each node's copies 60 seconds, unless `local.ttl_secs`
+//! // says otherwise.
 //! let mut settings = HybridCacheSettings::default();
-//! settings.common.ttl_secs = Some(300);
+//! settings.common.default_ttl_secs = Some(300);
 //!
 //! let cache = HybridCacheStore::connect("app", "redis://127.0.0.1:6379", &settings).await?;
 //!
@@ -73,10 +73,12 @@
 //! # }
 //! ```
 //!
-//! The local `max_ttl_secs` bounds what nothing shows, such as a Redis write that timed out on the
+//! The local `ttl_secs` bounds what nothing shows, such as a Redis write that timed out on the
 //! client but was applied later, or a writer in another language that sends no sequence numbers.
-//! It is 60 seconds by default, and `None` removes it. It doesn't change freshness: an entry with a
-//! 100-second TTL still refreshes at 80 seconds with a `refresh_threshold` of `0.8`.
+//! It is 60 seconds by default and can't be turned off, so a local copy always expires, even of
+//! an entry that Redis keeps until removed. A copy never outlives its entry. It doesn't change
+//! freshness: an entry with a 100-second TTL still refreshes at 80 seconds with a
+//! `refresh_threshold` of `0.8`.
 //!
 //! # Invalidations from other languages
 //!

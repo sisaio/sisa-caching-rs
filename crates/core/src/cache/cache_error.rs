@@ -22,7 +22,7 @@ pub enum CacheError {
     #[error("`{field}` {reason}")]
     #[non_exhaustive]
     InvalidSettings {
-        /// The setting, such as `ttl_secs`, or `ttl` for a write's options.
+        /// The setting, such as `default_ttl_secs`, or `ttl` for a write's options.
         field: &'static str,
         /// What is wrong with its value.
         reason: String,

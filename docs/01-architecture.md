@@ -14,8 +14,8 @@ explains how the parts fit, what they promise, and which rules hold them togethe
   keys and invalidation messages.
 - **A local layer with a known staleness bound.** The hybrid store serves reads from memory, and a
   node never serves a value it was told is invalid. When a message is lost, the writer's next
-  heartbeat shows it and the node clears its local layer; the local `max_ttl_secs` caps every copy
-  all the same.
+  heartbeat shows it and the node clears its local layer; every copy expires after the local
+  `ttl_secs` all the same.
 - **Small and explicit.** Building a store is all the setup: it runs its own worker. No hidden
   dependencies, and each store has one read path and one write path.
 
@@ -109,7 +109,7 @@ Rules every store follows:
 ### Memory
 
 `InMemoryCacheStore` keeps `shards` hash maps (16 by default), each behind its own lock. An entry
-stays for its remaining TTL; a hybrid's local layer caps that at `local.max_ttl_secs`. Past
+stays for its remaining TTL; a hybrid's local layer keeps it for `local.ttl_secs` at most. Past
 `max_entries`, a write starts a trim
 that drops expired entries, then the least recently used ones down to 90% of the limit, so the
 next writes don't trim again. Values are freed after the lock is released. Expired entries read as
@@ -159,7 +159,7 @@ Redis), and uses `RedisBackplane` (Redis pub/sub) to tell other nodes about writ
 One store holds values of every type, so an application usually needs one, such as
 `catalog_hybrid_cache` holding categories, groups and products under their own key prefixes. Run
 a second store, such as `user_hybrid_cache`, when a set of data needs other settings: another
-TTL, another `local.max_entries`, or another `local.max_ttl_secs` for its local copies.
+TTL, another `local.max_entries`, or another `local.ttl_secs` for its local copies.
 
 Each store has its own local layer, generations, worker, subscription connection and channel, so
 the stores don't affect each other: a burst of writes to one never fills another's subscription
@@ -283,13 +283,13 @@ stays subscribed.
 | | |
 | --- | --- |
 | **Guaranteed** | After a write returns, this node's local copy is gone, and every node that receives the message drops its copy. |
-| **Guaranteed** | A node serves a stale local copy for at most the local `max_ttl_secs` (60 seconds by default), even if every message is lost. With the cap set to `None`, the bound is the entry's own TTL. |
+| **Guaranteed** | A node serves a stale local copy for at most the local `ttl_secs` (60 seconds by default), even if every message is lost. It can't be turned off, so this holds for an entry with no TTL too. |
 | **Guaranteed** | Once the worker notices the backplane is down (a closed subscription, or its own heartbeats no longer coming back), the node reads only from the distributed store until it resubscribes. |
 | **Guaranteed** | When every publish attempt of a writer fails, or a message is lost while the subscription stays up, other nodes clear their local layer at the writer's next heartbeat. |
 | **Guaranteed** | If a process stops between the Redis write and the publish, other nodes clear their local layer at its `stopping` message, or once its heartbeats have stopped for `heartbeat_timeout_ms` (5 seconds by default) when it sent none. They also clear when a process stops without calling `shutdown`, so a rolling deploy that skips it clears every node's local layer once for each node it replaces. |
 | **Not guaranteed** | Delivery is at most once: pub/sub drops messages to a node that is reconnecting. The clear on resubscribe covers the gap. |
-| **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by `max_ttl_secs`. |
-| **Not guaranteed** | An invalidation lost just before its writer stops for good is bounded only by `max_ttl_secs` on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. |
+| **Not guaranteed** | A lost invalidation without a `seq`, as a service in another language may send, is bounded only by the local `ttl_secs`. |
+| **Not guaranteed** | An invalidation lost just before its writer stops for good is bounded only by the local `ttl_secs` on a node that subscribed less than `heartbeat_interval_ms` earlier and hasn't heard from that writer yet. |
 | **Not guaranteed** | While a writer can't publish for longer than `heartbeat_timeout_ms`, other nodes clear when its heartbeats stop and again at its first heartbeat after, so a copy read in between can be stale until then. |
 | **Not guaranteed** | A read that overlaps a write on another node may copy the old value; the write's invalidation then evicts it. |
 | **Not guaranteed** | A read returns the entry as it was when the store looked the key up. A value whose `Clone` takes longer than the entry has left comes back already expired, as a Redis read can expire on its way back. |
@@ -327,8 +327,8 @@ A local-layer type mismatch in the hybrid store reads through to the distributed
 
 What each failure does to the calls, how long a read can stay stale, and where it shows. The
 times are the defaults: heartbeats every 1 s (`heartbeat_interval_ms`), a node counted gone after
-5 s without one (`heartbeat_timeout_ms`), which also bounds subscribing, and a 60 s cap on
-local copies (`max_ttl_secs`), which bounds every row of the hybrid store whatever else goes
+5 s without one (`heartbeat_timeout_ms`), which also bounds subscribing, and a 60 s TTL on
+local copies (`local.ttl_secs`), which bounds every row of the hybrid store whatever else goes
 wrong. The memory store has no outside failures: it fails only on an invalid key or setting, and
 on a read as another type.
 

@@ -19,11 +19,11 @@ crate with the store's feature; none is on by default.
   version of what the key holds; see [Keys](01-architecture.md#keys).
 - **Entry**: a `CacheEntry`, the value with its creation time and TTL. Copying an entry between
   stores keeps its deadline.
-- **Settings**: a default TTL (`ttl_secs`), when to refresh a value ahead of expiry
+- **Settings**: a default TTL (`default_ttl_secs`), when to refresh a value ahead of expiry
   (`refresh_threshold`), and how long `get_or_set` waits for another caller's load
   (`lock_timeout_ms`), at the top level of each store's settings. The memory store adds an entry
-  limit (`max_entries`), and a hybrid store a cap on how long a node keeps a local copy
-  (`local.max_ttl_secs`).
+  limit (`max_entries`), and a hybrid store how long a node keeps a local copy
+  (`local.ttl_secs`), which can't be turned off.
 - **Worker**: a background task a store runs for itself. The memory store's purge worker drops
   expired entries; the hybrid store's backplane worker applies other nodes' invalidations.
 - **Backplane** and **invalidation**: after a hybrid write, the writing node publishes an

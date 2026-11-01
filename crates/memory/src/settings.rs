@@ -18,10 +18,11 @@ const MAX_SHARDS: usize = 1_024;
 /// ```
 /// # use sisa_caching_memory::settings::InMemoryCacheSettings;
 /// let settings: InMemoryCacheSettings =
-///     serde_json::from_str(r#"{ "ttl_secs": 300, "max_entries": 10000 }"#).unwrap();
+///     serde_json::from_str(r#"{ "default_ttl_secs": 300, "max_entries": 10000 }"#).unwrap();
 ///
-/// assert_eq!(settings.common.ttl_secs, Some(300));
-/// assert!(serde_json::from_str::<InMemoryCacheSettings>(r#"{ "ttl_sec": 300 }"#).is_err());
+/// assert_eq!(settings.common.default_ttl_secs, Some(300));
+/// let misspelled = r#"{ "default_ttl_sec": 300 }"#;
+/// assert!(serde_json::from_str::<InMemoryCacheSettings>(misspelled).is_err());
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -121,11 +122,11 @@ mod tests {
 
         for (field, settings) in [
             (
-                "ttl_secs",
+                "default_ttl_secs",
                 InMemoryCacheSettings {
                     common: {
                         let mut settings = CacheSettings::default();
-                        settings.ttl_secs = too_long;
+                        settings.default_ttl_secs = too_long;
                         settings
                     },
                     ..InMemoryCacheSettings::default()
@@ -177,7 +178,7 @@ mod tests {
         let settings = InMemoryCacheSettings {
             common: {
                 let mut settings = CacheSettings::default();
-                settings.ttl_secs = year;
+                settings.default_ttl_secs = year;
                 settings
             },
             purge_interval_secs: year,

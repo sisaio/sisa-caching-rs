@@ -46,7 +46,7 @@ async fn connect_builds_every_part_on_one_server_with_its_settings() {
     let redis = Redis::start().await;
     let settings = {
         let mut settings = HybridCacheSettings::default();
-        settings.common.ttl_secs = Some(300);
+        settings.common.default_ttl_secs = Some(300);
         settings.local.max_entries = Some(1_000);
         settings.distributed.scan_batch_size = 500;
         settings

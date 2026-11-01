@@ -13,14 +13,14 @@ use crate::cache::CacheError;
 pub const MAX_TTL_SECS: u64 = 365 * 24 * 60 * 60;
 
 /// Settings every store has. Each store's settings flatten them, so in a config file they sit
-/// beside the store's own: `{ "ttl_secs": 300, "max_entries": 10000 }`.
+/// beside the store's own: `{ "default_ttl_secs": 300, "max_entries": 10000 }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[non_exhaustive]
 pub struct CacheSettings {
     /// The TTL of a write that doesn't set one. `None` keeps values until removed or evicted;
     /// `validate` rejects `0`, which would expire every write at once.
-    pub ttl_secs: Option<u64>,
+    pub default_ttl_secs: Option<u64>,
 
     /// The share of an entry's TTL after which `get_or_set` reloads it ahead of expiry, such as
     /// `0.8`. `None` turns refresh-ahead off; `validate` rejects a value outside `(0, 1)`.
@@ -36,7 +36,7 @@ pub struct CacheSettings {
 impl Default for CacheSettings {
     fn default() -> Self {
         Self {
-            ttl_secs: None,
+            default_ttl_secs: None,
             refresh_threshold: None,
             lock_timeout_ms: Some(30_000),
         }
@@ -44,10 +44,14 @@ impl Default for CacheSettings {
 }
 
 impl CacheSettings {
-    /// Fails when `ttl_secs` or `lock_timeout_ms` is 0 or over [`MAX_TTL_SECS`], or
+    /// Fails when `default_ttl_secs` or `lock_timeout_ms` is 0 or over [`MAX_TTL_SECS`], or
     /// `refresh_threshold` is not between 0 and 1.
     pub fn validate(&self) -> Result<(), CacheError> {
-        check_duration("ttl_secs", self.default_ttl(), "use None for no TTL")?;
+        check_duration(
+            "default_ttl_secs",
+            self.default_ttl(),
+            "use None for no TTL",
+        )?;
         check_duration(
             "lock_timeout_ms",
             self.lock_timeout(),
@@ -67,9 +71,9 @@ impl CacheSettings {
         }
     }
 
-    /// `ttl_secs` as a `Duration`, or `None` when a write without a TTL never expires.
+    /// `default_ttl_secs` as a `Duration`, or `None` when a write without a TTL never expires.
     pub fn default_ttl(&self) -> Option<Duration> {
-        self.ttl_secs.map(Duration::from_secs)
+        self.default_ttl_secs.map(Duration::from_secs)
     }
 
     /// `lock_timeout_ms` as a `Duration`, or `None` to wait as long as the other load takes.
@@ -148,8 +152,8 @@ mod tests {
 
     #[test]
     fn out_of_range_settings_are_rejected() {
-        let ttl = |ttl_secs| CacheSettings {
-            ttl_secs: Some(ttl_secs),
+        let ttl = |secs| CacheSettings {
+            default_ttl_secs: Some(secs),
             ..CacheSettings::default()
         };
         let wait = |lock_timeout_ms| CacheSettings {
@@ -166,8 +170,8 @@ mod tests {
             assert!(settings.validate().is_ok(), "{settings:?}");
         }
         for (field, settings) in [
-            ("ttl_secs", ttl(0)),
-            ("ttl_secs", ttl(MAX_TTL_SECS + 1)),
+            ("default_ttl_secs", ttl(0)),
+            ("default_ttl_secs", ttl(MAX_TTL_SECS + 1)),
             ("lock_timeout_ms", wait(0)),
             ("lock_timeout_ms", wait(year_ms + 1)),
             ("refresh_threshold", refresh(0.0)),

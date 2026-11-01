@@ -68,7 +68,7 @@ sequenceDiagram
     participant Trim as Trim, on the blocking pool
 
     App->>Store: set_entry(key, entry)
-    Store->>Store: lifetime = remaining TTL, capped at max_ttl_secs
+    Store->>Store: lifetime = remaining TTL, at most the local ttl_secs in a hybrid
     Store->>Shard: insert, marked as just used
     opt more than max_entries, and no trim running
         Store-)Trim: start

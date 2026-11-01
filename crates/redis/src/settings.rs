@@ -16,10 +16,11 @@ pub const DEFAULT_SCAN_BATCH_SIZE: u32 = 1000;
 /// ```
 /// # use sisa_caching_redis::settings::RedisCacheSettings;
 /// let settings: RedisCacheSettings =
-///     serde_json::from_str(r#"{ "ttl_secs": 300, "scan_batch_size": 500 }"#).unwrap();
+///     serde_json::from_str(r#"{ "default_ttl_secs": 300, "scan_batch_size": 500 }"#).unwrap();
 ///
-/// assert_eq!(settings.common.ttl_secs, Some(300));
-/// assert!(serde_json::from_str::<RedisCacheSettings>(r#"{ "ttl_sec": 300 }"#).is_err());
+/// assert_eq!(settings.common.default_ttl_secs, Some(300));
+/// let misspelled = r#"{ "default_ttl_sec": 300 }"#;
+/// assert!(serde_json::from_str::<RedisCacheSettings>(misspelled).is_err());
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -81,14 +82,14 @@ mod tests {
         let ttl = RedisCacheSettings {
             common: {
                 let mut settings = CacheSettings::default();
-                settings.ttl_secs = Some(MAX_TTL_SECS + 1);
+                settings.default_ttl_secs = Some(MAX_TTL_SECS + 1);
                 settings
             },
             ..RedisCacheSettings::default()
         };
 
         assert!(batch(1).validate().is_ok());
-        for (field, settings) in [("scan_batch_size", batch(0)), ("ttl_secs", ttl)] {
+        for (field, settings) in [("scan_batch_size", batch(0)), ("default_ttl_secs", ttl)] {
             assert!(
                 matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
                 "{field}"

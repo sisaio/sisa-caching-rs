@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // sweeps out expired entries every minute, from its first write on. A loader stuck
             // longer than five seconds stops holding up other requests for its key.
             let mut settings = InMemoryCacheSettings::default();
-            settings.common.ttl_secs = Some(300);
+            settings.common.default_ttl_secs = Some(300);
             settings.common.lock_timeout_ms = Some(5_000);
             settings.max_entries = Some(10_000);
             settings.purge_interval_secs = Some(60);
@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // reloads it while other reads are still served the cached value, so busy keys never
             // expire under load. The connection reconnects by itself if Redis restarts.
             let mut settings = RedisCacheSettings::default();
-            settings.common.ttl_secs = Some(600);
+            settings.common.default_ttl_secs = Some(600);
             settings.common.refresh_threshold = Some(0.8);
             settings.common.lock_timeout_ms = Some(5_000);
 
@@ -73,15 +73,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         }
         "hybrid" => {
-            // Each instance keeps up to 10,000 entries in memory, for at most a minute each, which
-            // caps how long it can serve a stale entry when a lost invalidation goes unnoticed.
-            // Entries live and refresh as in the `redis` arm, in both layers.
+            // Each instance keeps up to 10,000 entries in memory, for a minute each at most, which
+            // bounds how long it can serve a stale entry when a lost invalidation goes unnoticed.
+            // Entries live and refresh in Redis as in the `redis` arm.
             let mut settings = HybridCacheSettings::default();
-            settings.common.ttl_secs = Some(600);
+            settings.common.default_ttl_secs = Some(600);
             settings.common.refresh_threshold = Some(0.8);
             settings.common.lock_timeout_ms = Some(5_000);
             settings.local.max_entries = Some(10_000);
-            settings.local.max_ttl_secs = Some(60);
+            settings.local.ttl_secs = 60;
 
             // The local layer, the Redis store, the backplane, and the worker that applies other
             // instances' invalidations. Until it has subscribed, reads skip the local layer, so
