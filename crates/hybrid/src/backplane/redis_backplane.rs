@@ -180,6 +180,14 @@ impl std::fmt::Debug for RedisBackplane {
 }
 
 impl RedisBackplane {
+    /// A backplane on `server`, with no channel until [`for_store`](Self::for_store) names it.
+    fn on(server: Server) -> Self {
+        Self {
+            server,
+            channel: Arc::from(""),
+        }
+    }
+
     /// Opens the publish connection to one server or any node of a cluster, built with
     /// [`connection_config`]. `info` is a URL, such as `redis://127.0.0.1:6379`, or a
     /// `redis::ConnectionInfo`. Each subscription opens its own connection later.
@@ -192,10 +200,7 @@ impl RedisBackplane {
     pub async fn from_client(client: Client) -> Result<Self> {
         let conn = ConnectionManager::new_with_config(client.clone(), connection_config()).await?;
 
-        Ok(Self {
-            server: Server::Standalone { client, conn },
-            channel: Arc::from(""),
-        })
+        Ok(Self::on(Server::Standalone { client, conn }))
     }
 
     /// Publishes and subscribes on the primary Sentinel names. Publishing shares the store's
@@ -234,10 +239,7 @@ impl RedisBackplane {
     /// # }
     /// ```
     pub fn sentinel(sentinel: SentinelConnection) -> Self {
-        Self {
-            server: Server::Sentinel(sentinel),
-            channel: Arc::from(""),
-        }
+        Self::on(Server::Sentinel(sentinel))
     }
 
     /// Publishes and subscribes through a cluster client, with sharded pub/sub (`SPUBLISH`,
@@ -252,10 +254,7 @@ impl RedisBackplane {
     pub async fn cluster(client: ClusterClient) -> Result<Self> {
         let conn = client.get_async_connection().await?;
 
-        Ok(Self {
-            server: Server::Cluster { client, conn },
-            channel: Arc::from(""),
-        })
+        Ok(Self::on(Server::Cluster { client, conn }))
     }
 }
 

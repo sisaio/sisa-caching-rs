@@ -4,7 +4,7 @@ use std::{
     collections::BTreeSet,
     hash::{BuildHasher, RandomState},
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
@@ -82,12 +82,7 @@ pub(crate) struct Publishing {
 // Marks the number's publish as over, so a heartbeat can vouch for it.
 impl Drop for Publishing {
     fn drop(&mut self) {
-        self.sequence
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .publishing
-            .remove(&self.seq);
+        self.sequence.numbers().publishing.remove(&self.seq);
     }
 }
 
@@ -98,9 +93,13 @@ impl Drop for Publishing {
 pub(crate) struct Sequence(Mutex<Numbers>);
 
 impl Sequence {
+    fn numbers(&self) -> MutexGuard<'_, Numbers> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The next number, counted as publishing until the returned guard drops.
     pub(crate) fn start(self: &Arc<Self>) -> Publishing {
-        let mut numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut numbers = self.numbers();
 
         numbers.last += 1;
 
@@ -116,16 +115,12 @@ impl Sequence {
 
     /// Whether no publish is in progress.
     pub(crate) fn idle(&self) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .publishing
-            .is_empty()
+        self.numbers().publishing.is_empty()
     }
 
     /// The highest number up to which every publish is over.
     pub(crate) fn finished(&self) -> u64 {
-        let numbers = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let numbers = self.numbers();
 
         numbers
             .publishing
@@ -135,7 +130,7 @@ impl Sequence {
 
     /// The last number handed out.
     pub(crate) fn last(&self) -> u64 {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).last
+        self.numbers().last
     }
 }
 
