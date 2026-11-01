@@ -24,8 +24,11 @@ reviews:
       instructions: The PR changes crates/sisa-caching, the facade crate.
     - label: breaking
       instructions: >-
-        The PR changes a published crate's public API, a config field or a data format (keys,
-        Redis entries, backplane messages), or a commit subject carries `!`.
+        The PR breaks what CONTRIBUTING.md's "What the public API is" lists: it removes or
+        changes a public item that isn't `#[doc(hidden)]`, a settings field name or default, a
+        metric or span name or attribute, the Redis hash or the backplane message, or moves to a
+        redis-rs release that breaks its API. A new item, setting, error variant or `CacheStore`
+        method isn't breaking. A commit subject with `!` always is.
 
   # The generated changelog and the lock file aren't reviewed.
   path_filters:
@@ -61,8 +64,8 @@ reviews:
       requirements: >-
         Conventional Commits as CONTRIBUTING.md says: `type(scope): summary`, at most 72
         characters, no period at the end, the summary in the imperative. The type is one of feat,
-        fix, perf, refactor, docs, test, build, ci or chore. The scope is optional: core, memory,
-        redis, hybrid, facade or deps. A breaking change adds `!` after the type or scope.
+        fix, perf, refactor, docs, test, build, ci, chore or revert. The scope is optional: core,
+        memory, redis, hybrid, facade or deps. A breaking change adds `!` after the type or scope.
 
   # Commits on a PR come from its author only, so CodeRabbit doesn't write docstrings or tests.
   finishing_touches:
