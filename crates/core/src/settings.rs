@@ -111,12 +111,12 @@ impl CacheSettings {
 
         match self.refresh_threshold {
             Some(threshold) if !(threshold > 0.0 && threshold < 1.0) => {
-                Err(CacheError::InvalidSettings {
-                    field: "refresh_threshold",
-                    reason: format!(
+                Err(CacheError::invalid_settings(
+                    "refresh_threshold",
+                    format!(
                         "is {threshold}; it is a share of the TTL between 0 and 1, such as 0.8"
                     ),
-                })
+                ))
             }
             _ => Ok(()),
         }
@@ -176,7 +176,7 @@ mod tests {
             ("refresh_threshold", refresh(f64::NAN)),
         ] {
             assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: rejected, .. }) if rejected == field),
                 "{settings:?}"
             );
         }

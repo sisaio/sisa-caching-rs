@@ -159,7 +159,7 @@ impl<D: CacheStore + 'static, C: Clock> Clone for HybridCacheStore<D, C> {
     }
 }
 
-/// The name, the node id and whether local reads are on; never a value.
+// Shows the name, the node id and whether local reads are on; never a value.
 impl<D: CacheStore + 'static, C: Clock> std::fmt::Debug for HybridCacheStore<D, C> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -239,7 +239,7 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
         let name = distributed_store.name();
         let local_store = InMemoryCacheStore::new(name.as_str())?
             .with_clock(clock)
-            .with_settings(settings.memory_settings())?
+            .with_settings(settings.local_store_settings())?
             .with_local_ttl(settings.local.ttl());
         let backplane = backplane.for_store(name);
         let reads = METRICS.reads(name, Layer::Hybrid);
@@ -491,7 +491,7 @@ impl RedisHybridCacheStore {
         let distributed = RedisCacheStore::connect(name, info.clone())
             .await
             .map_err(HybridCacheError::distributed)?
-            .with_settings(settings.redis_settings())?;
+            .with_settings(settings.distributed_store_settings())?;
         let backplane = RedisBackplane::connect(info)
             .await
             .map_err(HybridCacheError::distributed)?;

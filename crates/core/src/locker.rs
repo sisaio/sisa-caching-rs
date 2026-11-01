@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, atomic::AtomicBool},
+    sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, PoisonError, atomic::AtomicBool},
 };
 
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -32,7 +32,7 @@ impl Drop for Claim<'_> {
 pub struct KeyGuard<'a> {
     // Fields drop in order: release the mutex, then give up the claim on it.
     _guard: OwnedMutexGuard<()>,
-    _claim: Claim<'a>,
+    claim: Claim<'a>,
 }
 
 // Shows the key held; the mutex guard has nothing to show.
@@ -40,7 +40,7 @@ impl std::fmt::Debug for KeyGuard<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("KeyGuard")
-            .field("key", &self._claim.key)
+            .field("key", &self.claim.key)
             .finish()
     }
 }
@@ -72,7 +72,7 @@ impl Locker {
 
         KeyGuard {
             _guard: guard,
-            _claim: claim,
+            claim,
         }
     }
 
@@ -83,7 +83,7 @@ impl Locker {
 
         Some(KeyGuard {
             _guard: guard,
-            _claim: claim,
+            claim,
         })
     }
 
@@ -98,7 +98,7 @@ impl Locker {
     }
 
     fn lock_registry(&self) -> StdMutexGuard<'_, HashMap<String, Arc<Mutex<()>>>> {
-        self.locks.lock().unwrap_or_else(|e| e.into_inner())
+        self.locks.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

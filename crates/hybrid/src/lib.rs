@@ -108,7 +108,7 @@ pub mod settings;
 pub mod store;
 mod worker;
 
-pub use backplane::RedisBackplane;
+pub use backplane::{NodeId, RedisBackplane};
 pub use error::HybridCacheError;
-pub use settings::HybridCacheSettings;
+pub use settings::{BackplaneWorkerSettings, HybridCacheSettings, LocalSettings};
 pub use store::{HybridCacheStore, RedisHybridCacheStore};

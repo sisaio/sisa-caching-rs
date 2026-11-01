@@ -49,7 +49,7 @@
 
 use std::{
     sync::{
-        LazyLock, Mutex,
+        LazyLock, Mutex, PoisonError,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -168,7 +168,7 @@ impl CacheMetrics {
     /// with the same name share them, as they share a series, and they are never freed, so a
     /// rebuilt store's series counts on instead of starting over.
     pub fn reads(&self, store: &KeyPrefix, layer: Layer) -> &'static Reads {
-        let mut all = READS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut all = READS.lock().unwrap_or_else(PoisonError::into_inner);
 
         if let Some(reads) = all
             .iter()
@@ -279,7 +279,7 @@ pub static METRICS: LazyLock<CacheMetrics> = LazyLock::new(|| {
             .u64_observable_counter(name)
             .with_description(description)
             .with_callback(move |observer| {
-                for reads in READS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+                for reads in READS.lock().unwrap_or_else(PoisonError::into_inner).iter() {
                     let count = if hits { &reads.hits } else { &reads.misses };
 
                     observer.observe(count.sum(), &reads.attributes);

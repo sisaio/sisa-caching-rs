@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{Arc, PoisonError, RwLock},
 };
 
 use redis::{
@@ -161,12 +161,12 @@ fn not_run(kind: Option<ServerErrorKind>) -> bool {
 
 fn failover(error: &RedisError) -> Option<Failover> {
     // Inside a transaction `READONLY` arrives as one of the aborted commands' errors.
-    let read_only = error
+    let refused = error
         .clone()
         .into_server_errors()
         .is_some_and(|errors| errors.iter().any(|(_, aborted)| not_run(aborted.kind())));
 
-    if read_only || error.is_connection_refusal() {
+    if refused || error.is_connection_refusal() {
         Some(Failover::NotRun)
     } else if error.is_io_error() || error.is_connection_dropped() {
         Some(Failover::MayHaveRun)
@@ -178,7 +178,7 @@ fn failover(error: &RedisError) -> Option<Failover> {
 /// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, and a
 /// server that is loading runs no commands, so a reply of `READONLY` or `LOADING` means the
 /// command didn't run.
-fn read_only(reply: &Value) -> bool {
+fn refused(reply: &Value) -> bool {
     matches!(reply, Value::ServerError(error) if not_run(error.kind()))
 }
 
@@ -261,7 +261,7 @@ impl SentinelConnection {
     fn primary(&self) -> Primary {
         self.primary
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
 
@@ -291,12 +291,10 @@ impl SentinelConnection {
 
         let primary = Primary::connect(client, current.generation + 1).await?;
 
-        *self.primary.write().unwrap_or_else(|e| e.into_inner()) = primary.clone();
+        *self.primary.write().unwrap_or_else(PoisonError::into_inner) = primary.clone();
         Ok(primary)
     }
-}
 
-impl SentinelConnection {
     /// Sends on the current primary. After a failover it moves, and sends once more if the first
     /// try surely didn't run.
     ///
@@ -339,7 +337,7 @@ impl ConnectionLike for SentinelConnection {
     fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
         Box::pin(self.send(
             move |mut primary| async move { primary.req_packed_command(cmd).await },
-            read_only,
+            refused,
         ))
     }
 
@@ -351,7 +349,7 @@ impl ConnectionLike for SentinelConnection {
     ) -> RedisFuture<'a, Vec<Value>> {
         Box::pin(self.send(
             move |mut primary| async move { primary.req_packed_commands(pipe, offset, count).await },
-            |replies: &Vec<Value>| replies.iter().any(read_only),
+            |replies: &Vec<Value>| replies.iter().any(refused),
         ))
     }
 

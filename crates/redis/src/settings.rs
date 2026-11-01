@@ -116,7 +116,7 @@ mod tests {
         assert!(batch(1).validate().is_ok());
         for (field, settings) in [("scan_batch_size", batch(0)), ("default_ttl_secs", ttl)] {
             assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: rejected, .. }) if rejected == field),
                 "{field}"
             );
         }

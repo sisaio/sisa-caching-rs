@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     mem,
     sync::{
-        Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -101,14 +101,14 @@ impl Entries {
 }
 
 fn read(shard: &RwLock<EntryMap>) -> RwLockReadGuard<'_, EntryMap> {
-    shard.read().unwrap_or_else(|e| e.into_inner())
+    shard.read().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Values the store lets go are freed after this guard is dropped: a value's Drop can run any
 /// code, a call to this store included, which would deadlock under the lock, and freeing many
 /// values would hold up every other caller.
 fn write(shard: &RwLock<EntryMap>) -> RwLockWriteGuard<'_, EntryMap> {
-    shard.write().unwrap_or_else(|e| e.into_inner())
+    shard.write().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The store's purge task: drops `store`'s expired entries every `interval`, on the blocking pool,
@@ -144,8 +144,8 @@ impl<C> Drop for Trimming<C> {
 ///
 /// The store drops its expired entries every `memory.purge_interval_secs` of its settings, on a
 /// task it starts on its first write inside a tokio runtime. The task stops when the store's last
-/// clone drops. Inside a runtime, its purges, the trims of a full store and the freeing of what `clear`
-/// took run on the blocking pool, so they hold up no async thread.
+/// clone drops. Inside a runtime, its purges, the trims of a full store and the freeing of what
+/// `remove_prefix` and `clear` took run on the blocking pool, so they hold up no async thread.
 ///
 /// `C` is the clock the store reads the time from, [`SystemClock`] unless
 /// [`with_clock`](Self::with_clock) sets another.
@@ -163,7 +163,7 @@ pub struct InMemoryCacheStore<C = SystemClock> {
     reads: &'static Reads,
 }
 
-/// The name, the settings and how many entries it holds; never a value.
+// Shows the name, the settings and how many entries it holds; never a value.
 impl<C> std::fmt::Debug for InMemoryCacheStore<C> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -430,6 +430,7 @@ impl<C: Clock> sisa_caching_core::sealed::Sealed for InMemoryCacheStore<C> {}
 // The cache API over the in-process maps.
 impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
     type Error = CacheError;
+    // The store's own clock: `SystemClock` unless `with_clock` set another.
     type Clock = C;
 
     fn name(&self) -> &KeyPrefix {
@@ -512,19 +513,23 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
         Ok(removed.is_some_and(|stored| !stored.is_expired(now)))
     }
 
-    #[tracing::instrument(level = "debug", name = "memory remove_prefix", skip_all, fields(store = %self.name(), %prefix))]
+    #[tracing::instrument(level = "debug", name = "memory remove_prefix", skip_all, fields(store = %self.name, %prefix))]
     async fn remove_prefix(&self, prefix: &str) -> Result<usize, CacheError> {
         let prefix = KeyPrefix::new(prefix)?;
         let now = self.clock.instant();
         let removed = self.extract(|key, _| prefix.matches(key));
-
-        Ok(removed
+        let live = removed
             .iter()
             .filter(|(_, stored)| !stored.is_expired(now))
-            .count())
+            .count();
+
+        // As for `clear`: freeing many values can take a while.
+        off_async_thread(move || drop(removed));
+
+        Ok(live)
     }
 
-    #[tracing::instrument(level = "debug", name = "memory clear", skip_all, fields(store = %self.name()))]
+    #[tracing::instrument(level = "debug", name = "memory clear", skip_all, fields(store = %self.name))]
     async fn clear(&self) -> Result<(), CacheError> {
         // Clones share the name, so every key in the maps is this store's: take each map whole.
         let cleared: Vec<EntryMap> = self
@@ -859,6 +864,19 @@ mod tests {
 
         assert!(held(&store, 1..2).await.is_empty());
         release.send(()).expect("the clear held up the runtime");
+    }
+
+    #[tokio::test]
+    async fn remove_prefix_frees_the_values_on_the_blocking_pool() {
+        let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
+        let (slow, dropped, release) = SlowDrop::new();
+
+        store.set(&key(1), slow, None).await.unwrap();
+        assert_eq!(store.remove_prefix("user").await.unwrap(), 1);
+        dropped.await.unwrap();
+
+        assert!(held(&store, 1..2).await.is_empty());
+        release.send(()).expect("the removal held up the runtime");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1313,6 +1331,7 @@ mod tests {
     #[derive(Clone)]
     struct HookClock(ManualClock, Arc<Mutex<Option<Hook>>>);
 
+    // Runs the hook once, then reads the manual clock.
     impl Clock for HookClock {
         fn now(&self) -> std::time::SystemTime {
             let hook = self.1.lock().unwrap().take();
@@ -1382,6 +1401,7 @@ mod tests {
         store: Option<InMemoryCacheStore<ManualClock>>,
     }
 
+    // Calls the store, as a value's `Clone` may.
     impl Clone for CallsTheStore {
         fn clone(&self) -> Self {
             if let Some(store) = &self.store {
@@ -1394,6 +1414,7 @@ mod tests {
         }
     }
 
+    // Calls the store, as a value's `Drop` may.
     impl Drop for CallsTheStore {
         fn drop(&mut self) {
             if let Some(store) = &self.store {

@@ -29,7 +29,7 @@ pub(crate) enum Invalidation {
 impl Invalidation {
     /// The wire name of the kind: `key`, `prefix`, `clear`, `heartbeat` or `stopping`. Info spans
     /// and warnings carry this instead of the key, so they don't export cache keys.
-    pub fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Key(_) => "key",
             Self::Prefix(_) => "prefix",
@@ -41,7 +41,7 @@ impl Invalidation {
 
     /// Whether it removes nothing and only accounts for the writer's numbers: a heartbeat or a
     /// stop.
-    pub fn is_accounting(&self) -> bool {
+    pub(crate) fn is_accounting(&self) -> bool {
         matches!(self, Self::Heartbeat | Self::Stopping)
     }
 }
@@ -59,7 +59,7 @@ pub(crate) struct BackplaneMessage {
     #[serde(rename = "v", deserialize_with = "deserialize_version")]
     version: u8,
     /// The writer's node id. That node skips the message.
-    pub source: NodeId,
+    pub(crate) source: NodeId,
     /// On an invalidation, its number in the writer's sequence, which counts up from 1 with every
     /// invalidation the writer publishes. On a heartbeat, the highest number up to which the writer
     /// has finished publishing every invalidation, whether or not the publish worked; on a stop,
@@ -67,19 +67,19 @@ pub(crate) struct BackplaneMessage {
     /// `None` from a writer that doesn't number its invalidations, such as a service in another
     /// language; nodes apply those without tracking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seq: Option<u64>,
+    pub(crate) seq: Option<u64>,
     /// Which local copies go.
     #[serde(flatten)]
-    pub invalidation: Invalidation,
+    pub(crate) invalidation: Invalidation,
     /// The writer's trace context as OpenTelemetry propagation fields, such as W3C `traceparent`.
     /// Empty when the writer had no trace or no propagator is installed.
     #[serde(rename = "trace", default, skip_serializing_if = "HashMap::is_empty")]
-    pub trace_context: HashMap<String, String>,
+    pub(crate) trace_context: HashMap<String, String>,
 }
 
 impl BackplaneMessage {
     /// A message carrying the current trace context, injected by the global text map propagator.
-    pub fn new(source: NodeId, invalidation: Invalidation) -> Self {
+    pub(crate) fn new(source: NodeId, invalidation: Invalidation) -> Self {
         let mut trace_context = HashMap::new();
 
         global::get_text_map_propagator(|propagator| propagator.inject(&mut trace_context));

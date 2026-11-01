@@ -203,7 +203,7 @@ mod tests {
             ),
         ] {
             assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: rejected, .. }) if rejected == field),
                 "{settings:?}"
             );
         }

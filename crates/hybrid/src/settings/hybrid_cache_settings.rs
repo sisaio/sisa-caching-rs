@@ -79,7 +79,7 @@ impl HybridCacheSettings {
     }
 
     /// The memory store's settings for the local layer: the hybrid's `common` and `local`.
-    pub(crate) fn memory_settings(&self) -> InMemoryCacheSettings {
+    pub(crate) fn local_store_settings(&self) -> InMemoryCacheSettings {
         let mut settings = InMemoryCacheSettings::default();
         settings.common = self.common.clone();
         settings.memory = self.local.memory.clone();
@@ -89,7 +89,7 @@ impl HybridCacheSettings {
 
     /// The Redis store's settings for the distributed layer. Its TTL settings stay unset, as
     /// hybrid calls read the hybrid store's.
-    pub(crate) fn redis_settings(&self) -> RedisCacheSettings {
+    pub(crate) fn distributed_store_settings(&self) -> RedisCacheSettings {
         let mut settings = RedisCacheSettings::default();
         settings.redis = self.distributed.clone();
 
@@ -195,7 +195,7 @@ mod tests {
             ("heartbeat_timeout_ms", heartbeat(1_000, 0)),
         ] {
             assert!(
-                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: f, .. }) if f == field),
+                matches!(settings.validate(), Err(CacheError::InvalidSettings { field: rejected, .. }) if rejected == field),
                 "{field}: {settings:?}"
             );
         }
