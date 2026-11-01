@@ -263,16 +263,16 @@ where
     // The locks go by the store's full key, built only when a call locks: a hit never needs it.
     let full_key = || store.name().format_key(key);
     // Loads, records how long it took, and stores what it got.
-    let load = async move || {
+    let load_and_set = async move || {
         let started = Instant::now();
         let loaded = load().await;
 
-        METRICS.load(store.name(), started.elapsed(), loaded.is_ok());
+        METRICS.loaded(store.name(), started.elapsed(), loaded.is_ok());
 
         if let Ok(value) = &loaded {
             let stored = store.set(key, value.clone(), options).await;
 
-            record(store, "set", &locker.writes_failing, &stored);
+            record_outcome(store, "set", &locker.writes_failing, &stored);
         }
 
         loaded
@@ -280,19 +280,19 @@ where
 
     // Reads the key, and records a failed read.
     let read = async || {
-        let read = store.get_entry::<CV>(key).await;
+        let outcome = store.get_entry::<CV>(key).await;
 
-        record(store, "get", &locker.reads_failing, &read);
-        read
+        record_outcome(store, "get", &locker.reads_failing, &outcome);
+        outcome
     };
-    let due = |entry: &CacheEntry<CV>| {
+    let needs_refresh = |entry: &CacheEntry<CV>| {
         settings
             .refresh_threshold()
             .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
     };
 
     let due_entry = match read().await {
-        Ok(Some(entry)) if !due(&entry) => return Ok(entry.value),
+        Ok(Some(entry)) if !needs_refresh(&entry) => return Ok(entry.value),
         Ok(Some(entry)) => Some(entry),
         _ => None,
     };
@@ -308,12 +308,12 @@ where
 
             // Another caller may have refreshed it between this one's read and its lock.
             if let Ok(Some(entry)) = read().await
-                && !due(&entry)
+                && !needs_refresh(&entry)
             {
                 return Ok(entry.value);
             }
 
-            return match load().await {
+            return match load_and_set().await {
                 // The cached value only while the store still holds it: the load may have
                 // outlasted its TTL or the store's local TTL, or a write may have removed it.
                 Err(error) => match read().await {
@@ -346,7 +346,7 @@ where
         // stored over whatever is there.
         match read().await {
             Ok(Some(entry)) => Ok(entry.value),
-            _ => load().await,
+            _ => load_and_set().await,
         }
     })
     .await
@@ -355,7 +355,7 @@ where
 /// Counts a failed store call in [`METRICS`], and logs the first failure of a run and the success
 /// that ends it, so an outage logs two lines however many calls fail. `failing` holds whether the
 /// last such call failed.
-fn record<S, T>(
+fn record_outcome<S, T>(
     store: &S,
     operation: &'static str,
     failing: &AtomicBool,
