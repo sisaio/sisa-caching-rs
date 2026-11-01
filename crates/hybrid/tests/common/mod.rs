@@ -98,7 +98,7 @@ pub async fn publish(redis: &Redis, store: &str, payload: &str) {
 
 /// The removal of `key` by `source`, without a `seq`.
 pub fn removal(source: &str, key: &str) -> String {
-    serde_json::json!({ "v": 2, "source": source, "kind": "key", "target": key }).to_string()
+    serde_json::json!({ "v": 1, "source": source, "kind": "key", "target": key }).to_string()
 }
 
 /// Publishes the removal of `key` from `store` as `source` on the store's channel.
