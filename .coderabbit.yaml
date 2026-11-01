@@ -1,0 +1,94 @@
+# CodeRabbit's review settings. Keys left out keep their defaults:
+# https://docs.coderabbit.ai/reference/configuration
+language: en-US
+
+reviews:
+  profile: chill
+  # Short walkthroughs: one maintainer reviews, so no reviewer suggestions, and no poem.
+  poem: false
+  suggested_reviewers: false
+  # Suggest labels, never apply them: a PR carries its crate labels and, when it breaks the public
+  # API or a data format, `breaking`, which the semver check reads.
+  suggested_labels: true
+  auto_apply_labels: false
+  labeling_instructions:
+    - label: "crate: core"
+      instructions: The PR changes crates/core.
+    - label: "crate: memory"
+      instructions: The PR changes crates/memory.
+    - label: "crate: redis"
+      instructions: The PR changes crates/redis.
+    - label: "crate: hybrid"
+      instructions: The PR changes crates/hybrid.
+    - label: "crate: sisa-caching"
+      instructions: The PR changes crates/sisa-caching, the facade crate.
+    - label: breaking
+      instructions: >-
+        The PR changes a published crate's public API, a config field or a data format (keys,
+        Redis entries, backplane messages), or a commit subject carries `!`.
+
+  # The generated changelog and the lock file aren't reviewed.
+  path_filters:
+    - "!CHANGELOG.md"
+    - "!Cargo.lock"
+
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Check the rules in docs/01-architecture.md: each store keeps one read path (`get_entry`)
+        and one write path (`set_entry`); only the clock module reads the wall clock;
+        invalidations touch the local layer only, never Redis; no new dependency in a library
+        crate. Look for a lock held across `.await`, TTL arithmetic that can overflow, an error
+        dropped without a log, and a key written without its store's prefix. Don't ask for doc
+        comments on private items.
+    - path: "docs/**/*.md"
+      instructions: >-
+        Diagrams are Mermaid, and tables beat long lists. Every relative link and `#anchor` must
+        resolve. A change to keys, Redis entries or backplane messages must update Data formats
+        in docs/01-architecture.md.
+    - path: ".github/workflows/*.yml"
+      instructions: >-
+        Every action is pinned to a full commit SHA with its version in a comment. Workflow names
+        are Title Case; job names stay lowercase, since the `main` ruleset requires checks by job
+        name.
+
+  pre_merge_checks:
+    # rustdoc's `missing_docs` lint covers public items; this check also counts private helpers.
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits as CONTRIBUTING.md says: `type(scope): summary`, at most 72
+        characters, no period at the end, the summary in the imperative. The type is one of feat,
+        fix, perf, refactor, docs, test, build, ci or chore. The scope is optional: core, memory,
+        redis, hybrid, facade or deps. A breaking change adds `!` after the type or scope.
+
+  # Commits on a PR come from its author only, so CodeRabbit doesn't write docstrings or tests.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  tools:
+    # CI runs clippy with `-D warnings`.
+    clippy:
+      enabled: false
+    # Its 80-column rule fights the docs' 100 columns.
+    markdownlint:
+      enabled: false
+
+chat:
+  art: false
+
+knowledge_base:
+  code_guidelines:
+    # Read beside AGENTS.md, which CodeRabbit finds by itself, so settled decisions aren't raised
+    # again. A plain path applies to its own folder, so the two below name every file.
+    filePatterns:
+      - CONTRIBUTING.md
+      - files: .agents/skills/review-changes/SKILL.md
+        applyTo: "**"
+      - files: docs/01-architecture.md
+        applyTo: "**"
