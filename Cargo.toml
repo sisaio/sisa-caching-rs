@@ -14,9 +14,11 @@ readme = "README.md"
 
 # Lints every package takes, through its `[lints] workspace = true`, for all its targets: library,
 # tests, benches and examples. A name means one thing in its scope: a new binding may reuse one
-# only for the same value converted, such as `let prefix = prefix.into()`.
+# only for the same value converted, such as `let prefix = prefix.into()`. Names are whole words,
+# so no name is a single letter.
 [workspace.lints.clippy]
 shadow_unrelated = "warn"
+min_ident_chars = "warn"
 
 [workspace.dependencies]
 # The library crates, at the coordinated version.

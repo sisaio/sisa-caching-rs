@@ -22,6 +22,7 @@
 
 use std::{
     env, fs,
+    num::NonZero,
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -175,7 +176,7 @@ fn time(ns: f64) -> String {
 
 /// Such as "linux x86_64, 4 CPUs (Intel(R) Xeon(R) Processor @ 2.80GHz), rustc 1.99.0".
 fn machine() -> String {
-    let cpus = thread::available_parallelism().map_or(1, |n| n.get());
+    let cpus = thread::available_parallelism().map_or(1, NonZero::get);
     let model = fs::read_to_string("/proc/cpuinfo")
         .ok()
         .and_then(|info| {

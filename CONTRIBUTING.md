@@ -116,6 +116,7 @@ they don't check:
 - Doc comments and comments are full sentences, wrapped at 100 columns like the code. A comment
   says why, or what a reader can't see from the code; it doesn't repeat the code.
 - Names are whole words (`entry`, `deadline`), and the value type parameter is `CV` everywhere.
+  Clippy's `min_ident_chars` catches single letters, `i` and `n` included.
 - A name means one thing in its scope. A new binding may reuse a name for the same value
   converted (`let prefix = prefix.into()`); anything else gets a name of its own, such as
   `load_and_set` for the closure that wraps `load`. Clippy's `shadow_unrelated` catches the plain

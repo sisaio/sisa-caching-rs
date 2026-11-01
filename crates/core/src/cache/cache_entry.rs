@@ -159,7 +159,7 @@ mod tests {
         let deadline = CREATED + secs(10);
         let entry = CacheEntry::new(7, CREATED, Some(secs(60)))
             .with_expires_at(Some(deadline))
-            .map(|n| n.to_string());
+            .map(|number| number.to_string());
 
         assert_eq!(entry.value, "7");
         assert_eq!(entry.created_at(), CREATED);

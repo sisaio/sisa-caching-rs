@@ -13,7 +13,7 @@ use sisa_caching_redis::store::RedisCacheStore;
 use sisa_caching_testing::{Redis, eventually};
 use tokio::runtime::Runtime;
 
-fn hybrid(c: &mut Criterion) {
+fn hybrid(criterion: &mut Criterion) {
     meter_provider();
 
     let runtime = Runtime::new().unwrap();
@@ -39,14 +39,15 @@ fn hybrid(c: &mut Criterion) {
     });
     // Built before timing, so the times leave out formatting a key.
     let (hit, miss, written) = (key(1), key(3), key(2));
-    let mut group = c.benchmark_group("hybrid");
+    let mut group = criterion.benchmark_group("hybrid");
 
-    group.bench_function("get local hit", |b| {
-        b.to_async(&runtime)
+    group.bench_function("get local hit", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.get::<User>(black_box(&hit)).await.unwrap());
     });
-    group.bench_function("get local miss, Redis hit", |b| {
-        b.to_async(&runtime).iter_custom(async |iters| {
+    group.bench_function("get local miss, Redis hit", |bencher| {
+        bencher.to_async(&runtime).iter_custom(async |iters| {
             time_after(
                 iters,
                 async || _ = store.local_store().remove(&hit).await.unwrap(),
@@ -55,16 +56,18 @@ fn hybrid(c: &mut Criterion) {
             .await
         });
     });
-    group.bench_function("get miss", |b| {
-        b.to_async(&runtime)
+    group.bench_function("get miss", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.get::<User>(black_box(&miss)).await.unwrap());
     });
-    group.bench_function("set", |b| {
-        b.to_async(&runtime)
+    group.bench_function("set", |bencher| {
+        bencher
+            .to_async(&runtime)
             .iter(async || store.set(black_box(&written), user(2), None).await.unwrap());
     });
-    group.bench_function("remove", |b| {
-        b.to_async(&runtime).iter_custom(async |iters| {
+    group.bench_function("remove", |bencher| {
+        bencher.to_async(&runtime).iter_custom(async |iters| {
             time_after(
                 iters,
                 async || store.set(&written, user(2), None).await.unwrap(),
@@ -73,16 +76,16 @@ fn hybrid(c: &mut Criterion) {
             .await
         });
     });
-    group.bench_function("get_or_set local hit", |b| {
-        b.to_async(&runtime).iter(async || {
+    group.bench_function("get_or_set local hit", |bencher| {
+        bencher.to_async(&runtime).iter(async || {
             store
                 .get_or_set(black_box(&hit), async || Ok::<_, ()>(user(1)), None)
                 .await
                 .unwrap()
         });
     });
-    group.bench_function("get_or_set miss", |b| {
-        b.to_async(&runtime).iter_custom(async |iters| {
+    group.bench_function("get_or_set miss", |bencher| {
+        bencher.to_async(&runtime).iter_custom(async |iters| {
             time_after(
                 iters,
                 async || _ = store.remove(&written).await.unwrap(),
