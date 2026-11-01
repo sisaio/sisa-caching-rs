@@ -1108,6 +1108,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_or_set_waits_for_no_load_of_the_same_key_on_another_store() {
+        let clock = ManualClock::new();
+        let (first, second) = (
+            store(&clock, InMemoryCacheSettings::default()),
+            store(&clock, InMemoryCacheSettings::default()),
+        );
+        // The first store's load never finishes, so it holds its lock on the key for good.
+        let user = key(1);
+        let mut stuck =
+            Box::pin(first.get_or_set(&user, pending::<Result<String, Infallible>>, None));
+
+        assert!((&mut stuck).now_or_never().is_none());
+
+        let loaded = tokio::time::timeout(
+            secs(1),
+            second.get_or_set(&user, async || Ok::<_, Infallible>("ada".to_owned()), None),
+        )
+        .await
+        .expect("each store has locks of its own");
+
+        assert_eq!(loaded.as_deref(), Ok("ada"));
+    }
+
+    #[tokio::test]
     async fn get_or_set_stops_waiting_for_another_load_after_the_lock_timeout() {
         let store = store(
             &ManualClock::new(),
