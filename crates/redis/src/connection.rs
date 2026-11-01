@@ -6,7 +6,8 @@ use std::{
 };
 
 use redis::{
-    Client, Cmd, Pipeline, RedisError, RedisFuture, RedisResult, ServerErrorKind, Value,
+    Client, Cmd, Pipeline, RedisError, RedisFuture, RedisResult, ServerError, ServerErrorKind,
+    Value,
     aio::{ConnectionLike, ConnectionManager, ConnectionManagerConfig, MultiplexedConnection},
     cluster_async::ClusterConnection,
     cluster_routing::{MultipleNodeRoutingInfo, RoutingInfo, SingleNodeRoutingInfo},
@@ -144,51 +145,39 @@ impl Primary {
     }
 }
 
-/// What a failover does to a command: the old primary went away, or it is a replica now.
-enum Failover {
-    /// The command didn't run, so it can be sent again.
-    NotRun,
-    /// The connection broke; the command may have run.
-    MayHaveRun,
-}
-
-fn not_run(kind: Option<ServerErrorKind>) -> bool {
+/// A replica runs no writes, and a server that is loading runs no commands, so `READONLY` or
+/// `LOADING` means the command didn't run.
+fn refusal(error: &ServerError) -> bool {
     matches!(
-        kind,
+        error.kind(),
         Some(ServerErrorKind::ReadOnly | ServerErrorKind::BusyLoading)
     )
 }
 
-fn failover(error: &RedisError) -> Option<Failover> {
-    // Inside a transaction `READONLY` arrives as one of the aborted commands' errors.
-    let refused = error
-        .clone()
-        .into_server_errors()
-        .is_some_and(|errors| errors.iter().any(|(_, aborted)| not_run(aborted.kind())));
-
-    if refused || error.is_connection_refusal() {
-        Some(Failover::NotRun)
-    } else if error.is_io_error() || error.is_connection_dropped() {
-        Some(Failover::MayHaveRun)
-    } else {
-        None
-    }
-}
-
-/// Outside a transaction a server error is a reply, not an `Err`. A replica runs no writes, and a
-/// server that is loading runs no commands, so a reply of `READONLY` or `LOADING` means the
-/// command didn't run.
+/// Outside a transaction a server error is a reply, not an `Err`.
 fn refused(reply: &Value) -> bool {
-    matches!(reply, Value::ServerError(error) if not_run(error.kind()))
+    matches!(reply, Value::ServerError(error) if refusal(error))
 }
 
-/// A connection to the primary that Redis Sentinel names. When a command fails because the old
-/// primary went away or refuses writes with `READONLY`, this asks Sentinel for the primary and
-/// moves there if it changed; while Sentinel names the same one, the connection stays and
-/// reconnects by itself. A command that surely didn't run, refused with `READONLY` or `LOADING` or
-/// never sent because the connection was refused, is sent once more. Any other failed command
-/// returns its error, since it may have run. A demoted Dragonfly primary answers `LOADING` instead
-/// of `READONLY` while it syncs from the new one.
+/// The command didn't run: the connection was refused, or, inside a transaction, the server
+/// refused one of the aborted commands.
+fn not_run(error: &RedisError) -> bool {
+    error.is_connection_refusal()
+        || error
+            .clone()
+            .into_server_errors()
+            .is_some_and(|errors| errors.iter().any(|(_, aborted)| refusal(aborted)))
+}
+
+/// A connection to the primary that Redis Sentinel names, which follows a failover:
+///
+/// - A command the server refused with `READONLY` or `LOADING`, or that the connection refused to
+///   send, didn't run: the connection asks Sentinel for the primary, moves there, and sends it
+///   once more. A demoted Dragonfly primary answers `LOADING` while it syncs from the new one.
+/// - A command cut off on the way may have run, so it returns its error, and the connection moves
+///   for the next one.
+/// - While Sentinel names the same primary, the connection stays and reconnects by itself.
+/// - Clones share the connection, so one move moves all of them.
 ///
 /// It moves on an error, not on Sentinel's announcement. After a manual failover the old primary
 /// keeps accepting writes until Sentinel demotes it, about ten seconds later, and those writes are
@@ -197,8 +186,6 @@ fn refused(reply: &Value) -> bool {
 ///
 /// Its connections use [`connection_config`], so while the primary is down a command fails at
 /// once instead of waiting for the old primary to come back.
-///
-/// Clones share the connection, so one failover moves all of them.
 ///
 /// ```no_run
 /// use sisa_caching_redis::{
@@ -252,10 +239,7 @@ impl SentinelConnection {
     /// hybrid store's backplane calls it on each ping, so reads leave a demoted primary even when
     /// nothing fails there.
     pub async fn primary_client(&self) -> RedisResult<Client> {
-        let mut sentinel = self.sentinel.lock().await;
-        let client = sentinel.async_get_client().await?;
-
-        Ok(self.move_to(client).await?.client)
+        Ok(self.follow(self.primary().generation).await?.client)
     }
 
     fn primary(&self) -> Primary {
@@ -265,25 +249,18 @@ impl SentinelConnection {
             .clone()
     }
 
-    /// Moves to the primary Sentinel names now, unless a clone already moved past `failed`.
-    async fn follow(&self, failed: u64) -> RedisResult<ConnectionManager> {
+    /// Moves to the primary Sentinel names now, unless a clone already moved past `seen` or the
+    /// connection is there already: a connection to a primary that didn't move reconnects by
+    /// itself. The Sentinel lock keeps clones from moving at once.
+    async fn follow(&self, seen: u64) -> RedisResult<Primary> {
         let mut sentinel = self.sentinel.lock().await;
         let current = self.primary();
 
-        if current.generation != failed {
-            return Ok(current.connection);
+        if current.generation != seen {
+            return Ok(current);
         }
 
         let client = sentinel.async_get_client().await?;
-
-        Ok(self.move_to(client).await?.connection)
-    }
-
-    /// Moves to the server `client` names, unless the connection is there already: a connection
-    /// to a primary that didn't move reconnects by itself. Callers hold the Sentinel lock, so
-    /// clones don't move at once.
-    async fn move_to(&self, client: Client) -> RedisResult<Primary> {
-        let current = self.primary();
 
         if client.get_connection_info().addr() == current.client.get_connection_info().addr() {
             return Ok(current);
@@ -295,8 +272,8 @@ impl SentinelConnection {
         Ok(primary)
     }
 
-    /// Sends on the current primary. After a failover it moves, and sends once more if the first
-    /// try surely didn't run.
+    /// Sends on the current primary. When the reply shows a failover it moves, and sends once
+    /// more if the first try surely didn't run.
     ///
     /// `send` is a closure that returns a future, not an async closure: an `AsyncFn` here makes
     /// the boxed future its callers return need `'static` borrows, and theirs borrow the command.
@@ -314,20 +291,20 @@ impl SentinelConnection {
             ..
         } = self.primary();
         let reply = send(connection).await;
-        let failed = match &reply {
-            Ok(reply) if refused(reply) => Some(Failover::NotRun),
-            Ok(_) => None,
-            Err(error) => failover(error),
+        let resend = match &reply {
+            Ok(value) if refused(value) => true,
+            Err(error) if not_run(error) => true,
+            // Cut off, so it may have run: the next command goes to the new primary.
+            Err(error) if error.is_io_error() || error.is_connection_dropped() => false,
+            _ => return reply,
         };
 
-        match failed {
-            Some(Failover::NotRun) => send(self.follow(generation).await?).await,
-            Some(Failover::MayHaveRun) => {
-                // The command's own error says more than a failed lookup would.
-                let _ = self.follow(generation).await;
-                reply
-            }
-            None => reply,
+        if resend {
+            send(self.follow(generation).await?.connection).await
+        } else {
+            // The command's own error says more than a failed lookup would.
+            let _ = self.follow(generation).await;
+            reply
         }
     }
 }
