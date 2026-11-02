@@ -1,6 +1,7 @@
 # Runs the benchmarks for each release and records them on its release page: the table in the
 # release notes, and the table and Criterion's full HTML report as assets. The previous release's
-# benchmarks run first in the same job, so the table compares the two on one machine. The release
+# benchmarks run in the same job, in alternating rounds with this release's, so that a runner that
+# drifts during the job slows both columns alike. The release
 # workflow calls it with the new tag while that release is still a draft, because a published
 # release is immutable and takes no more assets. Run it by hand to see the table in the run's
 # summary without touching a release. Only the job that records on the release can write.
@@ -21,6 +22,12 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   REDIS_IMAGE: redis:8-alpine
+  # Both versions' code at the same alignment, so moving a function doesn't move a time.
+  RUSTFLAGS: -C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5
+  # Both versions' results in one folder, for the summary.
+  CRITERION_HOME: ${{ github.workspace }}/target/criterion
+  # Each version takes this many turns.
+  ROUNDS: 3
 
 jobs:
   bench:
@@ -49,19 +56,31 @@ jobs:
           previous=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -n 1 || true)
           echo "tag=$previous" >> "$GITHUB_OUTPUT"
 
-      - name: Run the previous release's benchmarks
-        if: steps.previous.outputs.tag
+      # Each version builds in its own target folder, so a run never rebuilds the other.
+      - name: Build both versions
         env:
           PREVIOUS: ${{ steps.previous.outputs.tag }}
         run: |
-          git worktree add ../previous "$PREVIOUS"
-          cd ../previous
-          rustup toolchain install
-          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
-            cargo bench -p sisa-caching-benches --locked -- --save-baseline previous
+          if [ -n "$PREVIOUS" ]; then
+            git worktree add ../previous "$PREVIOUS"
+            (cd ../previous && rustup toolchain install &&
+              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target-previous" \
+                cargo bench -p sisa-caching-benches --locked --no-run)
+          fi
+          cargo bench -p sisa-caching-benches --locked --no-run
 
       - name: Run the benchmarks
-        run: cargo bench -p sisa-caching-benches --locked -- --save-baseline current
+        if: ${{ !steps.previous.outputs.tag }}
+        run: cargo bench -p sisa-caching-benches --locked
+
+      - name: Run both versions in alternating rounds
+        if: steps.previous.outputs.tag
+        run: |
+          for round in $(seq "$ROUNDS"); do
+            (cd ../previous && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target-previous" \
+              cargo bench -p sisa-caching-benches --locked -- --save-baseline "previous-$round")
+            cargo bench -p sisa-caching-benches --locked -- --save-baseline "current-$round"
+          done
 
       - name: Summarize
         env:

@@ -6,19 +6,14 @@
 //! cargo run -p sisa-caching-benches --bin summary
 //! ```
 //!
-//! It lists every result under `target/criterion`, so remove that folder first where benchmarks
-//! ran before: a benchmark renamed since then still shows there with its old result.
+//! It lists every result under `target/criterion`, or `$CRITERION_HOME` when that is set, so
+//! remove that folder first where benchmarks ran before: a benchmark renamed since then still
+//! shows there with its old result.
 //!
-//! Given a release, such as `v0.1.0`, it compares that release with this code instead, run on the
-//! same machine and saved as the Criterion baselines `previous` and `current`:
-//!
-//! ```sh
-//! git worktree add ../previous v0.1.0
-//! (cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target" \
-//!     cargo bench -p sisa-caching-benches -- --save-baseline previous)
-//! cargo bench -p sisa-caching-benches -- --save-baseline current
-//! cargo run -p sisa-caching-benches --bin summary -- v0.1.0
-//! ```
+//! Given a release, such as `v0.1.0`, it compares that release with this code instead. The two
+//! run in turns on the same machine, a round each, saved as the Criterion baselines `previous-1`,
+//! `current-1`, `previous-2` and so on, so that a machine that drifts during the job slows both
+//! alike. docs/05-benchmarks.md has the commands.
 
 use std::{
     env, fs,
@@ -33,6 +28,40 @@ use serde::Deserialize;
 /// Two runs of the same code on one runner can differ by a few percent, so a smaller change isn't
 /// called one.
 const NOISE_PERCENT: f64 = 5.0;
+
+/// A benchmark's mean in each round, in nanoseconds.
+struct Rounds(Vec<f64>);
+
+impl Rounds {
+    /// The means saved as `<name>-1`, `<name>-2` and so on beside `run`, until one is missing.
+    fn saved(run: &Path, name: &str) -> Self {
+        let means = (1..)
+            .map(|round| {
+                run.with_file_name(format!("{name}-{round}"))
+                    .join("estimates.json")
+            })
+            .take_while(|path| path.exists())
+            .map(|path| read::<Estimates>(&path).mean.point_estimate)
+            .collect();
+
+        Self(means)
+    }
+
+    fn median(&self) -> f64 {
+        let mut means = self.0.clone();
+
+        means.sort_by(f64::total_cmp);
+        means[means.len() / 2]
+    }
+
+    fn min(&self) -> f64 {
+        self.0.iter().copied().fold(f64::INFINITY, f64::min)
+    }
+
+    fn max(&self) -> f64 {
+        self.0.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+    }
+}
 
 #[derive(Deserialize)]
 struct Benchmark {
@@ -56,14 +85,43 @@ struct Interval {
     upper_bound: f64,
 }
 
+/// How much faster or slower `after` is, or "about the same" when a round of one overlaps the
+/// rounds of the other or the medians differ by less than [`NOISE_PERCENT`]. Criterion's interval
+/// covers the noise inside one run only, so the rounds stand for the machine's drift between runs.
+fn change(before: &Rounds, after: &Rounds) -> String {
+    let apart = after.min() > before.max() || after.max() < before.min();
+    let percent = (after.median() / before.median() - 1.0) * 100.0;
+
+    if !apart || percent.abs() < NOISE_PERCENT {
+        return "about the same".to_owned();
+    }
+
+    if percent < 0.0 {
+        format!("{:.0}% faster", -percent)
+    } else {
+        format!("{percent:.0}% slower")
+    }
+}
+
 fn main() {
-    let target = env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    let home = env::var("CRITERION_HOME").map_or_else(
+        |_| {
+            let target = env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+
+            Path::new(&target).join("criterion")
+        },
+        PathBuf::from,
+    );
     let previous = env::args().nth(1);
     // Criterion keeps each benchmark's latest run in `new`, and a saved baseline under its name.
-    let latest = if previous.is_some() { "current" } else { "new" };
+    let latest = if previous.is_some() {
+        "current-1"
+    } else {
+        "new"
+    };
     let mut runs = Vec::new();
 
-    find_runs(&Path::new(&target).join("criterion"), latest, &mut runs);
+    find_runs(&home, latest, &mut runs);
     runs.sort();
 
     println!("## Benchmarks\n");
@@ -73,74 +131,52 @@ fn main() {
         redis_image()
     );
 
-    match &previous {
-        Some(release) => {
+    let Some(release) = &previous else {
+        println!("| Benchmark | Time | 95% interval |");
+        println!("| --- | ---: | ---: |");
+
+        for run in runs {
+            let id: Benchmark = read(&run.join("benchmark.json"));
+            let Estimates { mean } = read(&run.join("estimates.json"));
+
             println!(
-                "Both columns ran in the same job, so they compare fairly. A change counts only \
-                 when the two 95% intervals don't overlap and the means differ by \
-                 {NOISE_PERCENT}% or more.\n"
+                "| {} | {} | {} to {} |",
+                id.full_id,
+                time(mean.point_estimate),
+                time(mean.confidence_interval.lower_bound),
+                time(mean.confidence_interval.upper_bound)
             );
-            println!("| Benchmark | {release} | This release | 95% interval | Change |");
-            println!("| --- | ---: | ---: | ---: | --- |");
         }
-        None => {
-            println!("| Benchmark | Time | 95% interval |");
-            println!("| --- | ---: | ---: |");
-        }
-    }
+        return;
+    };
+
+    println!(
+        "Both columns ran in the same job, in alternating rounds: {release}, then this release, \
+         and again. Each time is the median of the rounds' means, and the range is this \
+         release's lowest to highest round. A change counts only when no round of one overlaps the \
+         rounds of the other and the medians differ by {NOISE_PERCENT}% or more.\n"
+    );
+    println!("| Benchmark | {release} | This release | Range over rounds | Change |");
+    println!("| --- | ---: | ---: | ---: | --- |");
 
     for run in runs {
         let id: Benchmark = read(&run.join("benchmark.json"));
-        let Estimates { mean } = read(&run.join("estimates.json"));
-        let interval = format!(
-            "{} to {}",
-            time(mean.confidence_interval.lower_bound),
-            time(mean.confidence_interval.upper_bound)
-        );
-
-        if previous.is_none() {
-            println!(
-                "| {} | {} | {interval} |",
-                id.full_id,
-                time(mean.point_estimate)
-            );
-            continue;
-        }
-
-        // The baseline sits next to the run; a benchmark the previous release didn't have has none.
-        let baseline = run.with_file_name("previous").join("estimates.json");
-        let (before, change) = if baseline.exists() {
-            let Estimates { mean: before } = read(&baseline);
-
-            (time(before.point_estimate), change(&before, &mean))
-        } else {
+        let after = Rounds::saved(&run, "current");
+        // A benchmark the previous release didn't have has no rounds of its own.
+        let before = Rounds::saved(&run, "previous");
+        let (before_time, change) = if before.0.is_empty() {
             (String::new(), "new".to_owned())
+        } else {
+            (time(before.median()), change(&before, &after))
         };
 
         println!(
-            "| {} | {before} | {} | {interval} | {change} |",
+            "| {} | {before_time} | {} | {} to {} | {change} |",
             id.full_id,
-            time(mean.point_estimate)
+            time(after.median()),
+            time(after.min()),
+            time(after.max())
         );
-    }
-}
-
-/// How much faster or slower `after` is, or "about the same" when the intervals overlap or the
-/// means differ by less than [`NOISE_PERCENT`].
-fn change(before: &Estimate, after: &Estimate) -> String {
-    let (before_ci, after_ci) = (&before.confidence_interval, &after.confidence_interval);
-    let overlap = after_ci.upper_bound >= before_ci.lower_bound
-        && after_ci.lower_bound <= before_ci.upper_bound;
-    let percent = (after.point_estimate / before.point_estimate - 1.0) * 100.0;
-
-    if overlap || percent.abs() < NOISE_PERCENT {
-        return "about the same".to_owned();
-    }
-
-    if percent < 0.0 {
-        format!("{:.0}% faster", -percent)
-    } else {
-        format!("{percent:.0}% slower")
     }
 }
 
