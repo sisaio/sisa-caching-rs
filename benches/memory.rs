@@ -192,5 +192,9 @@ fn large(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, single, parallel, large);
+criterion_group! {
+    name = benches;
+    config = sisa_caching_benches::criterion();
+    targets = single, parallel, large
+}
 criterion_main!(benches);
