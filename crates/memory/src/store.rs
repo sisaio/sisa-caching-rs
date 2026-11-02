@@ -247,7 +247,7 @@ impl<C: Clock> InMemoryCacheStore<C> {
     #[tracing::instrument(level = "debug", name = "memory purge", skip_all, fields(store = %self.name, removed))]
     pub fn purge(&self) -> usize {
         let now = self.clock.instant();
-        let removed = self.extract(|_, stored| stored.is_expired(now)).len();
+        let removed = self.extract(&mut Vec::new(), |_, stored| stored.is_expired(now));
 
         tracing::Span::current().record("removed", removed);
 
@@ -352,10 +352,12 @@ impl<C: Clock> InMemoryCacheStore<C> {
         if self.entries.len.load(Ordering::Relaxed) > max {
             let now = self.clock.instant();
 
-            removed.extend(self.extract(|_, stored| stored.is_expired(now)));
+            self.extract(&mut removed, |_, stored| stored.is_expired(now));
 
             let target = max - max / 10;
-            let mut uses: Vec<u64> = Vec::new();
+            // Sized once, as is `removed` below: grown map by map, these lists would be moved to
+            // new memory several times per trim, and each move touches pages for the first time.
+            let mut uses = Vec::with_capacity(self.entries.len.load(Ordering::Relaxed));
 
             for shard in &self.entries.shards {
                 uses.extend(
@@ -371,7 +373,10 @@ impl<C: Clock> InMemoryCacheStore<C> {
                 // Entries read since the same write tie, so several can sit at the cutoff: take
                 // only as many of those as the trim needs.
                 let mut ties = excess - below.iter().filter(|&&used| used < cutoff).count();
-                let evicted = self.extract(|_, stored| {
+
+                removed.reserve(excess);
+
+                let evicted = self.extract(&mut removed, |_, stored| {
                     let used = stored.last_used.load(Ordering::Relaxed);
 
                     if used == cutoff && ties > 0 {
@@ -382,13 +387,12 @@ impl<C: Clock> InMemoryCacheStore<C> {
                     used < cutoff
                 });
 
-                METRICS.evicted(&self.name, evicted.len());
+                METRICS.evicted(&self.name, evicted);
                 tracing::debug!(
                     store = %self.name,
-                    evicted = evicted.len(),
+                    evicted,
                     "store full; dropped the least recently used entries"
                 );
-                removed.extend(evicted);
             }
         }
 
@@ -404,12 +408,14 @@ impl<C: Clock> InMemoryCacheStore<C> {
         }
     }
 
-    /// Takes out every entry `pick` chooses, one map at a time. The caller frees them.
+    /// Moves every entry `pick` chooses into `taken`, one map at a time, and returns how many.
+    /// The caller frees them.
     fn extract(
         &self,
+        taken: &mut Vec<(String, StoredEntry)>,
         mut pick: impl FnMut(&str, &StoredEntry) -> bool,
-    ) -> Vec<(String, StoredEntry)> {
-        let mut taken = Vec::new();
+    ) -> usize {
+        let start = taken.len();
 
         for shard in &self.entries.shards {
             let before = taken.len();
@@ -420,7 +426,7 @@ impl<C: Clock> InMemoryCacheStore<C> {
                 .fetch_sub(taken.len() - before, Ordering::Relaxed);
         }
 
-        taken
+        taken.len() - start
     }
 }
 
@@ -517,7 +523,10 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
     async fn remove_prefix(&self, prefix: &str) -> Result<usize, CacheError> {
         let prefix = KeyPrefix::new(prefix)?;
         let now = self.clock.instant();
-        let removed = self.extract(|key, _| prefix.matches(key));
+        let mut removed = Vec::new();
+
+        self.extract(&mut removed, |key, _| prefix.matches(key));
+
         let live = removed
             .iter()
             .filter(|(_, stored)| !stored.is_expired(now))
