@@ -238,3 +238,52 @@ fn machine() -> String {
 fn redis_image() -> String {
     env::var("REDIS_IMAGE").unwrap_or_else(|_| "redis:8-alpine".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rounds(means: &[f64]) -> Rounds {
+        Rounds(means.to_vec())
+    }
+
+    #[test]
+    fn the_median_is_the_middle_round() {
+        assert_eq!(rounds(&[120.0, 100.0, 300.0]).median(), 120.0);
+    }
+
+    #[test]
+    fn rounds_that_overlap_are_about_the_same() {
+        let before = rounds(&[100.0, 101.0, 112.0]);
+        let after = rounds(&[110.0, 111.0, 115.0]);
+
+        assert_eq!(change(&before, &after), "about the same");
+    }
+
+    #[test]
+    fn rounds_that_touch_are_about_the_same() {
+        let before = rounds(&[100.0, 100.0, 110.0]);
+        let after = rounds(&[110.0, 120.0, 120.0]);
+
+        assert_eq!(change(&before, &after), "about the same");
+    }
+
+    #[test]
+    fn rounds_apart_by_less_than_the_noise_are_about_the_same() {
+        let before = rounds(&[100.0, 100.0, 100.0]);
+        let after = rounds(&[104.0, 104.0, 104.0]);
+
+        assert_eq!(change(&before, &after), "about the same");
+    }
+
+    #[test]
+    fn rounds_apart_by_the_noise_or_more_are_a_change() {
+        let before = rounds(&[100.0, 101.0, 102.0]);
+
+        assert_eq!(
+            change(&before, &rounds(&[110.0, 111.0, 112.0])),
+            "10% slower"
+        );
+        assert_eq!(change(&before, &rounds(&[80.0, 81.0, 82.0])), "20% faster");
+    }
+}
