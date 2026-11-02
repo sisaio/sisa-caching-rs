@@ -276,9 +276,16 @@ jobs:
       - name: Pull the server image
         run: docker pull "$REDIS_IMAGE"
 
-      # Every feature, so the TLS tests run on `tls-rustls`'s own crypto provider.
+      # Every feature, so the TLS tests run on `tls-rustls`'s own crypto provider. Only the Redis
+      # and hybrid crates talk to the server, so the rest of the workspace, its doctests among
+      # them, runs on one server.
       - name: Run all tests including Redis
+        if: matrix.server == 'redis:8-alpine'
         run: cargo test --workspace --all-features --locked
+
+      - name: Run the Redis and hybrid tests
+        if: matrix.server != 'redis:8-alpine'
+        run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --all-features --locked
 
       - name: Run the native-tls tests
         run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
