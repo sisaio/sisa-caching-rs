@@ -6,7 +6,8 @@
 # - on a push to main whose version has no `v<version>` tag yet, as merging that PR brings: tags
 #   the commit, creates the GitHub release from the changelog as a draft, runs the benchmarks for
 #   it, waits for CI to pass on that commit and for the maintainer to approve the `release`
-#   environment, publishes the crates to crates.io, and then publishes the release.
+#   environment, publishes the crates to crates.io, attaches the published `.crate` files and a
+#   signed provenance attestation for them to the draft, and then publishes the release.
 #
 # crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
 # draft and someone has read it. Releases are immutable once published, so the release stays a
@@ -161,9 +162,48 @@ jobs:
             fi
           done
 
+  # Signs what users download: the `.crate` files as crates.io serves them. The attestation is a
+  # Sigstore bundle with SLSA build provenance, also listed under the repository's attestations.
+  # It goes on the draft, since a published release can't change.
+  attest:
+    name: attest
+    needs: [tag, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the published crates
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          mkdir crates
+          for crate in sisa-caching-core sisa-caching-memory sisa-caching-redis sisa-caching-hybrid sisa-caching; do
+            curl -sSfL -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
+              -o "crates/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
+          done
+
+      - name: Attest the crates
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: crates/*.crate
+
+      - name: Attach them to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" "crates/sisa-caching-${TAG#v}.sigstore.json"
+          gh release upload "$TAG" crates/* --clobber --repo "$GITHUB_REPOSITORY"
+
   publish-release:
     name: publish release
-    needs: [tag, publish]
+    needs: [tag, attest]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

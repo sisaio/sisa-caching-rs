@@ -18,3 +18,13 @@ not in a public issue.
   release is on crates.io.
 - The fix ships as a patch release, and the advisory is published with it, crediting you unless
   you'd rather not be named.
+
+## Verifying a release
+
+From the next release on, each GitHub release carries the crates' `.crate` files as crates.io
+serves them, and a Sigstore bundle with their SLSA build provenance, made by the release workflow.
+Check a downloaded crate with the GitHub CLI:
+
+```sh
+gh attestation verify sisa-caching-<version>.crate --repo sisaio/sisa-caching-rs
+```
