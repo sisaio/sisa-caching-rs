@@ -6,6 +6,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.0...sisa-caching-core-v0.3.1) - 2026-11-02
+
+### Changed
+
+- *(memory)* size the trim's lists once instead of map by map
+
 ## [0.3.0](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.2.0...sisa-caching-core-v0.3.0) - 2026-11-01
 
 ### Added
