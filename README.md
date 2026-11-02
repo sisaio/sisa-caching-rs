@@ -1,6 +1,7 @@
 # sisa-caching-rs
 
 [![CI](https://github.com/sisaio/sisa-caching-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sisaio/sisa-caching-rs/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sisaio/sisa-caching-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/sisaio/sisa-caching-rs)
 [![codecov](https://codecov.io/gh/sisaio/sisa-caching-rs/graph/badge.svg)](https://codecov.io/gh/sisaio/sisa-caching-rs)
 [![crates.io](https://img.shields.io/crates/v/sisa-caching.svg)](https://crates.io/crates/sisa-caching)
 [![docs.rs](https://img.shields.io/docsrs/sisa-caching)](https://docs.rs/sisa-caching)
