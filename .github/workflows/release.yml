@@ -186,33 +186,36 @@ jobs:
       - name: Install the pinned toolchain
         run: rustup toolchain install
 
+      # The downloads go outside the checkout, which has a `crates/` folder of its own.
       - name: Check the published crates against the tag
         env:
           TAG: ${{ needs.tag.outputs.tag }}
+          OUT: ${{ runner.temp }}/release-crates
         run: |
           version="${TAG#v}"
-          mkdir crates
+          mkdir -p "$OUT"
           for crate in sisa-caching-core sisa-caching-memory sisa-caching-redis sisa-caching-hybrid sisa-caching; do
             cargo package -p "$crate" --locked --no-verify
             curl -sSfL -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
-              -o "crates/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
-            cmp "target/package/$crate-$version.crate" "crates/$crate-$version.crate"
+              -o "$OUT/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
+            cmp "target/package/$crate-$version.crate" "$OUT/$crate-$version.crate"
           done
 
       - name: Attest the crates
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: crates/*.crate
+          subject-path: ${{ runner.temp }}/release-crates/*.crate
 
       - name: Attach them to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.tag.outputs.tag }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          OUT: ${{ runner.temp }}/release-crates
         run: |
-          cp "$BUNDLE" "crates/sisa-caching-${TAG#v}.sigstore.json"
-          gh release upload "$TAG" crates/* --clobber --repo "$GITHUB_REPOSITORY"
+          cp "$BUNDLE" "$OUT/sisa-caching-${TAG#v}.sigstore.json"
+          gh release upload "$TAG" "$OUT"/* --clobber --repo "$GITHUB_REPOSITORY"
 
   publish-release:
     name: publish release
