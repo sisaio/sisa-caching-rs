@@ -181,7 +181,8 @@ impl Peers {
             });
 
         if !message.invalidation.is_accounting() {
-            if peer.finished.is_none_or(|finished| seq > finished) {
+            // Numbers count from 1, so a 0 can't stand in for a lost one.
+            if seq > peer.finished.unwrap_or(0) {
                 peer.received.insert(seq);
             }
 
@@ -518,6 +519,19 @@ mod tests {
             "1 to 4 came before the subscribe, or were lost since"
         );
         assert_eq!(started_before.receive(&heartbeat(6)), Some(Gap::Missing));
+    }
+
+    #[test]
+    fn a_number_0_does_not_stand_in_for_a_lost_one() {
+        let mut peers = Peers::new();
+
+        peers.receive(&key(0));
+        peers.receive(&key(2));
+        assert_eq!(
+            peers.receive(&heartbeat(2)),
+            Some(Gap::Unknown),
+            "1 never arrived"
+        );
     }
 
     fn stopping(seq: u64) -> BackplaneMessage {
