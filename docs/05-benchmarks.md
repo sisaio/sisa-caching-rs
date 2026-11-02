@@ -49,15 +49,20 @@ less work but touches more memory, as it walks the maps one at a time.
 
 ## Reading the numbers
 
-Each time is Criterion's mean, with its 95% confidence interval. Redis runs in Docker on the same
-machine as the benchmark, so Redis times leave out real network latency. Compare one release with
-another, not with your production network.
+Redis runs in Docker on the same machine as the benchmark, so Redis times leave out real network
+latency. Compare one release with another, not with your production network.
 
-The previous release's benchmarks run first, in the same job on the same runner, so the two
-columns compare fairly. The table calls a benchmark faster or slower only when the two 95%
-intervals don't overlap and the means differ by 5% or more; anything less is "about the same". A
-benchmark the previous release didn't have reads "new". The first release has nothing to compare
-with, so its table shows one column.
+The previous release's benchmarks run in the same job on the same runner, in alternating rounds:
+the previous release, then this one, three times over. A shared runner drifts by 10 to 20%
+between runs of the same code, more than most changes, and alternating lets that drift slow both
+columns alike. Both versions are built with the same function alignment, so moving a function
+doesn't move a time.
+
+Each time is the median of the three rounds' Criterion means, and the range is this release's
+lowest to highest round. The table calls a benchmark faster or slower only when no round of one
+version overlaps the rounds of the other and the medians differ by 5% or more; anything less is
+"about the same". A benchmark the previous release didn't have reads "new". The first release has
+nothing to compare with, so its table shows one run's mean and its 95% confidence interval.
 
 ## Running them
 
@@ -71,12 +76,19 @@ cargo run -p sisa-caching-benches --bin summary   # prints the Markdown table
 To compare with a release, as the release job does, with that release's tag for `v0.X.Y`:
 
 ```sh
+export RUSTFLAGS="-C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5"
+export CRITERION_HOME="$PWD/target/criterion"
 git worktree add ../previous v0.X.Y
-(cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target" \
-    cargo bench -p sisa-caching-benches -- --save-baseline previous)
-cargo bench -p sisa-caching-benches -- --save-baseline current
+for round in 1 2 3; do
+    (cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target-previous" \
+        cargo bench -p sisa-caching-benches -- --save-baseline "previous-$round")
+    cargo bench -p sisa-caching-benches -- --save-baseline "current-$round"
+done
 cargo run -p sisa-caching-benches --bin summary -- v0.X.Y
 ```
+
+Add a filter after `--`, such as `-- 'memory 1M' --save-baseline ...`, to compare a few benchmarks
+only.
 
 `REDIS_IMAGE` picks the server, for example `valkey/valkey:8-alpine`. Criterion's HTML report is
 in `target/criterion/report/index.html`.
