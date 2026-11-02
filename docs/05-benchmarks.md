@@ -78,7 +78,11 @@ To compare with a release, as the release job does, with that release's tag for 
 ```sh
 export RUSTFLAGS="-C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5"
 export CRITERION_HOME="$PWD/target/criterion"
+rm -rf "$CRITERION_HOME"   # the summary lists every result it finds there
 git worktree add ../previous v0.X.Y
+(cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target-previous" \
+    cargo bench -p sisa-caching-benches --no-run)
+cargo bench -p sisa-caching-benches --no-run
 for round in 1 2 3; do
     (cd ../previous && CARGO_TARGET_DIR="$OLDPWD/target-previous" \
         cargo bench -p sisa-caching-benches -- --save-baseline "previous-$round")
