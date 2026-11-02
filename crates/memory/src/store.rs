@@ -351,20 +351,21 @@ impl<C: Clock> InMemoryCacheStore<C> {
 
         if self.entries.len.load(Ordering::Relaxed) > max {
             let now = self.clock.instant();
-
-            self.extract(&mut removed, |_, stored| stored.is_expired(now));
-
             let target = max - max / 10;
+            // Expired entries count as never used, so they go first, and all of them go.
+            let last_use = |stored: &StoredEntry| {
+                if stored.is_expired(now) {
+                    0
+                } else {
+                    stored.last_used.load(Ordering::Relaxed)
+                }
+            };
             // Sized once, as is `removed` below: grown map by map, these lists would be moved to
             // new memory several times per trim, and each move touches pages for the first time.
             let mut uses = Vec::with_capacity(self.entries.len.load(Ordering::Relaxed));
 
             for shard in &self.entries.shards {
-                uses.extend(
-                    read(shard)
-                        .values()
-                        .map(|stored| stored.last_used.load(Ordering::Relaxed)),
-                );
+                uses.extend(read(shard).values().map(last_use));
             }
 
             if uses.len() > target {
@@ -376,9 +377,14 @@ impl<C: Clock> InMemoryCacheStore<C> {
 
                 removed.reserve(excess);
 
-                let evicted = self.extract(&mut removed, |_, stored| {
-                    let used = stored.last_used.load(Ordering::Relaxed);
+                let mut expired = 0;
+                let taken = self.extract(&mut removed, |_, stored| {
+                    let used = last_use(stored);
 
+                    if used == 0 {
+                        expired += 1;
+                        return true;
+                    }
                     if used == cutoff && ties > 0 {
                         ties -= 1;
                         return true;
@@ -386,13 +392,16 @@ impl<C: Clock> InMemoryCacheStore<C> {
 
                     used < cutoff
                 });
+                let evicted = taken - expired;
 
-                METRICS.evicted(&self.name, evicted);
-                tracing::debug!(
-                    store = %self.name,
-                    evicted,
-                    "store full; dropped the least recently used entries"
-                );
+                if evicted > 0 {
+                    METRICS.evicted(&self.name, evicted);
+                    tracing::debug!(
+                        store = %self.name,
+                        evicted,
+                        "store full; dropped the least recently used entries"
+                    );
+                }
             }
         }
 
