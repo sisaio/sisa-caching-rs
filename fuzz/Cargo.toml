@@ -1,0 +1,25 @@
+# Fuzz targets, run with cargo-fuzz on nightly: `cargo +nightly fuzz run backplane_message`.
+# A workspace of its own, so the main workspace's builds and checks never need nightly.
+[package]
+name = "sisa-caching-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sisa-caching-hybrid = { path = "../crates/hybrid" }
+
+# Payloads from the backplane channel: anything a node, or any other Redis client, publishes.
+[[bin]]
+name = "backplane_message"
+path = "fuzz_targets/backplane_message.rs"
+test = false
+doc = false
+bench = false

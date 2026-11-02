@@ -1,0 +1,56 @@
+# Fuzzes the backplane message reader with cargo-fuzz (fuzz/). One minute on PRs that touch the
+# reader or the fuzz target, ten minutes weekly. Outside `ci`: it needs nightly, and a new nightly
+# shouldn't block a merge. A crash uploads the input that caused it.
+name: Fuzz
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "fuzz/**"
+      - "crates/hybrid/src/backplane/**"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SECONDS_TO_RUN: ${{ github.event_name == 'pull_request' && '60' || '600' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-fuzz
+
+      # New inputs go to corpus/, which starts empty; seeds/ holds one message of each kind.
+      - name: Fuzz the backplane message reader
+        working-directory: fuzz
+        run: |
+          mkdir -p corpus/backplane_message
+          cargo +nightly fuzz run backplane_message corpus/backplane_message seeds/backplane_message \
+            -- -max_total_time="$SECONDS_TO_RUN"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          retention-days: 30

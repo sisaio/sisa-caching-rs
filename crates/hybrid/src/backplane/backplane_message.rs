@@ -123,6 +123,22 @@ fn deserialize_version<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u8,
     Ok(version)
 }
 
+/// Reads a payload the way the backplane worker does, and checks that a message it accepts
+/// serializes back to the same message. Only `cargo fuzz` builds it, with `--cfg fuzzing`, so it
+/// isn't part of the API.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub fn fuzz_receive(payload: &[u8]) {
+    let Ok(message) = serde_json::from_slice::<BackplaneMessage>(payload) else {
+        return;
+    };
+    let encoded = serde_json::to_vec(&message).expect("a received message serializes");
+    let decoded = serde_json::from_slice::<BackplaneMessage>(&encoded)
+        .expect("a serialized message reads back");
+
+    assert_eq!(decoded, message);
+}
+
 #[cfg(test)]
 mod tests {
     use opentelemetry::{

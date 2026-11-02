@@ -63,6 +63,16 @@ each push to main and the README badge shows it.
 cargo llvm-cov --workspace --all-features --ignore-filename-regex 'crates/testing/'
 ```
 
+A fuzz target in `fuzz/` feeds arbitrary bytes to the backplane message reader, which must never
+panic and must read back what it accepts. It needs nightly and
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz); the `fuzz` workflow runs it for a minute on
+PRs that touch the reader and for ten minutes weekly. `seeds/` holds one message of each kind, and
+a crash leaves its input in `fuzz/artifacts/`:
+
+```sh
+cd fuzz && cargo +nightly fuzz run backplane_message corpus/backplane_message seeds/backplane_message
+```
+
 Write tests a reader can follow: one behavior per test, named for that behavior, as few lines as
 it takes. Use `ManualClock` instead of sleeping on real time, and paused Tokio time for timers.
 
