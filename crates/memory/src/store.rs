@@ -35,7 +35,8 @@ fn off_async_thread(work: impl FnOnce() + Send + 'static) {
 type Erased = Arc<dyn Any + Send + Sync>;
 
 /// An entry plus when the store lets it go, on the monotonic clock so wall-clock changes don't
-/// move it, and when it was last stored or read, so a full store drops the least recently used.
+/// move it, and, in a store with `max_entries`, when it was last stored or read, so a full store
+/// drops the least recently used.
 struct StoredEntry {
     entry: CacheEntry<Erased>,
     deadline: Option<Instant>,
@@ -295,7 +296,11 @@ impl<C: Clock> InMemoryCacheStore<C> {
         let stored = StoredEntry {
             entry: entry.map(|value| Arc::new(value) as Erased),
             deadline: ttl.zip(now).and_then(|(ttl, now)| now.checked_add(ttl)),
-            last_used: AtomicU64::new(self.entries.next_use()),
+            // Only a store with `max_entries` trims, so only it orders its entries by use.
+            last_used: AtomicU64::new(match self.settings.memory.max_entries {
+                Some(_) => self.entries.next_use(),
+                None => 0,
+            }),
         };
         let mut entries = write(self.entries.shard(key));
         // A key that is there keeps its slot, so a write over it allocates no key. Measured, that
@@ -477,12 +482,14 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
             .get(key)
             .filter(|stored| !stored.is_expired(now))
             .map(|stored| {
-                let used = self.entries.uses.load(Ordering::Relaxed);
+                if self.settings.memory.max_entries.is_some() {
+                    let used = self.entries.uses.load(Ordering::Relaxed);
 
-                // Stored only when it moved, so readers of one entry don't keep taking its cache
-                // line from each other.
-                if stored.last_used.load(Ordering::Relaxed) != used {
-                    stored.last_used.store(used, Ordering::Relaxed);
+                    // Stored only when it moved, so readers of one entry don't keep taking its
+                    // cache line from each other.
+                    if stored.last_used.load(Ordering::Relaxed) != used {
+                        stored.last_used.store(used, Ordering::Relaxed);
+                    }
                 }
 
                 stored.entry.clone()
