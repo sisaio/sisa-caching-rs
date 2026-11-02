@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prints `true` when a PR or a push to main changes a file that the Rust jobs build, lint, test or
 # scan, and `false` when it changes only docs, scripts or other workflows. CI skips its Rust jobs on
-# `false`, and CodeQL its Rust scan on a PR.
+# `false`, and CodeQL its Rust scan, on a PR and on a push to main alike.
 # Usage: code-changed.sh <base sha> <head sha>
 set -euo pipefail
 

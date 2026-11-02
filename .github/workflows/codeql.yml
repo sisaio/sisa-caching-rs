@@ -37,22 +37,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The whole history, so the next step can diff the PR against its base.
+          # The whole history, so the next step can diff the PR against its base, or the push
+          # against the commit before it.
           fetch-depth: 0
 
-      # PRs that change no Rust inputs skip the Rust scan but still report `analyze (rust)`.
-      - name: Look for code changes
+      # A PR is diffed against its base and a push to main against the commit before it: one that
+      # changes no Rust inputs skips the Rust scan, and one that changes nothing under .github/
+      # skips the Actions scan. Both still report `analyze (...)`. The weekly run scans both.
+      - name: Look for changes to scan
         id: scope
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           LANGUAGE: ${{ matrix.language }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$LANGUAGE" = rust ]; then
-            echo "scan=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            scan=true
+          elif [ "$LANGUAGE" = rust ]; then
+            scan=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")
+          elif git diff --name-only "$BASE...$HEAD" | grep -q '^\.github/'; then
+            scan=true
           else
-            echo "scan=true" >> "$GITHUB_OUTPUT"
+            scan=false
           fi
+          echo "scan=$scan" >> "$GITHUB_OUTPUT"
 
       # The Rust extractor reads the Cargo manifests and runs build scripts and procedural macros.
       - name: Install the pinned toolchain
