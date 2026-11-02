@@ -40,13 +40,14 @@ jobs:
         with:
           tool: cargo-fuzz
 
-      # New inputs go to corpus/, which starts empty; seeds/ holds one message of each kind.
+      # New inputs go to corpus/, which starts empty; seeds/ holds one message of each kind. The
+      # installed cargo-fuzz is a musl build, which would target musl unless told otherwise.
       - name: Fuzz the backplane message reader
         working-directory: fuzz
         run: |
           mkdir -p corpus/backplane_message
-          cargo +nightly fuzz run backplane_message corpus/backplane_message seeds/backplane_message \
-            -- -max_total_time="$SECONDS_TO_RUN"
+          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu backplane_message \
+            corpus/backplane_message seeds/backplane_message -- -max_total_time="$SECONDS_TO_RUN"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
