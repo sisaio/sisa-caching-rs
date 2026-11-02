@@ -14,6 +14,7 @@ use crate::common::{
     Node, WRITES, Write, backplane, fast_heartbeats, hybrid, key, local_value, memory, node,
     publish, publish_removal, start,
 };
+use serde_json::json;
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheKey, CacheStore, CacheValue, KeyPrefix},
     clock::SystemClock,
@@ -349,6 +350,31 @@ async fn an_unreadable_message_clears_the_local_layer_and_is_never_quoted() {
         "{logged}"
     );
     assert!(!logged.contains("user::42"), "{logged}");
+}
+
+#[tokio::test]
+async fn a_writer_numbering_from_0_cannot_hide_a_lost_invalidation() {
+    let redis = Redis::start().await;
+    let node = start(hybrid(memory("users"), backplane(&redis).await).unwrap()).await;
+
+    node.local_store()
+        .set(&key(1), "ada".to_owned(), None)
+        .await
+        .unwrap();
+
+    // Invalidation 1 never arrives: 0 and 2 make two numbers, as many as the heartbeat counts.
+    for message in [
+        json!({"v": 1, "source": "elsewhere", "seq": 0, "kind": "key", "target": &*key(7)}),
+        json!({"v": 1, "source": "elsewhere", "seq": 2, "kind": "key", "target": &*key(8)}),
+        json!({"v": 1, "source": "elsewhere", "seq": 2, "kind": "heartbeat"}),
+    ] {
+        publish(&redis, "users", &message.to_string()).await;
+    }
+
+    eventually("the node clears", async || {
+        local_value(&node, &key(1)).await.is_none()
+    })
+    .await;
 }
 
 #[tokio::test]
