@@ -1,6 +1,6 @@
-//! What the benchmarks store: a small user record under `user:{id}`, the meter provider they
-//! record their metrics with, a timer for calls that need the store set up before each one, and
-//! the calls every store has, timed the same way on each.
+//! What the benchmarks store: a small user record under `user:{id}`, the Criterion settings they
+//! run with, the meter provider they record their metrics with, a timer for calls that need the
+//! store set up before each one, and the calls every store has, timed the same way on each.
 
 use std::{
     hint::black_box,
@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use criterion::{BenchmarkGroup, measurement::WallTime};
+use criterion::{BenchmarkGroup, Criterion, measurement::WallTime};
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::{ManualReader, SdkMeterProvider};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,15 @@ pub fn user(id: u64) -> User {
 
 pub fn key(id: u64) -> CacheKey {
     CacheKey::new("user", id).unwrap()
+}
+
+/// Criterion with a 1 s warm-up and 3 s of measuring per benchmark, not its default 3 s and 5 s:
+/// a nanosecond or microsecond call runs millions of times in that, and the release job runs
+/// every benchmark six times. A group that needs more, as the 1M-entry walks do, sets its own.
+pub fn criterion() -> Criterion {
+    Criterion::default()
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(3))
 }
 
 /// Installs a meter provider, once, so the stores record their metrics as an application that

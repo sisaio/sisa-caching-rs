@@ -56,5 +56,9 @@ fn hybrid(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, hybrid);
+criterion_group! {
+    name = benches;
+    config = sisa_caching_benches::criterion();
+    targets = hybrid
+}
 criterion_main!(benches);

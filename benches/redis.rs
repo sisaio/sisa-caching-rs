@@ -21,5 +21,9 @@ fn redis(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, redis);
+criterion_group! {
+    name = benches;
+    config = sisa_caching_benches::criterion();
+    targets = redis
+}
 criterion_main!(benches);
