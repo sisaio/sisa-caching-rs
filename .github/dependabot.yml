@@ -7,8 +7,9 @@
 # Dependabot's per-ecosystem ones.
 version: 2
 updates:
+  # The fuzz targets in fuzz/ are a workspace and lock file of their own.
   - package-ecosystem: cargo
-    directory: /
+    directories: [/, /fuzz]
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

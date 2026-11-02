@@ -5,6 +5,8 @@ mod backplane_message;
 mod node_id;
 mod redis_backplane;
 
+#[cfg(fuzzing)]
+pub use backplane_message::fuzz_receive;
 pub(crate) use backplane_message::{BackplaneMessage, Invalidation};
 pub use node_id::NodeId;
 pub use redis_backplane::RedisBackplane;

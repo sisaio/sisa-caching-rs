@@ -20,6 +20,10 @@ readme = "README.md"
 shadow_unrelated = "warn"
 min_ident_chars = "warn"
 
+# `cargo fuzz` builds with `--cfg fuzzing`, which turns on the fuzz entry points in fuzz/.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [workspace.dependencies]
 # The library crates, at the coordinated version.
 sisa-caching = { path = "crates/sisa-caching", version = "0.3.1" }
