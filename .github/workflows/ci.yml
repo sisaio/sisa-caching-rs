@@ -1,7 +1,7 @@
 # Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
 # links, the tests, which run against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and
-# coverage on main. The Redis tests start their servers in Docker. PRs that change no Rust inputs
-# skip the Rust jobs; `ci` sums them up for the ruleset.
+# coverage on main. The Redis tests start their servers in Docker. PRs and pushes to main that
+# change no Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
 name: CI
 
 on:
@@ -22,7 +22,8 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Whether the Rust jobs need to run (always on main), and the commit check every PR needs.
+  # Whether the Rust jobs need to run, and the commit check every PR needs. A PR is diffed against
+  # its base and a push to main against the commit before it, so a docs-only merge skips them too.
   changes:
     name: changes
     runs-on: ubuntu-24.04
@@ -30,23 +31,18 @@ jobs:
     outputs:
       code: ${{ steps.diff.outputs.code }}
     env:
-      BASE: ${{ github.event.pull_request.base.sha }}
-      HEAD: ${{ github.event.pull_request.head.sha }}
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The whole history, so both checks can read the PR's commits.
+          # The whole history, so both checks can read the pushed commits.
           fetch-depth: 0
 
       - name: Look for code changes
         id: diff
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
 
       # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
       # checked on the next push. Dependabot's titles run long, so its PRs are left out.
@@ -279,7 +275,8 @@ jobs:
   # enough: the other servers run the same code paths. The test helpers crate is left out.
   coverage:
     name: coverage
-    if: github.event_name == 'push'
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
