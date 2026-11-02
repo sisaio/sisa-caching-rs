@@ -30,6 +30,12 @@ reviews:
         redis-rs release that breaks its API. A new item, setting, error variant or `CacheStore`
         method isn't breaking. A commit subject with `!` always is.
 
+  # Approve a PR once its findings are resolved, so Scorecard's Code-Review check sees the review.
+  # The author can't approve their own PR with `@coderabbitai approve`.
+  auto_approvals:
+    enabled: true
+    allow_author_approval: false
+
   # The generated changelog and the lock file aren't reviewed.
   path_filters:
     - "!CHANGELOG.md"
