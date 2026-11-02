@@ -25,7 +25,9 @@ jobs:
   # Whether the Rust jobs need to run, and the commit check every PR needs. A PR is diffed against
   # its base and a push to main against the commit before it, so a docs-only merge skips them too.
   # A merge with the same files as its PR's head, which passed CI, skips them as well; coverage
-  # still runs on every code change, for the badge.
+  # still runs on every code change, for the badge. `semver` runs only when a published crate's
+  # source or manifest, the lock file, the toolchain or this workflow changes: tests, benches and
+  # examples have no public API.
   changes:
     name: changes
     runs-on: ubuntu-24.04
@@ -37,6 +39,7 @@ jobs:
     outputs:
       code: ${{ steps.diff.outputs.code }}
       coverage: ${{ steps.diff.outputs.coverage }}
+      api: ${{ steps.diff.outputs.api }}
     env:
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -59,6 +62,12 @@ jobs:
             code=false
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          api=false
+          if git diff --name-only "$BASE...$HEAD" | grep -qE \
+            '^crates/(core|memory|redis|hybrid|sisa-caching)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
+            api=true
+          fi
+          echo "api=$api" >> "$GITHUB_OUTPUT"
 
       # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
       # checked on the next push. Dependabot's titles run long, so its PRs are left out.
@@ -170,7 +179,7 @@ jobs:
   semver:
     name: semver
     needs: changes
-    if: needs.changes.outputs.code == 'true' && github.event_name == 'pull_request'
+    if: needs.changes.outputs.api == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
