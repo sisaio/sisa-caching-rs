@@ -24,12 +24,19 @@ env:
 jobs:
   # Whether the Rust jobs need to run, and the commit check every PR needs. A PR is diffed against
   # its base and a push to main against the commit before it, so a docs-only merge skips them too.
+  # A merge with the same files as its PR's head, which passed CI, skips them as well; coverage
+  # still runs on every code change, for the badge.
   changes:
     name: changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      coverage: ${{ steps.diff.outputs.coverage }}
     env:
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -42,7 +49,16 @@ jobs:
 
       - name: Look for code changes
         id: diff
-        run: echo "code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          code=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")
+          echo "coverage=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = true ] && [ "$GITHUB_EVENT_NAME" = push ] \
+            && [ "$(.github/scripts/pr-tested.sh "$BASE" "$HEAD")" = true ]; then
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
       # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
       # checked on the next push. Dependabot's titles run long, so its PRs are left out.
@@ -276,7 +292,7 @@ jobs:
   coverage:
     name: coverage
     needs: changes
-    if: github.event_name == 'push' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'push' && needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:

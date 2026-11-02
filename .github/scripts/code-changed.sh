@@ -8,7 +8,7 @@ set -euo pipefail
 files=$(git diff --name-only "$1...$2")
 printf '%s\n' "$files" >&2
 
-if grep -qE '^(crates|benches|examples|\.cargo)/|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml|deny\.toml)$|^\.github/(workflows/(ci|codeql)\.yml|scripts/code-changed\.sh)$' <<<"$files"; then
+if grep -qE '^(crates|benches|examples|\.cargo)/|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml|deny\.toml)$|^\.github/(workflows/(ci|codeql)\.yml|scripts/(code-changed|pr-tested)\.sh)$' <<<"$files"; then
   echo true
 else
   echo false
