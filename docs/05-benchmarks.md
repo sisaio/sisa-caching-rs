@@ -43,6 +43,10 @@ another node's, so those hold up no async thread. A memory store's `remove_prefi
 called by the application walk on the caller's thread; inside a runtime, `remove_prefix` frees
 what it removed on the blocking pool.
 
+`set that trims` runs on the default 16 maps, so it is not comparable with releases before 0.3.0,
+which kept one map by default: 0.3.0 timed it 17% slower than 0.2.0. Over 16 maps the trim does
+less work but touches more memory, as it walks the maps one at a time.
+
 ## Reading the numbers
 
 Each time is Criterion's mean, with its 95% confidence interval. Redis runs in Docker on the same
