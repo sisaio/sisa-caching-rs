@@ -6,8 +6,9 @@
 # - on a push to main whose version has no `v<version>` tag yet, as merging that PR brings: tags
 #   the commit, creates the GitHub release from the changelog as a draft, runs the benchmarks for
 #   it, waits for CI to pass on that commit and for the maintainer to approve the `release`
-#   environment, publishes the crates to crates.io, attaches the published `.crate` files and a
-#   signed provenance attestation for them to the draft, and then publishes the release.
+#   environment, publishes the crates to crates.io, checks that crates.io serves the `.crate`
+#   files the tag packages to and attaches them with a signed provenance attestation to the
+#   draft, and then publishes the release.
 #
 # crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
 # draft and someone has read it. Releases are immutable once published, so the release stays a
@@ -162,28 +163,40 @@ jobs:
             fi
           done
 
-  # Signs what users download: the `.crate` files as crates.io serves them. The attestation is a
-  # Sigstore bundle with SLSA build provenance, also listed under the repository's attestations.
-  # It goes on the draft, since a published release can't change.
+  # Signs what users download, once it matches the tagged source: it packages each crate from the
+  # tag, as `cargo publish` did, and fails unless crates.io serves the same bytes, so a crate
+  # uploaded any other way gets no attestation. `.crate` files are reproducible. The attestation
+  # is a Sigstore bundle with SLSA build provenance, also listed under the repository's
+  # attestations. It goes on the draft, since a published release can't change.
   attest:
     name: attest
     needs: [tag, publish]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - name: Download the published crates
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - name: Check the published crates against the tag
         env:
           TAG: ${{ needs.tag.outputs.tag }}
         run: |
           version="${TAG#v}"
           mkdir crates
           for crate in sisa-caching-core sisa-caching-memory sisa-caching-redis sisa-caching-hybrid sisa-caching; do
+            cargo package -p "$crate" --locked --no-verify
             curl -sSfL -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
               -o "crates/$crate-$version.crate" "https://static.crates.io/crates/$crate/$crate-$version.crate"
+            cmp "target/package/$crate-$version.crate" "crates/$crate-$version.crate"
           done
 
       - name: Attest the crates
