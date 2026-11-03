@@ -84,7 +84,8 @@ Warnings name the store, not the key, and quote no value. A `get_or_set` warning
 `cache get_or_set` debug span, so with debug on it shows next to the key. A Redis decode error
 says where the stored JSON stops fitting the type; serde's own message, which can quote the data,
 is the error's `source`. A warning about a backplane message that can't be read names the kind of
-problem, and the full message, which can quote keys, logs at debug.
+problem, and the full message, which can quote keys, logs at debug. So does a failed Sentinel
+lookup, once however many calls share it; each call returns its own error.
 
 Every target starts with `sisa_caching`, so one filter covers all crates:
 

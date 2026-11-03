@@ -170,6 +170,11 @@ impl RedisSentinel {
         self.containers[0].unpause().await.unwrap();
     }
 
+    /// Stops the Sentinel for good, so every lookup through it fails at once.
+    pub async fn stop_sentinel(&self) {
+        self.containers[2].stop_with_timeout(Some(0)).await.unwrap();
+    }
+
     /// Promotes the server on 6380 and waits until Sentinel names it. The old primary keeps
     /// accepting writes until Sentinel demotes it, about ten seconds later.
     pub async fn failover(&self) {
