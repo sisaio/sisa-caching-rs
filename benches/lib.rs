@@ -12,7 +12,7 @@ use criterion::{BenchmarkGroup, Criterion, measurement::WallTime};
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::{ManualReader, SdkMeterProvider};
 use serde::{Deserialize, Serialize};
-use sisa_caching_core::cache::{CacheKey, CacheStore};
+use sisa_caching_core::cache::{CacheKey, CacheOptions, CacheStore};
 use tokio::runtime::Runtime;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -81,7 +81,8 @@ pub async fn time_after(
 
 /// Times the calls every store has, in `group`: `get` hit and miss, `set`, `remove`, and
 /// `get_or_set` hit and miss. `hit` names the hits, such as `local hit` on the hybrid. It caches
-/// `user:1` first; `user:2` stays missing, and `user:3` is the key the writes use.
+/// `user:1` first, for an hour, as most entries have a TTL; `user:2` stays missing, and `user:3`
+/// is the key the writes use.
 pub fn time_every_call<S: CacheStore>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     runtime: &Runtime,
@@ -90,8 +91,9 @@ pub fn time_every_call<S: CacheStore>(
 ) {
     // Built before timing, so the times leave out formatting a key.
     let (cached, missing, written) = (key(1), key(2), key(3));
+    let hour = CacheOptions::with_ttl(Duration::from_secs(3600));
 
-    runtime.block_on(store.set(&cached, user(1), None)).unwrap();
+    runtime.block_on(store.set(&cached, user(1), hour)).unwrap();
 
     group.bench_function(format!("get {hit}"), |bencher| {
         bencher
