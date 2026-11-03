@@ -3,6 +3,7 @@
 //! distributed store is a memory store, so a test can break the backplane alone.
 
 use std::{
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -104,8 +105,9 @@ async fn heartbeating_node(distributed: &InMemoryCacheStore, url: &str) -> Node 
     start(store).await
 }
 
-/// A writer whose publishes the test can refuse, and a reader holding copies of `user:1` = `old`
-/// and `user:other` = `x`, both sending fast heartbeats. `None` when the server can't add a user.
+/// A writer whose publishes the test can refuse, and a reader holding copies of `user:1` = `old`,
+/// `user:other` = `x` and `user:marker` = `x`, both sending fast heartbeats. `None` when the
+/// server can't add a user.
 async fn writer_and_reader(redis: &Redis) -> Option<(Node, Node)> {
     let distributed = memory("users");
     let writer = heartbeating_node(&distributed, &redis.add_user("writer").await?).await;
@@ -116,15 +118,36 @@ async fn writer_and_reader(redis: &Redis) -> Option<(Node, Node)> {
         .await
         .unwrap();
     reader.get::<String>(&key(1)).await.unwrap();
-    reader
-        .local_store()
-        .set(&key("other"), "x".to_owned(), None)
-        .await
-        .unwrap();
+    for other in ["other", "marker"] {
+        reader
+            .local_store()
+            .set(&key(other), "x".to_owned(), None)
+            .await
+            .unwrap();
+    }
     // Time for each to hear the other's heartbeats, so the reader already tracks the writer.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     Some((writer, reader))
+}
+
+/// Waits until the server has refused a `publish` from `user`, as its ACL log records.
+async fn publish_refused(redis: &Redis, user: &str) {
+    eventually("the server refuses a publish", async || {
+        let log: Vec<HashMap<String, String>> = redis::cmd("ACL")
+            .arg("LOG")
+            .query_async(&mut redis.connection().await)
+            .await
+            .unwrap();
+
+        log.iter().any(|entry| {
+            entry.get("username").is_some_and(|name| name == user)
+                && entry
+                    .get("object")
+                    .is_some_and(|command| command.eq_ignore_ascii_case("publish"))
+        })
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -137,7 +160,7 @@ async fn a_failed_publish_is_tried_again() {
     // The first try is refused; the next comes 50 ms later.
     redis.set_user("writer", "-publish").await;
     writer.set(&key(1), "new".to_owned(), None).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    publish_refused(&redis, "writer").await;
     redis.set_user("writer", "+publish").await;
 
     eventually("a later try reaches the reader", async || {
