@@ -156,24 +156,24 @@ impl Redis {
             .collect()
     }
 
-    /// Adds the user `name`, allowed everything, and returns a URL that logs in as it. `None` on a
-    /// server that refuses those rules, after saying so, so the test can skip itself.
+    /// Adds the user `name`, allowed everything, and returns a URL that logs in as it. `None` on
+    /// Garnet, where adding the user fails and `ACL LOG` doesn't exist, after saying so, so the test
+    /// can skip itself. Any other server must add it.
     pub async fn add_user(&self, name: &str) -> Option<String> {
-        let added: redis::RedisResult<()> = redis::cmd("ACL")
+        if Server::current() == Server::Garnet {
+            eprintln!("skipped: Garnet can't add a user with these ACL rules");
+            return None;
+        }
+        let _: () = redis::cmd("ACL")
             .arg(&["SETUSER", name, "on", ">secret", "~*", "&*", "+@all"])
             .query_async(&mut self.connection().await)
-            .await;
+            .await
+            .unwrap();
 
-        match added {
-            Ok(()) => Some(
-                self.url
-                    .replacen("redis://", &format!("redis://{name}:secret@"), 1),
-            ),
-            Err(error) => {
-                println!("skipped: the server can't add a user: {error}");
-                None
-            }
-        }
+        Some(
+            self.url
+                .replacen("redis://", &format!("redis://{name}:secret@"), 1),
+        )
     }
 
     /// Changes a user's rights with an ACL rule, such as `-publish`.
