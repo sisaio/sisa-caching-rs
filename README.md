@@ -38,7 +38,7 @@ another store doesn't touch its call sites. The crate docs cover settings and be
 
 ```toml
 [dependencies]
-sisa-caching = { version = "0.3", features = ["memory"] }   # or "redis", or "hybrid"
+sisa-caching = { version = "0.4", features = ["memory"] }   # or "redis", or "hybrid"
 ```
 
 In memory:
