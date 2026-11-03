@@ -30,7 +30,7 @@ jobs:
   # examples have no public API.
   changes:
     name: changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -85,11 +85,12 @@ jobs:
           .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
 
+  # On ARM, which builds faster; the jobs that run our code stay on x64, where most users are.
   lint:
     name: lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,7 +137,7 @@ jobs:
     name: msrv
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -161,7 +162,7 @@ jobs:
     name: deny
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,7 +181,7 @@ jobs:
     name: semver
     needs: changes
     if: needs.changes.outputs.api == 'true' && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -227,7 +228,7 @@ jobs:
   # checks the links in doc comments.
   links:
     name: links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -246,7 +247,7 @@ jobs:
     name: test (${{ matrix.server }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -296,7 +297,7 @@ jobs:
     name: ci
     if: always()
     needs: [changes, lint, msrv, deny, semver, links, test]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Check the results
@@ -309,7 +310,7 @@ jobs:
     name: coverage
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       REDIS_IMAGE: redis:8-alpine

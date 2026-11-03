@@ -23,7 +23,7 @@ env:
 jobs:
   fuzz:
     name: fuzz
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     env:
       SECONDS_TO_RUN: ${{ github.event_name == 'pull_request' && '60' || '600' }}
@@ -41,12 +41,14 @@ jobs:
           tool: cargo-fuzz
 
       # New inputs go to corpus/, which starts empty; seeds/ holds one message of each kind. The
-      # installed cargo-fuzz is a musl build, which would target musl unless told otherwise.
+      # installed cargo-fuzz is a musl build, which would target musl unless told otherwise, so it
+      # gets the runner's own glibc target.
       - name: Fuzz the backplane message reader
         working-directory: fuzz
         run: |
           mkdir -p corpus/backplane_message
-          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu backplane_message \
+          target=$(rustc +nightly -vV | sed -n 's/^host: //p')
+          cargo +nightly fuzz run --target "$target" backplane_message \
             corpus/backplane_message seeds/backplane_message -- -max_total_time="$SECONDS_TO_RUN"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
