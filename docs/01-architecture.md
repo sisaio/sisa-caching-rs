@@ -367,5 +367,5 @@ Settled; reopen only with new evidence.
   `flatten`, so a last flattened field fails on whatever fields the others didn't take.
 - Info spans and warnings carry the store and the invalidation kind, never a key or a value; only
   debug spans and events carry keys. Stores warn only about the errors they swallow. Their info
-  lines say that a worker started or stopped, a backplane subscribed, or store calls work again,
-  and a worker's panic logs an error.
+  lines say that a worker started or stopped, a backplane subscribed, store calls work again, or a
+  hybrid store told the other nodes it is stopping, and a worker's panic logs an error.

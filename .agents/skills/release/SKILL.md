@@ -36,9 +36,6 @@ or merges it, approves, publishes, or pushes a tag.
       `chore`; a commit without a type lands under Other.
 - [ ] If semver-checks reports a breaking change, check the bump matches (before 1.0, a breaking
       change bumps the minor version) and that the changelog says how to migrate.
-- [ ] When the minor version changes, check that the README's install line names it: every
-      crate publishes that README to crates.io. If it doesn't, fix it in a PR to `main` before you
-      edit the changelog, since anything that lands on `main` replaces the release PR.
 - [ ] Push the changelog edit to the release PR's branch, then tell the maintainer it is ready,
       with the version and a one-line summary.
 
@@ -64,8 +61,7 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
   sections. Each rc's GitHub pre-release keeps its notes. When nothing in the crates changed
   since the last rc, release-plz opens no PR: open a normal PR with the version and that
   section, titled `chore: release v0.4.0`.
-- The README's install line names the stable version until the final, and the milestone stays
-  open until the final is published.
+- The milestone stays open until the final is published.
 
 ## Gotchas
 

@@ -36,9 +36,8 @@ another store doesn't touch its call sites. The crate docs cover settings and be
 
 ## Quick start
 
-```toml
-[dependencies]
-sisa-caching = { version = "0.3", features = ["memory"] }   # or "redis", or "hybrid"
+```sh
+cargo add sisa-caching --features memory   # or redis, or hybrid
 ```
 
 In memory:
