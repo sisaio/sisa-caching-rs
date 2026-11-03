@@ -37,8 +37,9 @@ crate, so they sit at the end of its file. Each Redis test starts its own server
 `sisa-caching-testing`, so the suite needs Docker and nothing else. `REDIS_IMAGE` picks the server,
 `redis:8-alpine` by default; CI runs Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2. Each
 helper starts the cluster, Sentinel or TLS setup the way that server needs it; the Sentinel tests
-skip themselves on Garnet. The Cluster and Sentinel tests reach their servers on the container's own
-IP address, so they need Docker on a Linux host, as in CI; Docker Desktop can't route to it.
+and the tests that add an ACL user skip themselves on Garnet. The Cluster and Sentinel tests reach
+their servers on the container's own IP address, so they need Docker on a Linux host, as in CI;
+Docker Desktop can't route to it.
 
 ```sh
 REDIS_IMAGE=valkey/valkey:8-alpine cargo test --workspace --all-features
