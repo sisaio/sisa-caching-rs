@@ -61,7 +61,9 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
 - The next rc needs no input: from a published `0.4.0-rc.1`, release-plz picks `0.4.0-rc.2`
   whatever the commits are.
 - The final needs it: `-f version=0.4.0`. Its changelog section lists only the commits since the
-  last rc, so rewrite it to cover the whole cycle; the rc sections stay.
+  last rc, so rewrite it to cover the whole cycle; the rc sections stay. When nothing in the
+  crates changed since the last rc, release-plz opens no PR, so the workflow opens one itself with
+  the version and an empty section to write.
 - The README's install line names the stable version until the final, and the milestone stays
   open until the final is published.
 
