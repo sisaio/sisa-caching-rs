@@ -134,7 +134,6 @@ sequenceDiagram
     participant Redis
 
     App->>Hybrid: get_entry(key)
-    Hybrid->>Hybrid: note the key's generation
     alt local reads on
         Hybrid->>Local: get_entry(key)
         Local-->>Hybrid: entry or none
@@ -142,6 +141,7 @@ sequenceDiagram
     alt local hit
         Hybrid-->>App: entry
     else local miss, or local reads off
+        Hybrid->>Hybrid: note the key's generation
         Hybrid->>Redis: get_entry(key)
         Redis-->>Hybrid: entry or none
         opt found and local reads on

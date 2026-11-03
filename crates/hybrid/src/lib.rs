@@ -27,9 +27,9 @@
 //! # }
 //! ```
 //!
-//! For a Redis Cluster, Sentinel or another distributed store, build the distributed store and the
-//! backplane, and give them to [`HybridCacheStore::new`] with the settings; it builds the local
-//! layer. On a cluster, give the store a `ClusterConnection` and the backplane the cluster client
+//! For a Redis Cluster or Sentinel, build the Redis store and the backplane, and give them to
+//! [`HybridCacheStore::new`] with the settings; it builds the local layer. On a cluster, give the
+//! store a `ClusterConnection` and the backplane the cluster client
 //! ([`RedisBackplane::cluster`]), which uses sharded pub/sub.
 //!
 //! Each store publishes and listens on its own pub/sub channel, `<store>:backplane`. One store
