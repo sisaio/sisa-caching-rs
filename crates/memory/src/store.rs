@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     mem,
     sync::{
-        Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -489,11 +489,24 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
         &self,
         key: &str,
     ) -> Result<Option<CacheEntry<CV>>, CacheError> {
+        let shard = self.entries.shard(key);
         // Read first even when the entry has no deadline: measured, reading it after the lookup,
         // only when needed, slows hits on entries with a TTL, which most entries have.
-        let now = self.clock.instant();
+        let before = self.clock.instant();
+        // A read that waits for a write reads the time again once it holds the map, so an entry
+        // that expired while it waited counts as expired. Measured, reading it under the lock on
+        // every read slows many threads reading through one map.
+        let (entries, now) = match shard.try_read() {
+            Ok(entries) => (entries, before),
+            Err(TryLockError::Poisoned(poisoned)) => (poisoned.into_inner(), before),
+            Err(TryLockError::WouldBlock) => {
+                let entries = read(shard);
+
+                (entries, self.clock.instant())
+            }
+        };
         // An expired entry stays until a purge, a trim or a write replaces it.
-        let found = read(self.entries.shard(key))
+        let found = entries
             .get(key)
             .filter(|stored| !stored.is_expired(now))
             .map(|stored| {
@@ -509,6 +522,8 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
 
                 stored.entry.clone()
             });
+
+        drop(entries);
 
         let Some(entry) = found else {
             self.reads.record(false);
@@ -539,14 +554,17 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
 
     #[tracing::instrument(level = "debug", name = "memory remove", skip_all, fields(key = %self.name.format_key(key)))]
     async fn remove(&self, key: &str) -> Result<bool, CacheError> {
-        let now = self.clock.instant();
         let removed = write(self.entries.shard(key)).remove(key);
 
         if removed.is_some() {
             self.entries.len.fetch_sub(1, Ordering::Relaxed);
         }
 
-        // An expired entry goes too, but it wasn't there for a reader, as on Redis.
+        // An expired entry goes too, but it wasn't there for a reader, as on Redis. The time is
+        // read after the removal, so one that expired while this waited for the lock counts as
+        // expired.
+        let now = self.clock.instant();
+
         Ok(removed.is_some_and(|stored| !stored.is_expired(now)))
     }
 
@@ -863,6 +881,39 @@ mod tests {
         assert!(!store.remove(&key(1)).await.unwrap(), "expired");
         assert_eq!(store.remove_prefix("user").await.unwrap(), 1);
         assert_eq!(store.purge(), 0, "the expired entries went too");
+    }
+
+    #[tokio::test]
+    async fn an_entry_that_expires_while_a_call_waits_for_its_map_counts_as_expired() {
+        let clock = ManualClock::new();
+        let store = store(
+            &clock,
+            InMemoryCacheSettings {
+                memory: MemorySettings {
+                    shards: Some(1),
+                    ..MemorySettings::default()
+                },
+                ..InMemoryCacheSettings::default()
+            },
+        );
+
+        store.set(&key(1), 1_u32, ttl(1)).await.unwrap();
+        store.set(&key(2), 2_u32, ttl(1)).await.unwrap();
+
+        let held_map = write(&store.entries.shards[0]);
+
+        std::thread::scope(|scope| {
+            let read = scope.spawn(|| store.get::<u32>(&key(1)).now_or_never().unwrap());
+            let removal = scope.spawn(|| store.remove(&key(2)).now_or_never().unwrap());
+
+            // Both wait for the map while the entries expire.
+            std::thread::sleep(Duration::from_millis(50));
+            clock.advance(secs(1));
+            drop(held_map);
+
+            assert_eq!(read.join().unwrap().unwrap(), None);
+            assert!(!removal.join().unwrap().unwrap(), "expired");
+        });
     }
 
     #[tokio::test]
