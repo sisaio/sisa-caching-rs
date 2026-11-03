@@ -70,7 +70,7 @@ fn parallel(criterion: &mut Criterion) {
     for shards in [1, 16] {
         let store = store(shards);
 
-        fill(&runtime, &store, 0..TASKS, None);
+        fill(&runtime, &store, 0..TASKS, Some(Duration::from_secs(3600)));
 
         group.bench_function(BenchmarkId::new("get hit, shards", shards), |bencher| {
             bencher.to_async(&runtime).iter_custom(|iters| {
@@ -104,8 +104,8 @@ fn parallel(criterion: &mut Criterion) {
     group.finish();
 }
 
-/// The calls that walk every entry of one map, at a million entries. Each holds that map's lock,
-/// and the thread it runs on, until it is done.
+/// The calls that walk every entry, at a million entries. Each locks one map at a time, and holds
+/// the thread it runs on until it is done.
 fn large(criterion: &mut Criterion) {
     meter_provider();
 
