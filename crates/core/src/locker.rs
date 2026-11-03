@@ -19,16 +19,14 @@ struct Claim<'a> {
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
         // A caller takes its first share under this lock and gives up its claim, its last share,
-        // under it too, so once this one is gone, a count of one, the map's, means nobody holds
-        // or waits on the mutex. Given up after the check instead, two last claims dropped at
-        // once could each count the other's share and both leave the mutex in the map.
+        // under it too, so a count of two, the map's and this one, means nobody else holds or
+        // waits on the mutex. This share goes before the lock is released: given up after it,
+        // two last claims dropped at once could each count the other's share and both leave the
+        // mutex in the map. It is the map's own `Arc`, so the count needs no second lookup.
         let mut locks = self.locker.lock_registry();
+        let mutex = self.mutex.take();
 
-        drop(self.mutex.take());
-        if locks
-            .get(&self.key)
-            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
-        {
+        if mutex.is_some_and(|mutex| Arc::strong_count(&mutex) == 2) {
             locks.remove(&self.key);
         }
     }
