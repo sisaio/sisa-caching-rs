@@ -174,8 +174,8 @@ fn not_run(error: &RedisError) -> bool {
 /// - A command the server refused with `READONLY` or `LOADING`, or that the connection refused to
 ///   send, didn't run: the connection asks Sentinel for the primary, moves there, and sends it
 ///   once more. A demoted Dragonfly primary answers `LOADING` while it syncs from the new one.
-/// - A command cut off on the way may have run, so it returns its error, and the connection moves
-///   for the next one.
+/// - A command cut off on the way may have run, so it returns its error at once, and the
+///   connection asks Sentinel in the background and moves for the next one.
 /// - While Sentinel names the same primary, the connection stays and reconnects by itself.
 /// - Clones share the connection, so one move moves all of them.
 ///
@@ -185,7 +185,9 @@ fn not_run(error: &RedisError) -> bool {
 /// [`primary_client`](Self::primary_client) call moves the connection.
 ///
 /// Its connections use [`connection_config`], so while the primary is down a command fails at
-/// once instead of waiting for the old primary to come back.
+/// once instead of waiting for the old primary to come back. A command that can't reach the
+/// primary also waits for one Sentinel lookup, which every caller failing at the same time shares,
+/// before it is sent once more.
 ///
 /// ```no_run
 /// use sisa_caching_redis::{
@@ -236,8 +238,8 @@ impl SentinelConnection {
     /// Asks Sentinel for the primary, moves this connection there if it isn't there yet, and
     /// returns a client for it, for connections this one can't carry, such as pub/sub. A
     /// subscription opened with it and this connection's reads then use the same primary. A
-    /// hybrid store's backplane calls it on each ping, so reads leave a demoted primary even when
-    /// nothing fails there.
+    /// hybrid store's backplane calls it every `heartbeat_timeout_ms` while subscribed, so reads
+    /// leave a demoted primary even when nothing fails there.
     pub async fn primary_client(&self) -> RedisResult<Client> {
         Ok(self.follow(self.primary().generation).await?.client)
     }
@@ -251,9 +253,15 @@ impl SentinelConnection {
 
     /// Moves to the primary Sentinel names now, unless a clone already moved past `seen` or the
     /// connection is there already: a connection to a primary that didn't move reconnects by
-    /// itself. The Sentinel lock keeps clones from moving at once.
+    /// itself. One lookup runs at a time, under the Sentinel lock. A caller that finds one running
+    /// waits for it and takes what it found, as new as its own would be, so callers that fail
+    /// together while the primary is down share one lookup instead of queueing for one each.
     async fn follow(&self, seen: u64) -> RedisResult<Primary> {
-        let mut sentinel = self.sentinel.lock().await;
+        let Ok(mut sentinel) = self.sentinel.try_lock() else {
+            drop(self.sentinel.lock().await);
+
+            return Ok(self.primary());
+        };
         let current = self.primary();
 
         if current.generation != seen {
@@ -302,8 +310,11 @@ impl SentinelConnection {
         if resend {
             send(self.follow(generation).await?.connection).await
         } else {
-            // The command's own error says more than a failed lookup would.
-            let _ = self.follow(generation).await;
+            // The command's own error says more than a failed lookup would, so it returns now,
+            // and the lookup runs on its own task for the commands after it.
+            let follower = self.clone();
+
+            tokio::spawn(async move { _ = follower.follow(generation).await });
             reply
         }
     }

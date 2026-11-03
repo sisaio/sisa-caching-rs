@@ -61,7 +61,10 @@ Connect through a `SentinelConnection` and share it between the store and the ba
   connection asks Sentinel for the primary again and moves there if it changed; while Sentinel
   names the same one, the connection stays and reconnects by itself. A command the server refused
   with either, or that the connection couldn't send, didn't run, so it is sent once more; one cut
-  off by a broken connection may have run, so it returns its error.
+  off by a broken connection or a reply timeout may have run, so it returns its error at once and
+  the lookup runs in the background. One lookup runs at a time, and callers that fail while it
+  runs take its answer, so a primary that stops answering costs each call the 500 ms reply
+  timeout, plus one lookup for a command that is sent again.
 - A hybrid node notices a new primary within `heartbeat_timeout_ms` (5 s by default): each
   subscription asks Sentinel for the primary that often and moves the shared connection there. Its
   own heartbeats can't show the move, since a demoted primary still delivers what is published on

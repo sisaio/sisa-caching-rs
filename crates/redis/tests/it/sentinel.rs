@@ -1,6 +1,8 @@
 //! The Redis store behind Sentinel, through a failover. Each test starts a primary, a replica and
 //! a Sentinel in Docker.
 
+use std::time::{Duration, Instant};
+
 use sisa_caching_core::cache::{CacheKey, CacheStore};
 use sisa_caching_redis::{connection::SentinelConnection, store::RedisCacheStore};
 use sisa_caching_testing::RedisSentinel;
@@ -113,5 +115,52 @@ async fn primary_client_moves_to_the_new_primary_without_a_failed_command() {
             .get_connection_info()
             .addr()
             .to_string()
+    );
+}
+
+#[tokio::test]
+async fn calls_while_the_primary_is_down_fail_without_queueing_for_lookups() {
+    const CALLERS: usize = 30;
+
+    let Some(sentinel) = RedisSentinel::start().await else {
+        return;
+    };
+    let store = RedisCacheStore::new("app", connect(&sentinel).await).unwrap();
+
+    store.set(&key(1), "ada".to_owned(), None).await.unwrap();
+    sentinel.pause_primary().await;
+
+    let calls: Vec<_> = (0..CALLERS)
+        .map(|_| {
+            let store = store.clone();
+
+            tokio::spawn(async move {
+                let started = Instant::now();
+                let result = store.get::<String>(&key(1)).await;
+
+                (started.elapsed(), result.is_err())
+            })
+        })
+        .collect();
+    let mut slowest = Duration::ZERO;
+
+    for call in calls {
+        let (took, failed) = call.await.unwrap();
+
+        assert!(failed, "the primary is down");
+        slowest = slowest.max(took);
+    }
+    sentinel.unpause_primary().await;
+
+    // The 500 ms reply timeout. A lookup takes about a second while the primary is down, and when
+    // each call waited for one of its own, one after another, the slowest took 30 s.
+    assert!(
+        slowest < Duration::from_secs(2),
+        "slowest call took {slowest:?}"
+    );
+    assert_eq!(
+        store.get::<String>(&key(1)).await.unwrap().as_deref(),
+        Some("ada"),
+        "the connection is back once the primary answers"
     );
 }
