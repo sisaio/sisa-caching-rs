@@ -257,6 +257,16 @@ impl<C: Clock> InMemoryCacheStore<C> {
         removed
     }
 
+    /// `set_entry`'s work, in its `memory set` span. The span is opened on this sync function, not
+    /// in the async `set_entry` nor on `replace_entry`: measured, a span entered in an async body
+    /// slows every write, by 10% on ARM, and the hybrid store's promotions, which call
+    /// `replace_entry`, are not writes.
+    #[tracing::instrument(level = "debug", name = "memory set", skip_all, fields(key = %self.name.format_key(key)))]
+    fn set_in_span<CV: CacheValue>(&self, key: &str, entry: CacheEntry<CV>) {
+        // The value that was replaced is freed here, once the shard is unlocked (see `write`).
+        drop(self.replace_entry(key, entry));
+    }
+
     /// Stores `entry` as [`set_entry`](CacheStore::set_entry) does, and hands back the value it
     /// replaced instead of freeing it, so a caller that holds a lock of its own can free it once
     /// that lock is released. The hybrid store's promotions do, so a slow `Drop` holds up no
@@ -541,13 +551,7 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
         key: &str,
         entry: CacheEntry<CV>,
     ) -> Result<(), CacheError> {
-        // Entered here, not by `tracing::instrument`, which wraps an async fn's future: measured,
-        // that cost about 30 ns a write with no subscriber. Nothing below awaits. Measured too,
-        // `enter` on a span kept here costs fewer instructions than `entered`.
-        let span = tracing::debug_span!("memory set", key = %self.name.format_key(key));
-        let _entered = span.enter();
-        // The value that was replaced is freed here, once the shard is unlocked (see `write`).
-        drop(self.replace_entry(key, entry));
+        self.set_in_span(key, entry);
 
         Ok(())
     }
