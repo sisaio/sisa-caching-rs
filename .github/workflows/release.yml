@@ -43,7 +43,7 @@ jobs:
   # release, and carries on from there.
   tag:
     name: tag
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.repository_owner == 'sisaio' && github.event_name == 'push'
     timeout-minutes: 5
     permissions:
@@ -110,7 +110,7 @@ jobs:
     name: wait for CI
     needs: tag
     if: needs.tag.outputs.tag
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       actions: read
@@ -137,7 +137,7 @@ jobs:
     name: publish
     needs: [tag, bench, ci]
     if: always() && needs.tag.outputs.tag && needs.ci.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: release
     permissions:
@@ -183,7 +183,7 @@ jobs:
   attest:
     name: attest
     needs: [tag, publish]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: write
@@ -232,7 +232,7 @@ jobs:
   publish-release:
     name: publish release
     needs: [tag, attest]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -248,7 +248,7 @@ jobs:
   # no CI.
   release-pr:
     name: release PR
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.repository_owner == 'sisaio'
     timeout-minutes: 30
     permissions:
