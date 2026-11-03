@@ -93,8 +93,10 @@ async fn stop<C: Clock>(state: Arc<State<C>>, backplane: Arc<RedisBackplane>, wo
 }
 
 /// Publishes one invalidation under its sequence number, retrying with a growing wait. When every
-/// try fails, the other nodes see the number missing at this node's next heartbeat and clear their
-/// local layers.
+/// try fails, the other nodes see the number missing at this node's first heartbeat after this
+/// write, and every write the node started before it, has finished, and clear their local layers.
+/// A heartbeat vouches only for a run of finished numbers, so a slow earlier write holds the clear
+/// back until it is done.
 async fn publish(
     publishing: Publishing,
     backplane: Arc<RedisBackplane>,
@@ -111,7 +113,7 @@ async fn publish(
                 %store,
                 %error,
                 kind = message.invalidation.kind(),
-                "could not publish an invalidation; other nodes clear their local layers at the next heartbeat"
+                "could not publish an invalidation; other nodes clear their local layers once this node's heartbeats cover it"
             );
         }
     }

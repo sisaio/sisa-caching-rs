@@ -25,8 +25,8 @@ Worth an alert ([Failures](01-architecture.md#failures) says what causes each an
 reads can get meanwhile):
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every
   `get_or_set` meanwhile runs its loader.
-- `publish.failures` above 0: other nodes clear their local layers at the writer's next heartbeat,
-  so hit rates dip.
+- `publish.failures` above 0: other nodes clear their local layers once the writer's heartbeats
+  cover the lost write, usually a second later, so hit rates dip.
 - `invalidations.delivered` falling while writes go on: a node stopped listening.
 - `backplane.connected` at 0: that node reads everything from Redis.
 - `backplane.unreadable` above 0: something publishes messages this release can't read, and each

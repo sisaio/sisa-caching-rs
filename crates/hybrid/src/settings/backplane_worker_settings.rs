@@ -21,7 +21,9 @@ pub struct BackplaneWorkerSettings {
 
     /// How often the worker publishes a heartbeat with the last sequence number its store has
     /// finished publishing: 1 second by default. A node that missed one of the store's
-    /// invalidations clears its local layer at the next heartbeat. `validate` rejects `0`.
+    /// invalidations clears its local layer at the first heartbeat whose number covers it: the
+    /// next one, unless a write the store started earlier is still running. `validate` rejects
+    /// `0`.
     pub heartbeat_interval_ms: u64,
 
     /// How long without a heartbeat from another node before this node clears its local layer, as
