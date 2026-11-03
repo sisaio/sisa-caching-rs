@@ -35,9 +35,13 @@ Both scripts can run any number of times:
   which fails when a job it needs fails and passes when they pass or are skipped, the two CodeQL
   `analyze` jobs, and dependency `review`. A new CI job goes in `ci`'s `needs`, not in the list;
   when a listed check is renamed, update the list too, or merges wait on a check that never runs.
-- Repository admins can still bypass the `main` rules on a PR (never by a direct push), for an
-  emergency only. Release PRs don't need it once the release app below is set up: they run CI
-  like any other PR.
+- A PR also needs one approval given after its latest push, and a branch that is up to date with
+  `main`. CodeRabbit's auto-approval gives it; the author can't. These are what OpenSSF Scorecard's
+  Branch-Protection check asks for. CODEOWNERS review, two approvers, stale review dismissal and
+  rules for admins are left off: they need a second maintainer, or only score once those do.
+- Repository admins can still bypass the `main` rules on a PR (never by a direct push): in an
+  emergency, when CodeRabbit hasn't approved the latest push, or for a release PR, which
+  CodeRabbit doesn't review.
 - `release-tags.json`: once a `v*` tag exists, only admins can move or delete it. Creating one
   isn't restricted: GitHub rejects the GitHub Actions app as a bypass actor on this repository's
   rulesets, so a creation rule would stop the release workflow from tagging. A published
