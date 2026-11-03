@@ -1,9 +1,11 @@
 # Benchmarks
 
 Each release runs the benchmarks and records them on its release page: a table that compares
-each one with the previous release, the machine they ran on, and Criterion's full HTML report as a
-download. [The latest release](https://github.com/sisaio/sisa-caching-rs/releases/latest) has the
-current numbers. v0.1.0 has no table on its page; its numbers are in the summary of
+each one with the previous stable release, the machine they ran on, and Criterion's full HTML
+report as a download. A pre-release such as `0.4.0-rc.1` is never the baseline, so an rc and its
+final both compare with the last stable release.
+[The latest release](https://github.com/sisaio/sisa-caching-rs/releases/latest) has the current
+numbers. v0.1.0 has no table on its page; its numbers are in the summary of
 [its benchmark run](https://github.com/sisaio/sisa-caching-rs/actions/workflows/release.yml).
 
 ## What they measure

@@ -1,10 +1,10 @@
 # Runs the benchmarks for each release and records them on its release page: the table in the
-# release notes, and the table and Criterion's full HTML report as assets. The previous release's
-# benchmarks run in the same job, in alternating rounds with this release's, so that a runner that
-# drifts during the job slows both columns alike. The release
-# workflow calls it with the new tag while that release is still a draft, because a published
-# release is immutable and takes no more assets. Run it by hand to see the table in the run's
-# summary without touching a release. Only the job that records on the release can write.
+# release notes, and the table and Criterion's full HTML report as assets. The previous stable
+# release's benchmarks run in the same job, in alternating rounds with this release's, so that a
+# runner that drifts during the job slows both columns alike. The release workflow calls it with
+# the new tag while that release is still a draft, because a published release is immutable and
+# takes no more assets. Run it by hand to see the table in the run's summary without touching a
+# release. Only the job that records on the release can write.
 name: Bench
 
 on:
@@ -47,13 +47,15 @@ jobs:
       - name: Pull the server image
         run: docker pull "$REDIS_IMAGE"
 
-      # The newest `v` tag before this release; none before the first one.
+      # The newest stable `v` tag before this release; none before the first one. Pre-releases such
+      # as `v0.4.0-rc.1` are skipped, so an rc and its final both compare with the last stable
+      # release.
       - name: Find the previous release
         id: previous
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          previous=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -n 1 || true)
+          previous=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -v -- - | grep -vxF "$TAG" | head -n 1 || true)
           echo "tag=$previous" >> "$GITHUB_OUTPUT"
 
       # Each version builds in its own target folder, so a run never rebuilds the other.
