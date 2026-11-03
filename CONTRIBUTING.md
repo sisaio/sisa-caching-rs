@@ -18,7 +18,7 @@ cargo test --workspace --all-features --locked
 cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
 cargo deny check
 cargo semver-checks --workspace --all-features --baseline-rev origin/main   # unless labeled `breaking`
-lychee --offline --include-fragments --exclude-path target './**/*.md'
+lychee --offline --include-fragments --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 ```
 
 A weekly workflow also checks the workspace with every direct dependency at its lowest allowed

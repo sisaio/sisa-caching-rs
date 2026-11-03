@@ -218,8 +218,9 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
 
-  # Relative links and #anchors in the Markdown files. External links stay out, since they flake;
-  # rustdoc checks the links in doc comments.
+  # Relative links and #anchors in the Markdown files, hidden folders such as .agents and .github
+  # included; .claude only links to .agents. External links stay out, since they flake; rustdoc
+  # checks the links in doc comments.
   links:
     name: links
     runs-on: ubuntu-24.04
@@ -235,7 +236,7 @@ jobs:
           tool: lychee
 
       - name: Check the links
-        run: lychee --offline --include-fragments --no-progress --exclude-path target './**/*.md'
+        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 
   test:
     name: test (${{ matrix.server }})
