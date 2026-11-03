@@ -21,6 +21,9 @@ cargo semver-checks --workspace --all-features --baseline-rev origin/main   # un
 lychee --offline --include-fragments --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
 ```
 
+The `tls-native-tls` lines build OpenSSL's bindings on Linux, which need its headers and
+`pkg-config`: `sudo apt-get install libssl-dev pkg-config` on Debian and Ubuntu.
+
 A weekly workflow also checks the workspace with every direct dependency at its lowest allowed
 version: `cargo +nightly update -Z direct-minimal-versions`, then `cargo check --workspace
 --all-targets --all-features`. Restore `Cargo.lock` afterwards.
@@ -45,6 +48,14 @@ Docker Desktop can't route to it.
 REDIS_IMAGE=valkey/valkey:8-alpine cargo test --workspace --all-features
 REDIS_IMAGE=ghcr.io/dragonflydb/dragonfly:v2.0.2 cargo test --workspace --all-features
 REDIS_IMAGE=ghcr.io/microsoft/garnet:2 cargo test --workspace --all-features
+```
+
+Docker Hub limits anonymous pulls. When a pull fails with `429 Too Many Requests`, run
+`docker login`, or pull the image from Google's mirror under the name the tests use:
+
+```sh
+docker pull mirror.gcr.io/library/redis:8-alpine
+docker tag mirror.gcr.io/library/redis:8-alpine redis:8-alpine
 ```
 
 A chaos test, ignored by `cargo test`, runs four hybrid nodes under load while the server restarts
