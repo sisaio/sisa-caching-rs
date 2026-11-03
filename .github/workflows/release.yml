@@ -269,7 +269,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "$VERSION" ] && ! [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+          # Semver without build metadata: no leading zeros in a number.
+          number='(0|[1-9][0-9]*)'
+          identifier="($number|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+          if [ -n "$VERSION" ] && ! [[ $VERSION =~ ^$number\.$number\.$number(-$identifier(\.$identifier)*)?$ ]]; then
             echo "::error::$VERSION is not a version such as 0.4.0 or 0.4.0-rc.1"
             exit 1
           fi
