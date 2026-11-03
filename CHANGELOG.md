@@ -6,6 +6,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-rc.2](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.4.0-rc.1...sisa-caching-core-v0.4.0-rc.2) - 2026-11-03
+
+### Changed
+
+- *(core)* count a key lock's shares without a second lookup
+- *(memory)* enter the set span in set_entry's body
+
 ## [0.4.0-rc.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.2...sisa-caching-core-v0.4.0-rc.1) - 2026-11-03
 
 ### Changed
