@@ -164,3 +164,29 @@ async fn calls_while_the_primary_is_down_fail_without_queueing_for_lookups() {
         "the connection is back once the primary answers"
     );
 }
+
+#[tokio::test]
+async fn callers_that_wait_for_a_failed_lookup_get_its_error() {
+    let Some(sentinel) = RedisSentinel::start().await else {
+        return;
+    };
+    let conn = connect(&sentinel).await;
+
+    sentinel.stop_sentinel().await;
+
+    // The first call looks up; the others find its lookup running and wait for it.
+    let calls: Vec<_> = (0..10)
+        .map(|_| {
+            let conn = conn.clone();
+
+            tokio::spawn(async move { conn.primary_client().await })
+        })
+        .collect();
+
+    for call in calls {
+        assert!(
+            call.await.unwrap().is_err(),
+            "a waiting call took the primary it had"
+        );
+    }
+}

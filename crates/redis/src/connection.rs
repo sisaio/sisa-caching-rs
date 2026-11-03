@@ -2,7 +2,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, PoisonError, RwLock},
+    sync::{
+        Arc, PoisonError, RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use redis::{
@@ -209,8 +212,17 @@ fn not_run(error: &RedisError) -> bool {
 /// ```
 #[derive(Clone)]
 pub struct SentinelConnection {
-    sentinel: Arc<Mutex<SentinelClient>>,
+    sentinel: Arc<Mutex<Sentinel>>,
+    /// How many lookups have finished, so a caller that waited for one can tell it did.
+    lookups: Arc<AtomicU64>,
     primary: Arc<RwLock<Primary>>,
+}
+
+/// The Sentinel client, and why the last lookup failed, if it did, for the callers that waited
+/// for it.
+struct Sentinel {
+    client: SentinelClient,
+    failed: Option<RedisError>,
 }
 
 // Shows how many failovers it has followed; the clients have nothing to show.
@@ -230,7 +242,11 @@ impl SentinelConnection {
         let primary = Primary::connect(sentinel.async_get_client().await?, 0).await?;
 
         Ok(Self {
-            sentinel: Arc::new(Mutex::new(sentinel)),
+            sentinel: Arc::new(Mutex::new(Sentinel {
+                client: sentinel,
+                failed: None,
+            })),
+            lookups: Arc::default(),
             primary: Arc::new(RwLock::new(primary)),
         })
     }
@@ -251,17 +267,8 @@ impl SentinelConnection {
             .clone()
     }
 
-    /// Moves to the primary Sentinel names now, unless a clone already moved past `seen` or the
-    /// connection is there already: a connection to a primary that didn't move reconnects by
-    /// itself. One lookup runs at a time, under the Sentinel lock. A caller that finds one running
-    /// waits for it and takes what it found, as new as its own would be, so callers that fail
-    /// together while the primary is down share one lookup instead of queueing for one each.
-    async fn follow(&self, seen: u64) -> RedisResult<Primary> {
-        let Ok(mut sentinel) = self.sentinel.try_lock() else {
-            drop(self.sentinel.lock().await);
-
-            return Ok(self.primary());
-        };
+    /// The lookup [`follow`](Self::follow) runs under the Sentinel lock.
+    async fn look_up(&self, sentinel: &mut SentinelClient, seen: u64) -> RedisResult<Primary> {
         let current = self.primary();
 
         if current.generation != seen {
@@ -278,6 +285,42 @@ impl SentinelConnection {
 
         *self.primary.write().unwrap_or_else(PoisonError::into_inner) = primary.clone();
         Ok(primary)
+    }
+
+    /// Moves to the primary Sentinel names now, unless a clone already moved past `seen` or the
+    /// connection is there already: a connection to a primary that didn't move reconnects by
+    /// itself. One lookup runs at a time, under the Sentinel lock. A caller that finds one running
+    /// waits for it and takes what it found, its error included, as new as its own would be, so
+    /// callers that fail together while the primary is down share one lookup instead of queueing
+    /// for one each. If the caller it waited for gave up before its lookup ended, it looks up
+    /// itself.
+    async fn follow(&self, seen: u64) -> RedisResult<Primary> {
+        let finished = self.lookups.load(Ordering::Relaxed);
+        let mut sentinel = match self.sentinel.try_lock() {
+            Ok(sentinel) => sentinel,
+            Err(_) => {
+                // Lookups are counted under the lock, so this count is the latest.
+                let sentinel = self.sentinel.lock().await;
+
+                if self.lookups.load(Ordering::Relaxed) != finished {
+                    return match &sentinel.failed {
+                        Some(error) => Err(error.clone()),
+                        None => Ok(self.primary()),
+                    };
+                }
+
+                sentinel
+            }
+        };
+        let found = self.look_up(&mut sentinel.client, seen).await;
+
+        if let Err(error) = &found {
+            tracing::debug!(%error, "asking Sentinel for the primary failed");
+        }
+        sentinel.failed = found.as_ref().err().cloned();
+        self.lookups.fetch_add(1, Ordering::Relaxed);
+
+        found
     }
 
     /// Sends on the current primary. When the reply shows a failover it moves, and sends once

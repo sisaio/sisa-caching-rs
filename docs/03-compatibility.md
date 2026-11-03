@@ -63,8 +63,9 @@ Connect through a `SentinelConnection` and share it between the store and the ba
   with either, or that the connection couldn't send, didn't run, so it is sent once more; one cut
   off by a broken connection or a reply timeout may have run, so it returns its error at once and
   the lookup runs in the background. One lookup runs at a time, and callers that fail while it
-  runs take its answer, so a primary that stops answering costs each call the 500 ms reply
-  timeout, plus one lookup for a command that is sent again.
+  runs take its answer, or its error if it failed, so a primary that stops answering costs each
+  call the 500 ms reply timeout, plus one lookup for a command that is sent again. A failed lookup
+  logs its error at debug, once however many callers share it.
 - A hybrid node notices a new primary within `heartbeat_timeout_ms` (5 s by default): each
   subscription asks Sentinel for the primary that often and moves the shared connection there. Its
   own heartbeats can't show the move, since a demoted primary still delivers what is published on
