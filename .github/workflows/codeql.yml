@@ -19,7 +19,6 @@ concurrency:
 jobs:
   analyze:
     name: analyze (${{ matrix.language }})
-    # ARM scans Rust about a quarter faster than x64.
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     permissions:

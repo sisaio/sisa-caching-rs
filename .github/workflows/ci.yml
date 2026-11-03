@@ -30,7 +30,7 @@ jobs:
   # examples have no public API.
   changes:
     name: changes
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     permissions:
       actions: read
@@ -85,7 +85,6 @@ jobs:
           .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
 
-  # On ARM, which builds faster; the jobs that run our code stay on x64, where most users are.
   lint:
     name: lint
     needs: changes
@@ -137,7 +136,7 @@ jobs:
     name: msrv
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,16 +161,22 @@ jobs:
     name: deny
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-deny
+
       # Advisories, licenses, bans and sources, as deny.toml sets them.
       - name: Check the dependency policy
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        run: cargo deny --log-level warn --all-features check
 
   # A change that breaks a published crate's API, against the PR's base, fails unless the PR
   # carries the `breaking` label. The base rather than crates.io, so that a break already merged
@@ -181,7 +186,7 @@ jobs:
     name: semver
     needs: changes
     if: needs.changes.outputs.api == 'true' && github.event_name == 'pull_request'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     permissions:
       contents: read
@@ -228,7 +233,7 @@ jobs:
   # checks the links in doc comments.
   links:
     name: links
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -247,7 +252,7 @@ jobs:
     name: test (${{ matrix.server }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -297,7 +302,7 @@ jobs:
     name: ci
     if: always()
     needs: [changes, lint, msrv, deny, semver, links, test]
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
       - name: Check the results
@@ -310,7 +315,7 @@ jobs:
     name: coverage
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     env:
       REDIS_IMAGE: redis:8-alpine
