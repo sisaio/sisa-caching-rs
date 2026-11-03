@@ -11,17 +11,24 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 struct Claim<'a> {
     locker: &'a Locker,
     key: String,
-    mutex: Arc<Mutex<()>>,
+    /// `None` once dropped.
+    mutex: Option<Arc<Mutex<()>>>,
 }
 
 // Gives up the share, and removes the key's mutex if it was the last one.
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
-        // Shares are only handed out under this lock, so a count of two, the map's and this one,
-        // means this share is the last.
+        // A caller takes its first share under this lock and gives up its claim, its last share,
+        // under it too, so once this one is gone, a count of one, the map's, means nobody holds
+        // or waits on the mutex. Given up after the check instead, two last claims dropped at
+        // once could each count the other's share and both leave the mutex in the map.
         let mut locks = self.locker.lock_registry();
 
-        if Arc::strong_count(&self.mutex) == 2 {
+        drop(self.mutex.take());
+        if locks
+            .get(&self.key)
+            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
+        {
             locks.remove(&self.key);
         }
     }
@@ -67,8 +74,8 @@ impl Locker {
 
     /// Waits for, then holds, the lock for `key` until the guard is dropped.
     pub async fn lock(&self, key: &str) -> KeyGuard<'_> {
-        let claim = self.claim(key);
-        let guard = Arc::clone(&claim.mutex).lock_owned().await;
+        let (claim, mutex) = self.claim(key);
+        let guard = mutex.lock_owned().await;
 
         KeyGuard {
             _guard: guard,
@@ -78,8 +85,8 @@ impl Locker {
 
     /// Takes the lock for `key` only if it is free right now.
     pub fn try_lock(&self, key: &str) -> Option<KeyGuard<'_>> {
-        let claim = self.claim(key);
-        let guard = Arc::clone(&claim.mutex).try_lock_owned().ok()?;
+        let (claim, mutex) = self.claim(key);
+        let guard = mutex.try_lock_owned().ok()?;
 
         Some(KeyGuard {
             _guard: guard,
@@ -87,14 +94,16 @@ impl Locker {
         })
     }
 
-    fn claim(&self, key: &str) -> Claim<'_> {
+    /// A share of `key`'s mutex, and the mutex to lock.
+    fn claim(&self, key: &str) -> (Claim<'_>, Arc<Mutex<()>>) {
         let mutex = Arc::clone(self.lock_registry().entry(key.to_owned()).or_default());
-
-        Claim {
+        let claim = Claim {
             locker: self,
             key: key.to_owned(),
-            mutex,
-        }
+            mutex: Some(Arc::clone(&mutex)),
+        };
+
+        (claim, mutex)
     }
 
     fn lock_registry(&self) -> StdMutexGuard<'_, HashMap<String, Arc<Mutex<()>>>> {
@@ -104,7 +113,7 @@ impl Locker {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{sync::Barrier, time::Duration};
 
     use super::*;
 
@@ -146,7 +155,42 @@ mod tests {
 
         drop(locker.lock("a").await);
         drop(locker.try_lock("b"));
+        // A caller that stops waiting gives up its claim too.
+        let held = locker.lock("c").await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), locker.lock("c"))
+                .await
+                .is_err()
+        );
+        drop(held);
 
         assert!(locker.lock_registry().is_empty());
+    }
+
+    #[test]
+    fn the_last_two_claims_given_up_at_once_remove_the_lock() {
+        let locker = Locker::new();
+        let keys: Vec<String> = (0..10_000).map(|id| id.to_string()).collect();
+        let claim_all = || {
+            keys.iter()
+                .map(|key| locker.claim(key).0)
+                .collect::<Vec<_>>()
+        };
+        let (first, second) = (claim_all(), claim_all());
+        let together = Barrier::new(2);
+
+        // Each key's two claims go at the same moment, on two threads.
+        std::thread::scope(|scope| {
+            for claims in [first, second] {
+                scope.spawn(|| {
+                    for claim in claims {
+                        together.wait();
+                        drop(claim);
+                    }
+                });
+            }
+        });
+
+        assert_eq!(locker.lock_registry().len(), 0, "locks left in the map");
     }
 }
