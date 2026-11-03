@@ -1,0 +1,73 @@
+# Deletes finished workflow runs, with their logs and artifacts, once they are older than
+# `DAYS`. Two kinds of run stay: every Release run, which records each publish, and each current
+# workflow's newest run, so the CI badge and every workflow page keep a last result in a quiet
+# spell. Two weeks keeps the last two runs of each weekly workflow to compare.
+#
+# A PR whose CI ran before the cutoff still merges: the push to main finds no passing PR run and
+# runs CI in full. A Release re-run after the cutoff waits on a ci run its commit no longer has;
+# push again or run CI on main first.
+name: Clean Up Runs
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Delete runs older than this many days
+        default: "14"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-up:
+    name: clean-up
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: read
+    env:
+      DAYS: ${{ inputs.days || '14' }}
+    steps:
+      # The workflow files, to tell current workflows from removed ones.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Delete old runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d "$DAYS days ago" +%F)
+          repo="repos/$GITHUB_REPOSITORY/actions"
+
+          # Each current workflow's newest finished run. A removed workflow keeps none, so it
+          # drops off the Actions list once its runs pass the cutoff.
+          gh api --paginate "$repo/workflows?per_page=100" --jq '.workflows[] | [.id, .path] | @tsv' |
+            while IFS=$'\t' read -r id path; do
+              if [ -f "$path" ]; then
+                gh api "$repo/workflows/$id/runs?status=completed&per_page=1" --jq '.workflow_runs[].id' < /dev/null
+              fi
+            done > "$RUNNER_TEMP/keep"
+
+          # Runs in progress can't be deleted, so only finished ones are listed. The list is TSV,
+          # so a newline in a run's title stays in its field. GitHub returns at most 1,000 runs
+          # per query; the next day's run takes the rest.
+          gh api --paginate "$repo/runs?status=completed&per_page=100&created=%3C$cutoff" \
+            --jq '.workflow_runs[] | select(.path != ".github/workflows/release.yml")
+              | [.id, .created_at, .name, .display_title] | @tsv' |
+            awk -F'\t' -v keep="$RUNNER_TEMP/keep" \
+              'BEGIN { while ((getline id < keep) > 0) kept[id] } !($1 in kept)' \
+            > "$RUNNER_TEMP/runs"
+
+          # One a second, under GitHub's secondary rate limit of 80 writes a minute.
+          count=0
+          while IFS=$'\t' read -r id created name title; do
+            echo "$created $name: $title"
+            gh api --method DELETE "$repo/runs/$id" --silent < /dev/null
+            count=$((count + 1))
+            sleep 1
+          done < "$RUNNER_TEMP/runs"
+          echo "Deleted $count runs created before $cutoff." | tee -a "$GITHUB_STEP_SUMMARY"

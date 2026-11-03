@@ -9,13 +9,6 @@ script or its JSON in a PR, then run the script after the merge to sync GitHub w
 | `project.sh` | Labels, milestones, and the `sisa-caching` board: its description and README (from `project-readme.md`), Status options, the Priority, Start date and Target date fields, and the views | `gh auth refresh -s project` |
 | `rulesets.sh` | The rulesets in `rulesets/`: `main.json` for the default branch, `release-tags.json` for `v*` tags | Repository admin |
 
-`delete-runs.sh` isn't a sync. It deletes finished workflow runs, with their logs and artifacts,
-of one workflow (`--workflow runner-trial.yml`), created before a day (`--before 2026-10-20`), or
-both. It lists the runs and asks before deleting, since deleted runs can't be restored. GitHub
-deletes logs and artifacts by itself after the retention period under Settings → Actions →
-General, so this is for clearing out sooner, such as a removed workflow that still shows in the
-Actions list until its last run is gone.
-
 Run them from the repository root on an up-to-date `main`:
 
 ```sh
