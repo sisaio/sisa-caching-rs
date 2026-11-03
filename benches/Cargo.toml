@@ -7,10 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# The values and keys the benchmarks share.
 [lints]
 workspace = true
 
+# The values and keys the benchmarks share.
 [lib]
 path = "lib.rs"
 bench = false
