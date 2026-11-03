@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-rc.1] - 2026-11-03
+
+No changes since the last release.
+
 ## [0.3.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.0...sisa-caching-core-v0.3.1) - 2026-11-02
 
 ### Changed
