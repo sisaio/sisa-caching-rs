@@ -74,14 +74,17 @@ sequenceDiagram
         Store-)Trim: start
     end
     Store-->>App: Ok
-    Trim->>Trim: drop expired entries
-    Trim->>Trim: drop least recently used, down to 90% of max_entries
+    loop until at most max_entries
+        Trim->>Trim: drop expired entries
+        Trim->>Trim: drop least recently used, down to 90% of max_entries
+    end
 ```
 
-Only one trim runs at a time, and writes go on while it runs, so the store can go over
-`max_entries` meanwhile. Outside a tokio runtime the write runs the trim itself. Replaced and
-dropped values are freed after the shard's lock is released, so a large value never holds up
-other callers.
+Only one trim runs at a time, and writes go on while it runs without starting another, so the
+store can go over `max_entries` meanwhile. When it ends, the trim checks the count again and runs
+once more if those writes left the store over `max_entries`. Outside a tokio runtime the write
+runs the trim itself. Replaced and dropped values are freed after the shard's lock is released,
+so a large value never holds up other callers.
 
 A read looks the key up in its shard and marks it as used. An expired entry, including one
 written with no lifetime left, reads as a miss and stays until a purge, a trim or a write to its
