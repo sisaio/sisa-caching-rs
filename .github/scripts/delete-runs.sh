@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deletes finished workflow runs, with their logs and artifacts: every run of one workflow, every
 # run created before a date, or both together. It lists what it would delete and asks first.
-# Deleted runs can't be restored.
+# Deleted runs can't be restored. It deletes about one run a second.
 #
 # Usage:
 #   delete-runs.sh --workflow runner-trial.yml     # every run of one workflow
@@ -38,7 +38,7 @@ path="repos/$REPO/actions/runs"
 query="status=completed&per_page=100"
 [ -n "$before" ] && query="$query&created=%3C$before"
 runs=$(gh api --paginate "$path?$query" \
-  --jq '.workflow_runs[] | "\(.id)\t\(.created_at)\t\(.name)\t\(.display_title)"')
+  --jq '.workflow_runs[] | [.id, .created_at, .name, .display_title] | @tsv')
 
 if [ -z "$runs" ]; then
   echo "no runs to delete"
@@ -51,7 +51,9 @@ if [ "$yes" != true ]; then
   [ "$answer" = y ] || [ "$answer" = Y ] || exit 1
 fi
 
+# One a second, under GitHub's secondary rate limit of 80 writes a minute.
 for id in $(printf '%s\n' "$runs" | cut -f1); do
   gh api --method DELETE "repos/$REPO/actions/runs/$id" --silent
+  sleep 1
 done
 echo "deleted $count runs"
