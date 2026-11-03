@@ -97,5 +97,18 @@ only.
 `REDIS_IMAGE` picks the server, for example `valkey/valkey:8-alpine`. Criterion's HTML report is
 in `target/criterion/report/index.html`.
 
+A shared machine's times drift by more than a small change. For a difference under 5%, count
+instructions instead: write a small program that makes the call many times, such as 100,000
+`get`s of one key, build it in release mode against each version, and run each under callgrind:
+
+```sh
+valgrind --tool=callgrind --callgrind-out-file=/dev/null target/release/<program> 2>&1 | grep refs
+```
+
+Setup costs the same on both sides, so the difference between the totals, divided by the number
+of calls, is what the change saves or costs per call. Count the whole program rather than one
+function with `--toggle-collect`: a function the compiler inlined has no symbol of its own, so
+the toggle counts nothing or a fragment.
+
 The code is in [`benches`](../benches), a crate of its own, so the library crates don't depend on
 Criterion.

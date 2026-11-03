@@ -40,7 +40,11 @@ exit codes rather than piped output. The Redis tests need Docker.
 
 - Keep code minimal, readable, and working; the smallest change that does the job wins.
 - Each store has one read path (`get_entry`) and one write path (`set_entry`). Don't add helpers
-  around them.
+  around them. The one exception is a hidden helper that hands the replaced value back, such as
+  the memory store's `replace_entry`, so the caller frees it outside its own lock.
+- A performance change shows its numbers before and after, measured as
+  [Benchmarks](docs/05-benchmarks.md#running-them) says: alternating rounds, and instruction counts
+  when the difference is under 5%.
 - The maintainer picks public names. Use given names exactly, and propose new ones instead of
   inventing them.
 - Don't add dependencies to the library crates without asking. No `moka`: memory bounds and
