@@ -237,7 +237,8 @@ impl CacheMetrics {
     }
 
     /// Counts one invalidation a hybrid store could not publish after every retry. Other nodes
-    /// clear their local layers at the store's next heartbeat.
+    /// clear their local layers at the store's first heartbeat once this write, and every write
+    /// it started before it, has finished.
     pub fn publish_failed(&self, store: &KeyPrefix) {
         self.publish_failures.add(1, &[store_attribute(store)]);
     }

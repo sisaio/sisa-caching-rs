@@ -185,8 +185,8 @@ sequenceDiagram
 ```
 
 If every publish try fails, the write has already returned the Redis result, and a warning is
-logged. Node A's next heartbeat shows node B the missing sequence number, and node B clears its
-local layer.
+logged. Node A's first heartbeat after this write, and every write A started before it, has
+finished shows node B the missing sequence number, and node B clears its local layer.
 
 ## Backplane worker
 

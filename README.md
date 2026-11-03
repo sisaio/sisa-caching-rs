@@ -74,9 +74,9 @@ cache.shutdown().await;
 ```
 
 When an invalidation never reaches a node, the node clears its local layer at the writer's next
-heartbeat (1 second by default), or once the writer's heartbeats have stopped for 5 seconds. The
-local `ttl_secs`, 60 seconds by default, still expires every local copy, even of an entry Redis
-keeps until removed.
+heartbeat (1 second by default), or at the first one after a write the writer started earlier
+ends, or once the writer's heartbeats have stopped for 5 seconds. The local `ttl_secs`, 60 seconds
+by default, still expires every local copy, even of an entry Redis keeps until removed.
 
 Each hybrid store has its own pub/sub channel, `<store>:backplane`. One store usually covers an
 application; a second one, such as `user_cache` next to `catalog_cache`, gets its own settings

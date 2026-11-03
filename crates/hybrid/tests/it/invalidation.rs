@@ -207,6 +207,72 @@ async fn a_publish_refused_on_every_try_clears_the_other_nodes_at_the_next_heart
 }
 
 #[tokio::test]
+async fn a_lost_invalidation_clears_the_other_nodes_once_the_writes_before_it_finish() {
+    let redis = Redis::start().await;
+    let Some(url) = redis.add_user("writer").await else {
+        return;
+    };
+    let distributed = PausingStore::new();
+    let writer = start(
+        HybridCacheStore::new(
+            distributed.clone(),
+            RedisBackplane::connect(url).await.unwrap(),
+            &fast_heartbeats(),
+        )
+        .unwrap(),
+    )
+    .await;
+    let reader = heartbeating_node(&distributed.inner, redis.url()).await;
+
+    for other in ["other", "marker"] {
+        reader
+            .local_store()
+            .set(&key(other), "x".to_owned(), None)
+            .await
+            .unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // An earlier write held before it writes, then a later one whose publish is refused on every
+    // try.
+    distributed.pause(true);
+    let earlier = tokio::spawn({
+        let writer = writer.clone();
+        async move { writer.set(&key(1), "new".to_owned(), None).await.unwrap() }
+    });
+    distributed.write_started.notified().await;
+    distributed.pause(false);
+    redis.set_user("writer", "-publish").await;
+    writer.remove(&key(2)).await.unwrap();
+    // The three tries are over well within this.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    redis.set_user("writer", "+publish").await;
+
+    // Heartbeats go out again, but none vouches for the lost number while the earlier write
+    // runs. Messages arrive in order: once the marker is applied, a dozen have been handled.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    publish_removal(&redis, "elsewhere", "users", &key("marker")).await;
+    eventually("the reader catches up", async || {
+        local_value(&reader, &key("marker")).await.is_none()
+    })
+    .await;
+    assert_eq!(
+        local_value(&reader, &key("other")).await.as_deref(),
+        Some("x"),
+        "cleared while the earlier write ran"
+    );
+
+    distributed.finish_write.notify_one();
+    earlier.await.unwrap();
+
+    eventually(
+        "the first heartbeat after the earlier write shows the number missing",
+        async || local_value(&reader, &key("other")).await.is_none(),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn a_publish_refused_before_a_node_first_hears_the_writer_clears_it_at_the_first_heartbeat() {
     let redis = Redis::start().await;
     let Some(url) = redis.add_user("writer").await else {
