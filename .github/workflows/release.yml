@@ -57,10 +57,10 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      # The commit CI tested; GITHUB_SHA is main's newest commit, which may be a later one.
+      # Main with its history. The job reads the files of the commit CI tested with `git show` and
+      # runs none of its code; GITHUB_SHA is main's newest commit, which may be a later one.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -70,7 +70,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          version=$(git show "$SHA:Cargo.toml" |
+            python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["workspace"]["package"]["version"])')
           tag="v$version"
           # `isDraft` of the version's release, or nothing when it has none.
           draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
@@ -89,7 +90,7 @@ jobs:
               index($0, heading) == 1 { found = 1; next }
               found && /^## \[/ { exit }
               found { print }
-            ' CHANGELOG.md > notes.md
+            ' <(git show "$SHA:CHANGELOG.md") > notes.md
             # A version such as 0.4.0-rc.1 is a pre-release, which GitHub never marks as the latest.
             prerelease=()
             if [[ $version == *-* ]]; then
