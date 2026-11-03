@@ -4,7 +4,7 @@ members = ["crates/*", "examples/*", "benches"]
 resolver = "3"
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Sang Au <auvansang@outlook.com>"]
 edition = "2024"
 rust-version = "1.89"
@@ -26,11 +26,11 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [workspace.dependencies]
 # The library crates, at the coordinated version.
-sisa-caching = { path = "crates/sisa-caching", version = "0.3.2" }
-sisa-caching-core = { path = "crates/core", version = "0.3.2" }
-sisa-caching-memory = { path = "crates/memory", version = "0.3.2" }
-sisa-caching-redis = { path = "crates/redis", version = "0.3.2" }
-sisa-caching-hybrid = { path = "crates/hybrid", version = "0.3.2" }
+sisa-caching = { path = "crates/sisa-caching", version = "0.3.3" }
+sisa-caching-core = { path = "crates/core", version = "0.3.3" }
+sisa-caching-memory = { path = "crates/memory", version = "0.3.3" }
+sisa-caching-redis = { path = "crates/redis", version = "0.3.3" }
+sisa-caching-hybrid = { path = "crates/hybrid", version = "0.3.3" }
 
 # Redis client library, without the default features (streams, scripts, ACL helpers...) that no
 # crate here uses.
