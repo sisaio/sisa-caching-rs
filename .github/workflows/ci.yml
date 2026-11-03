@@ -211,11 +211,15 @@ jobs:
         with:
           tool: cargo-semver-checks
 
-      # Every published crate with every feature; `--workspace` skips the unpublished ones.
+      # Every published crate with every feature; `--workspace` skips the unpublished ones. Each
+      # crate is built twice, as it is and at the base, and on its own cargo-semver-checks gives
+      # every build a target dir of its own. One shared dir builds the dependencies once instead of
+      # six times, which takes the job from about 4 minutes to 1.
       - name: Check the public API
         if: steps.label.outputs.breaking != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/semver
         run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
 
   # Relative links and #anchors in the Markdown files, hidden folders such as .agents and .github
