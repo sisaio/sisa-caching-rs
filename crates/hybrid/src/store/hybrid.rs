@@ -335,9 +335,8 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
     /// it is done, even when it fails or panics, since a write without a reply may still have
     /// been applied. The call returns once the write is done and no local copy from before it
     /// can be read; the invalidation is published, and retried, in the background, so a
-    /// backplane that can't be reached doesn't slow writes down. It runs in a `hybrid write`
-    /// span, whose context the invalidation carries to the other nodes.
-    #[tracing::instrument(name = "hybrid write", skip_all, fields(store = %self.name(), kind = invalidation.kind()), err(level = "info"))]
+    /// backplane that can't be reached doesn't slow writes down. It runs in the calling method's
+    /// span, such as `hybrid set`, whose context the invalidation carries to the other nodes.
     async fn mutate<T, Fut>(
         &self,
         invalidation: Invalidation,
@@ -440,6 +439,7 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
         Ok(entry)
     }
 
+    #[tracing::instrument(name = "hybrid set", skip_all, fields(store = %self.name()), err(level = "debug"))]
     async fn set_entry<CV: CacheValue>(&self, key: &str, entry: CacheEntry<CV>) -> Result<()> {
         let key = key.to_owned();
 
@@ -449,6 +449,7 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
         .await
     }
 
+    #[tracing::instrument(name = "hybrid remove", skip_all, fields(store = %self.name()), err(level = "debug"))]
     async fn remove(&self, key: &str) -> Result<bool> {
         let key = key.to_owned();
 
@@ -458,6 +459,7 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
         .await
     }
 
+    #[tracing::instrument(name = "hybrid remove_prefix", skip_all, fields(store = %self.name()), err(level = "debug"))]
     async fn remove_prefix(&self, prefix: &str) -> Result<usize> {
         let prefix = KeyPrefix::new(prefix)?;
 
@@ -468,6 +470,7 @@ impl<D: CacheStore + 'static, C: Clock> CacheStore for HybridCacheStore<D, C> {
         .await
     }
 
+    #[tracing::instrument(name = "hybrid clear", skip_all, fields(store = %self.name()), err(level = "debug"))]
     async fn clear(&self) -> Result<()> {
         self.mutate(Invalidation::Clear, async move |distributed| {
             distributed.clear().await
