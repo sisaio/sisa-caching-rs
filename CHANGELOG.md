@@ -6,21 +6,21 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.4.0-rc.3](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.4.0-rc.2...sisa-caching-core-v0.4.0-rc.3) - 2026-11-03
+## [0.4.0-rc.3](https://github.com/sisaio/sisa-caching-rs/compare/v0.4.0-rc.2...v0.4.0-rc.3) - 2026-11-03
 
 ### Changed
 
 - *(memory)* open the set span on a sync function
 - *(memory)* read remove's time only for an entry with a deadline
 
-## [0.4.0-rc.2](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.4.0-rc.1...sisa-caching-core-v0.4.0-rc.2) - 2026-11-03
+## [0.4.0-rc.2](https://github.com/sisaio/sisa-caching-rs/compare/v0.4.0-rc.1...v0.4.0-rc.2) - 2026-11-03
 
 ### Changed
 
 - *(core)* count a key lock's shares without a second lookup
 - *(memory)* enter the set span in set_entry's body
 
-## [0.4.0-rc.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.2...sisa-caching-core-v0.4.0-rc.1) - 2026-11-03
+## [0.4.0-rc.1](https://github.com/sisaio/sisa-caching-rs/compare/v0.3.2...v0.4.0-rc.1) - 2026-11-03
 
 ### Changed
 
@@ -37,13 +37,13 @@ All notable changes are listed here. The format follows
 - *(redis)* share one Sentinel lookup between failing calls
 - *(hybrid)* count only numbers above a node's last heartbeat
 
-## [0.3.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.0...sisa-caching-core-v0.3.1) - 2026-11-02
+## [0.3.1](https://github.com/sisaio/sisa-caching-rs/compare/v0.3.0...v0.3.1) - 2026-11-02
 
 ### Changed
 
 - *(memory)* size the trim's lists once instead of map by map
 
-## [0.3.0](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.2.0...sisa-caching-core-v0.3.0) - 2026-11-01
+## [0.3.0](https://github.com/sisaio/sisa-caching-rs/compare/v0.2.0...v0.3.0) - 2026-11-01
 
 ### Added
 

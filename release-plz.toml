@@ -22,4 +22,6 @@ commit_parsers = [
 name = "sisa-caching-core"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
+# The tag release.yml makes, which the changelog's compare links point at.
+git_tag_name = "v{{ version }}"
 changelog_include = ["sisa-caching", "sisa-caching-memory", "sisa-caching-redis", "sisa-caching-hybrid"]
