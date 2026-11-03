@@ -135,7 +135,9 @@ struct Trimming<C>(InMemoryCacheStore<C>);
 // Lets the next trim start, whether or not this one ran.
 impl<C> Drop for Trimming<C> {
     fn drop(&mut self) {
-        self.0.entries.trimming.store(false, Ordering::Release);
+        // A swap, not a store, as is the one that starts a trim: a write whose swap found a trim
+        // running is then seen by the count the trim checks after this (see `start_trim`).
+        self.0.entries.trimming.swap(false, Ordering::AcqRel);
     }
 }
 
@@ -333,18 +335,31 @@ impl<C: Clock> InMemoryCacheStore<C> {
     /// runtime it runs on the blocking pool, and the write that starts it goes on, as do the
     /// writes after it.
     fn start_trim(&self, max: usize) {
-        if self.entries.trimming.swap(true, Ordering::Acquire) {
+        if self.entries.trimming.swap(true, Ordering::AcqRel) {
             return;
         }
 
-        let trimming = Trimming(self.for_worker());
+        let mut trimming = Trimming(self.for_worker());
 
         off_async_thread(move || {
-            let removed = trimming.0.trim(max);
+            loop {
+                let removed = trimming.0.trim(max);
+                let store = trimming.0.clone();
 
-            // Let the next trim start, then free what this one dropped.
-            drop(trimming);
-            drop(removed);
+                // Let the next trim start, then free what this one dropped.
+                drop(trimming);
+                drop(removed);
+
+                // The writes that came in while this trim ran started none, so trim again if they
+                // left the store over `max`, unless one of them has started a trim since.
+                if store.entries.len.load(Ordering::Relaxed) <= max
+                    || store.entries.trimming.swap(true, Ordering::AcqRel)
+                {
+                    return;
+                }
+
+                trimming = Trimming(store);
+            }
         });
     }
 
@@ -1018,6 +1033,47 @@ mod tests {
         // The test runtime has one thread, so 0 is being freed on another while this runs.
         release.send(()).expect("the trim held up the write");
         assert_eq!(held(&store, 0..2).await, [1]);
+    }
+
+    #[tokio::test]
+    async fn a_store_filled_again_during_a_trim_is_trimmed_again() {
+        let store = store(
+            &ManualClock::new(),
+            InMemoryCacheSettings {
+                memory: MemorySettings {
+                    max_entries: Some(100),
+                    shards: Some(4),
+                    ..MemorySettings::default()
+                },
+                ..InMemoryCacheSettings::default()
+            },
+        );
+        let last_map = &store.entries.shards[3];
+        let mut ids = (0_u32..).filter(|&id| !ptr::eq(store.entries.shard(&key(id)), last_map));
+        let mut set = |count| {
+            for id in ids.by_ref().take(count) {
+                store
+                    .set(&key(id), id, None)
+                    .now_or_never()
+                    .unwrap()
+                    .unwrap();
+            }
+        };
+
+        set(100);
+        let held_map = write(last_map);
+        // Past the limit: the trim counts the entries of the other maps, then waits for this one.
+        set(1);
+        std::thread::sleep(Duration::from_millis(50));
+        // The trim is running, so these start none, and it counted none of them.
+        set(100);
+        drop(held_map);
+
+        eventually("the store is back under its limit", async || {
+            !store.entries.trimming.load(Ordering::Acquire)
+                && store.entries.len.load(Ordering::Relaxed) <= 100
+        })
+        .await;
     }
 
     #[test]

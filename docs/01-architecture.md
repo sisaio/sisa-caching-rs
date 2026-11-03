@@ -89,14 +89,14 @@ Rules every store follows:
 
 `InMemoryCacheStore` keeps `shards` hash maps (16 by default), each behind its own lock. An entry
 stays for its remaining TTL; a hybrid's local layer keeps it for `local.ttl_secs` at most. Past
-`max_entries`, a write starts a trim
-that drops expired entries, then the least recently used ones down to 90% of the limit, so the
-next writes don't trim again. Values are freed after the lock is released. Expired entries read as
-misses and go when they are overwritten, trimmed, or purged. The store purges every
-`purge_interval_secs` on its worker. Inside a tokio runtime the trims, the purges and the freeing
-of what `remove_prefix` and `clear` took run on the blocking pool, so a store of a million entries
-holds up no async thread; the walks of `remove_prefix` and `purge` called by the application run on
-the caller's thread.
+`max_entries`, a write starts a trim that drops expired entries, then the least recently used ones
+down to 90% of the limit, so the next writes don't trim again; writes made while it ran start none,
+so it runs again if they left the store over the limit. Values are freed after the lock is released.
+Expired entries read as misses and go when they are overwritten, trimmed, or purged. The store
+purges every `purge_interval_secs` on its worker. Inside a tokio runtime the trims, the purges and
+the freeing of what `remove_prefix` and `clear` took run on the blocking pool, so a store of a
+million entries holds up no async thread; the walks of `remove_prefix` and `purge` called by the
+application run on the caller's thread.
 
 ### Redis
 
