@@ -82,9 +82,9 @@ live, which serves that value, a lock wait that timed out, an invalidation that 
 published, a backplane subscription lost or failing, a backplane message that couldn't be read, and
 a local layer cleared because an invalidation went missing or a node's heartbeats stopped. When a
 node stops without calling `shutdown`, every other node logs that clear `heartbeat_timeout_ms`
-later, so such a rolling deploy logs it once for each node it replaces. The backplane worker also logs at info when
-it subscribes. Each store's worker logs starting and stopping at info, and a panic at error, with
-the worker's name in `worker` and the store's in `store`.
+later, so such a rolling deploy logs it once for each node it replaces. The backplane worker also
+logs at info when it subscribes. Each store's worker logs starting and stopping at info, and a panic
+at error, with the worker's name in `worker` and the store's in `store`.
 
 Warnings name the store, not the key, and quote no value. A `get_or_set` warning fires inside the
 `cache get_or_set` debug span, so with debug on it shows next to the key. A Redis decode error
