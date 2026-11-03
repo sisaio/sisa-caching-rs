@@ -36,7 +36,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # bash with pipefail: a failed API call stops the step before it deletes anything, where a
+      # failed newest-run lookup would otherwise leave nothing kept.
       - name: Delete old runs
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
