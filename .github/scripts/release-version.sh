@@ -69,8 +69,10 @@ push() {
     "HEAD:refs/heads/$branch"
 }
 
-pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --label release --state open --base "$GITHUB_REF_NAME" \
-  --json number,headRefName --jq 'first // empty')
+# The REST list, not `gh pr list --label`, which reads the search index: a PR release-plz opened a
+# second ago isn't in it yet, so the script would open a second PR.
+pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=$GITHUB_REF_NAME&per_page=100" \
+  --jq 'map(select(any(.labels[]; .name == "release"))) | first // empty | {number, headRefName: .head.ref}')
 
 if [ -z "$pr" ]; then
   if [ -z "$wanted" ]; then
