@@ -254,10 +254,6 @@ impl<C: Clock> InMemoryCacheStore<C> {
 
         tracing::Span::current().record("removed", removed);
 
-        if removed > 0 {
-            tracing::debug!(store = %self.name, removed, "expired entries removed");
-        }
-
         removed
     }
 
@@ -266,7 +262,6 @@ impl<C: Clock> InMemoryCacheStore<C> {
     /// that lock is released. The hybrid store's promotions do, so a slow `Drop` holds up no
     /// invalidation.
     #[doc(hidden)]
-    #[tracing::instrument(level = "debug", name = "memory set", skip_all, fields(key = %self.name.format_key(key)))]
     pub fn replace_entry<CV: CacheValue>(
         &self,
         key: &str,
@@ -541,6 +536,7 @@ impl<C: Clock> CacheStore for InMemoryCacheStore<C> {
         Ok(Some(entry.map(|_| value)))
     }
 
+    #[tracing::instrument(level = "debug", name = "memory set", skip_all, fields(key = %self.name.format_key(key)))]
     async fn set_entry<CV: CacheValue>(
         &self,
         key: &str,

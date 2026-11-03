@@ -39,8 +39,8 @@ reads can get meanwhile):
 
 | Span | Level | Fields |
 | --- | --- | --- |
-| `hybrid write` | info | `store`, `kind` |
-| `hybrid apply_invalidation` | info | `store`, `kind`; a child of the writer's `hybrid write` span |
+| `hybrid set`, `hybrid remove`, `hybrid remove_prefix`, `hybrid clear` | info | `store` |
+| `hybrid apply_invalidation` | info | `store`, `kind`; a child of the writer's span, such as `hybrid set` |
 | `hybrid resync` | info | `store`, `connected` |
 | `cache get_or_set` | debug | `key` |
 | `memory get`, `memory set`, `memory remove` | debug | `key` |
@@ -51,7 +51,13 @@ reads can get meanwhile):
 
 `kind` is `key`, `prefix` or `clear`. Info spans and warnings never carry a key or a value, so
 they are safe to keep in production; only debug spans carry the full key. Failed Redis and hybrid
-calls mark their span as an error.
+calls mark their span as an error and log the error at debug.
+
+At info, a hybrid store makes one span per write on the writer, including the write of a
+`get_or_set` that loaded, and one per invalidation on every other node, so their number grows with
+writes times nodes. On a store that writes often, sample traces, with a
+`ParentBased(TraceIdRatioBased)` sampler for example, so a write and the spans it causes on other
+nodes are kept or dropped together.
 
 A hybrid write and the `hybrid apply_invalidation` spans it causes on other nodes share one trace.
 This needs a text map propagator, such as `TraceContextPropagator`, installed at startup. It also
