@@ -69,7 +69,7 @@ sequenceDiagram
 
     App->>Store: set_entry(key, entry)
     Store->>Store: lifetime = remaining TTL, at most the local ttl_secs in a hybrid
-    Store->>Shard: insert, marked as just used
+    Store->>Shard: insert, marked as just used if the store has max_entries
     opt more than max_entries, and no trim running
         Store-)Trim: start
     end
@@ -86,9 +86,10 @@ once more if those writes left the store over `max_entries`. Outside a tokio run
 runs the trim itself. Replaced and dropped values are freed after the shard's lock is released,
 so a large value never holds up other callers.
 
-A read looks the key up in its shard and marks it as used. An expired entry, including one
-written with no lifetime left, reads as a miss and stays until a purge, a trim or a write to its
-key.
+A read looks the key up in its shard and, in a store with `max_entries`, marks it as used. A read
+that waited for a write to the shard checks the entry's lifetime against the time after the wait.
+An expired entry, including one written with no lifetime left, reads as a miss and stays until a
+purge, a trim or a write to its key.
 
 ## Redis store write and read
 

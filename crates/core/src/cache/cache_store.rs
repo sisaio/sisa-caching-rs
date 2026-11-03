@@ -227,7 +227,8 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     /// The entry under `key` as a `CV`, or `None` when it is missing or expired. The memory store
     /// fails with [`CacheError::TypeMismatch`] when it holds another Rust type there. The Redis
     /// store decodes its JSON into `CV`, so another type whose fields fit reads it too, and JSON
-    /// that doesn't fit is an error.
+    /// that doesn't fit is an error. The entry is as it was when looked up: it can expire while
+    /// a slow `Clone` of its value, or its decoding, runs.
     fn get_entry<CV: CacheValue>(
         &self,
         key: &str,
