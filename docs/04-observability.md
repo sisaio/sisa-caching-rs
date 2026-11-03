@@ -86,6 +86,11 @@ later, so such a rolling deploy logs it once for each node it replaces. The back
 logs at info when it subscribes. Each store's worker logs starting and stopping at info, and a panic
 at error, with the worker's name in `worker` and the store's in `store`.
 
+`shutdown` logs `told the other nodes this one is stopping` at info once its stop message is out.
+It warns instead when that message can't be published, so the other nodes clear once its
+heartbeats stop, and when writes were still publishing their invalidations after its two-second
+wait, so the other nodes may clear once.
+
 Warnings name the store, not the key, and quote no value. A `get_or_set` warning fires inside the
 `cache get_or_set` debug span, so with debug on it shows next to the key. A Redis decode error
 says where the stored JSON stops fitting the type; serde's own message, which can quote the data,

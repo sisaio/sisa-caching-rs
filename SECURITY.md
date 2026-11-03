@@ -21,7 +21,7 @@ not in a public issue.
 
 ## Verifying a release
 
-From the next release on, each GitHub release carries the crates' `.crate` files as crates.io
+Since 0.4.0-rc.1, each GitHub release carries the crates' `.crate` files as crates.io
 serves them, checked against a packaging of the tagged source, and a Sigstore bundle with their
 SLSA build provenance, made by the release workflow.
 Check a downloaded crate with the GitHub CLI:

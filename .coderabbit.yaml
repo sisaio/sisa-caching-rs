@@ -22,6 +22,8 @@ reviews:
       instructions: The PR changes crates/hybrid.
     - label: "crate: sisa-caching"
       instructions: The PR changes crates/sisa-caching, the facade crate.
+    - label: ci
+      instructions: The PR changes .github/workflows, .github/scripts or .githooks.
     - label: breaking
       instructions: >-
         The PR breaks what CONTRIBUTING.md's "What the public API is" lists: it removes or
