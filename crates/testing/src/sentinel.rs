@@ -20,7 +20,8 @@ use crate::{
 /// share one network namespace, so they announce one address. Redis Sentinel watches Dragonfly
 /// too; Garnet replicates only in cluster mode, so it has no Sentinel setup.
 pub struct RedisSentinel {
-    _containers: Vec<ContainerAsync<GenericImage>>,
+    /// The primary, the replica and the Sentinel, in that order.
+    containers: Vec<ContainerAsync<GenericImage>>,
     ip: IpAddr,
 }
 
@@ -71,7 +72,7 @@ impl RedisSentinel {
         .unwrap();
 
         let redis = Self {
-            _containers: vec![primary, replica, sentinel],
+            containers: vec![primary, replica, sentinel],
             ip,
         };
         let sentinel_client = redis.server(26379);
@@ -146,6 +147,27 @@ impl RedisSentinel {
             closed += killed.unwrap_or(0);
         }
         closed
+    }
+
+    /// Freezes the primary on 6379, as a host that stops answering would, until `unpause`, and
+    /// tells Sentinel to wait a minute before it calls the primary down, so it doesn't fail over
+    /// meanwhile.
+    pub async fn pause_primary(&self) {
+        let _: () = query(
+            &self.server(26379),
+            redis::cmd("SENTINEL")
+                .arg("SET")
+                .arg("primary")
+                .arg("down-after-milliseconds")
+                .arg(60_000),
+        )
+        .await;
+        self.containers[0].pause().await.unwrap();
+    }
+
+    /// Lets the primary on 6379 answer again.
+    pub async fn unpause_primary(&self) {
+        self.containers[0].unpause().await.unwrap();
     }
 
     /// Promotes the server on 6380 and waits until Sentinel names it. The old primary keeps
