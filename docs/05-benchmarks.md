@@ -54,6 +54,11 @@ less work but touches more memory, as it walks the maps one at a time.
 Redis runs in Docker on the same machine as the benchmark, so Redis times leave out real network
 latency. Compare one release with another, not with your production network.
 
+The release tables come from GitHub's `ubuntu-26.04-arm` runner. Its times hold within a few
+percent from one run to the next, where the x64 runners moved by 40% or more. Its Redis round
+trips are slower than on x64, so the table shows how releases compare, not how fast your x64
+servers will be.
+
 The previous release's benchmarks run in the same job on the same runner, in alternating rounds:
 the previous release, then this one, three times over. A shared runner drifts by 10 to 20%
 between runs of the same code, more than most changes, and alternating lets that drift slow both
