@@ -6,6 +6,23 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-rc.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.2...sisa-caching-core-v0.4.0-rc.1) - 2026-11-03
+
+### Changed
+
+- *(memory)* skip the LRU stamps in a store without max_entries
+- *(memory)* trim in two walks instead of three
+
+### Fixed
+
+- *(memory)* check expiry against the time after a lock wait
+- *(core)* drop a key lock's claim under the registry lock
+- *(hybrid)* open write spans on the methods callers call
+- *(memory)* trim again when writes during a trim overfill the store
+- *(redis)* give callers that wait for a lookup its error
+- *(redis)* share one Sentinel lookup between failing calls
+- *(hybrid)* count only numbers above a node's last heartbeat
+
 ## [0.3.1](https://github.com/sisaio/sisa-caching-rs/compare/sisa-caching-core-v0.3.0...sisa-caching-core-v0.3.1) - 2026-11-02
 
 ### Changed
