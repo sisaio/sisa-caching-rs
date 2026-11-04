@@ -4,12 +4,12 @@
 #   cargo-semver-checks, and adds the changelog section. The run's `version` input sets the version
 #   by hand, such as `0.4.0-rc.1` for a first rc or `0.4.0` for the final. Run it again to bring the
 #   PR up to date with main; nothing else touches it;
-# - when a push to main changes the changelog, as merging that PR does, and its version has no
-#   `v<version>` tag yet: tags the commit, creates the GitHub release from the changelog as a
-#   draft, runs the benchmarks for it, waits for CI to pass on that commit and for the maintainer
-#   to approve the `release` environment, publishes the crates to crates.io, checks that crates.io
-#   serves the `.crate` files the tag packages to and attaches them with a signed provenance
-#   attestation to the draft, and then publishes the release.
+# - when a push to main changes the version or the changelog, as merging that PR does, and its
+#   version has no `v<version>` tag yet: tags the commit, creates the GitHub release from the
+#   changelog as a draft, runs the benchmarks for it, waits for CI to pass on that commit and for
+#   the maintainer to approve the `release` environment, publishes the crates to crates.io, checks
+#   that crates.io serves the `.crate` files the tag packages to and attaches them with a signed
+#   provenance attestation to the draft, and then publishes the release.
 #
 # crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
 # draft and someone has read it. Releases are immutable once published, so the release stays a
@@ -22,10 +22,11 @@
 name: Release
 
 on:
-  # Only a release PR changes the changelog, so other merges start no run.
+  # Every release PR bumps the version in the root Cargo.toml, though it may add no changelog
+  # entry. Another change to either file, such as a dependency bump, finds its version tagged.
   push:
     branches: [main]
-    paths: [CHANGELOG.md]
+    paths: [Cargo.toml, CHANGELOG.md]
   workflow_dispatch:
     inputs:
       version:
