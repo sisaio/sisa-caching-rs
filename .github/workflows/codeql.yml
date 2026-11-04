@@ -42,8 +42,9 @@ jobs:
           fetch-depth: 0
 
       # A PR is diffed against its base and a push to main against the commit before it: one that
-      # changes no Rust inputs skips the Rust scan, and one that changes nothing under .github/
-      # skips the Actions scan. Both still report `analyze (...)`. The weekly run scans both.
+      # changes no Rust inputs skips the Rust scan, which still reports `analyze (rust)`. The
+      # Actions scan always runs, so every PR gets the `CodeQL` check that Scorecard's SAST check
+      # counts. The weekly run scans both.
       - name: Look for changes to scan
         id: scope
         env:
@@ -55,10 +56,8 @@ jobs:
             scan=true
           elif [ "$LANGUAGE" = rust ]; then
             scan=$(.github/scripts/code-changed.sh "$BASE" "$HEAD")
-          elif git diff --name-only "$BASE...$HEAD" | grep -q '^\.github/'; then
-            scan=true
           else
-            scan=false
+            scan=true
           fi
           echo "scan=$scan" >> "$GITHUB_OUTPUT"
 
