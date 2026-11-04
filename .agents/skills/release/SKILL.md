@@ -14,11 +14,15 @@ library crates share one version, one changelog at the root and one `v<version>`
   opens if any crate changed since the last release. The run's `version` input sets the version
   by hand instead of release-plz's pick, as for a pre-release (below).
 - Nothing updates the release PR on its own. Running the workflow again brings it up to date
-  with `main`, rewriting it from scratch, edits included.
+  with `main`: release-plz rewrites a PR that holds only bot commits, and closes one with
+  anybody else's commit and opens a new one. Either way, edits are gone.
 - The release PR bumps the versions, runs cargo-semver-checks
-  against the last published version, and adds a changelog section.
-- Merging the release PR changes the changelog on `main`, which starts the release workflow: it
-  tags `v<version>`, creates the GitHub release as a draft from the changelog section, and runs
+  against the last published version, and adds a changelog section. release-plz opens it when
+  any file a crate packages changed (`cargo package --list`), README included, so a PR whose
+  commits are all `docs`, `ci` and the like has a version bump and no changelog entries: write
+  its section by hand, or the GitHub release has no notes.
+- Merging the release PR changes the version in `Cargo.toml` on `main`, which starts the release
+  workflow: it tags `v<version>`, creates the GitHub release as a draft from the changelog section, and runs
   the benchmarks, whose table and report go on the draft. The publish job then waits for the CI
   run on that commit to pass and for the maintainer to approve the `release` environment. Once approved, it publishes the crates to
   crates.io, and the draft is published. Releases are immutable once published, so nothing may
@@ -65,8 +69,9 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
 
 ## Gotchas
 
-- Running the workflow again while the release PR is open rewrites it without your edits, and
-  without the version you set unless you pass it again.
+- Running the workflow again while the release PR is open drops your edits, and the version you
+  set unless you pass it again. With a commit of yours on it, release-plz closes it and opens a
+  new PR.
 - The release workflow runs from its copy on `main`, so a change to it can't be tried in a PR.
 - If merging the release PR starts no workflow run, GitHub dropped the push. Push a changelog
   fix to `main`: that tags and drafts the version, since its tag doesn't exist yet. Running the
