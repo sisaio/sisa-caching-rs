@@ -6,26 +6,14 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.4.0-rc.3](https://github.com/sisaio/sisa-caching-rs/compare/v0.4.0-rc.2...v0.4.0-rc.3) - 2026-11-03
-
-### Changed
-
-- *(memory)* open the set span on a sync function
-- *(memory)* read remove's time only for an entry with a deadline
-
-## [0.4.0-rc.2](https://github.com/sisaio/sisa-caching-rs/compare/v0.4.0-rc.1...v0.4.0-rc.2) - 2026-11-03
-
-### Changed
-
-- *(core)* count a key lock's shares without a second lookup
-- *(memory)* enter the set span in set_entry's body
-
-## [0.4.0-rc.1](https://github.com/sisaio/sisa-caching-rs/compare/v0.3.2...v0.4.0-rc.1) - 2026-11-03
+## [0.4.0](https://github.com/sisaio/sisa-caching-rs/compare/v0.3.2...v0.4.0) - 2026-11-04
 
 ### Changed
 
 - *(memory)* skip the LRU stamps in a store without max_entries
 - *(memory)* trim in two walks instead of three
+- *(core)* count a key lock's shares without a second lookup
+- *(memory)* read remove's time only for an entry with a deadline
 
 ### Fixed
 
