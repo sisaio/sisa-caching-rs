@@ -1,17 +1,15 @@
 # Releases. It:
 # - opens the release PR with release-plz (see release-plz.toml) when the maintainer runs this
-#   workflow by hand, and updates it after every push to main while it is open. The PR bumps the
-#   versions, checks the public API for breaking changes with cargo-semver-checks, and adds the
-#   changelog section;
-# - once CI passes on a push to main whose version has no `v<version>` tag yet, as merging that PR
-#   brings: tags the commit, creates the GitHub release from the changelog as a draft, runs the
-#   benchmarks for it, waits for the maintainer to approve the `release` environment, publishes
-#   the crates to crates.io, checks that crates.io serves the `.crate` files the tag packages to
-#   and attaches them with a signed provenance attestation to the draft, and then publishes the
-#   release.
-#
-# It starts when CI finishes on main rather than on the push, so a commit whose CI failed is never
-# tagged. GitHub runs this file as it is on main, so a change to it takes effect once merged.
+#   workflow by hand. The PR bumps the versions, checks the public API for breaking changes with
+#   cargo-semver-checks, and adds the changelog section. The run's `version` input sets the version
+#   by hand, such as `0.4.0-rc.1` for a first rc or `0.4.0` for the final. Run it again to bring the
+#   PR up to date with main; nothing else touches it;
+# - when a push to main changes the changelog, as merging that PR does, and its version has no
+#   `v<version>` tag yet: tags the commit, creates the GitHub release from the changelog as a
+#   draft, runs the benchmarks for it, waits for CI to pass on that commit and for the maintainer
+#   to approve the `release` environment, publishes the crates to crates.io, checks that crates.io
+#   serves the `.crate` files the tag packages to and attaches them with a signed provenance
+#   attestation to the draft, and then publishes the release.
 #
 # crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
 # draft and someone has read it. Releases are immutable once published, so the release stays a
@@ -24,11 +22,16 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  # Only a release PR changes the changelog, so other merges start no run.
+  push:
     branches: [main]
+    paths: [CHANGELOG.md]
   workflow_dispatch:
+    inputs:
+      version:
+        description: The version, such as 0.4.0-rc.1 or 0.4.0. Empty lets release-plz pick it.
+        type: string
+        required: false
 
 permissions: {}
 
@@ -36,18 +39,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Tags the commit CI passed on and drafts its release, unless its version is tagged already. A
-  # push while an earlier release waits for approval finds the tag on another commit and does nothing.
+  # Tags the pushed commit and drafts its release, unless its version is tagged already. A push
+  # while an earlier release waits for approval finds the tag on another commit and does nothing.
   # A rerun of a run that failed after tagging finds the tag on its own commit, with no published
   # release, and carries on from there.
   tag:
     name: tag
     runs-on: ubuntu-26.04
-    # `branches` also matches a PR from a fork's main, so only CI runs for a push count.
-    if: >-
-      github.repository_owner == 'sisaio' && github.event_name == 'workflow_run'
-      && github.event.workflow_run.event == 'push'
-      && github.event.workflow_run.conclusion == 'success'
+    if: github.repository_owner == 'sisaio' && github.event_name == 'push'
     timeout-minutes: 5
     permissions:
       contents: write
@@ -57,8 +56,6 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      # Main with its history. The job reads the files of the commit CI tested with `git show` and
-      # runs none of its code; GITHUB_SHA is main's newest commit, which may be a later one.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -68,21 +65,19 @@ jobs:
         id: tag
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          version=$(git show "$SHA:Cargo.toml" |
-            python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["workspace"]["package"]["version"])')
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           tag="v$version"
           # `isDraft` of the version's release, or nothing when it has none.
           draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
           if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-            if [ "$(git rev-parse "$tag^{commit}")" != "$SHA" ] || [ "$draft" = false ]; then
+            if [ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ] || [ "$draft" = false ]; then
               echo "$tag exists; nothing to release"
               exit 0
             fi
             echo "$tag is on this commit and not released yet; carrying on"
           else
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$SHA" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
           fi
           if [ -z "$draft" ]; then
             # The changelog section for this version, without its heading.
@@ -90,7 +85,7 @@ jobs:
               index($0, heading) == 1 { found = 1; next }
               found && /^## \[/ { exit }
               found { print }
-            ' <(git show "$SHA:CHANGELOG.md") > notes.md
+            ' CHANGELOG.md > notes.md
             # A version such as 0.4.0-rc.1 is a pre-release, which GitHub never marks as the latest.
             prerelease=()
             if [[ $version == *-* ]]; then
@@ -111,13 +106,39 @@ jobs:
     with:
       tag: ${{ needs.tag.outputs.tag }}
 
+  # The ci workflow's run for this exact commit must succeed. A failed or cancelled run, or none
+  # within the timeout, stops the release before crates.io.
+  ci:
+    name: wait for CI
+    needs: tag
+    if: needs.tag.outputs.tag
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the ci run on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while true; do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --json status,conclusion,url --jq 'first // empty')
+            if [ -n "$run" ] && [ "$(jq -r .status <<< "$run")" = completed ]; then
+              echo "$(jq -r .url <<< "$run"): $(jq -r .conclusion <<< "$run")"
+              [ "$(jq -r .conclusion <<< "$run")" = success ]
+              exit
+            fi
+            sleep 30
+          done
+
   # Waits for the maintainer to approve the `release` environment, after reading the benchmark
   # table on the draft. It runs even when the benchmarks failed, so that call is theirs. Each crate
   # whose version crates.io already has is skipped, so a re-run finishes a half-done publish.
   publish:
     name: publish
-    needs: [tag, bench]
-    if: always() && needs.tag.outputs.tag
+    needs: [tag, bench, ci]
+    if: always() && needs.tag.outputs.tag && needs.ci.result == 'success'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: release
@@ -230,9 +251,7 @@ jobs:
   release-pr:
     name: release PR
     runs-on: ubuntu-26.04
-    if: >-
-      github.repository_owner == 'sisaio'
-      && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push')
+    if: github.repository_owner == 'sisaio' && github.event_name == 'workflow_dispatch'
     timeout-minutes: 30
     permissions:
       contents: write
@@ -243,41 +262,57 @@ jobs:
     env:
       HAS_APP: ${{ secrets.RELEASE_APP_ID != '' }}
     steps:
-      # A push only updates a release PR that is already open; opening one is the maintainer's call.
-      - name: Check for an open release PR
-        id: open
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # The REST list, not `gh pr list --label`, which reads the search index and misses a new PR.
-          branch=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" \
-            --jq 'map(select(any(.labels[]; .name == "release"))) | first.head.ref // empty')
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ -n "$branch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Get the release app's token
         id: app
-        if: steps.open.outputs.run == 'true' && env.HAS_APP == 'true'
+        if: env.HAS_APP == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.open.outputs.run == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install the pinned toolchain
-        if: steps.open.outputs.run == 'true'
         run: rustup toolchain install
 
       - name: Open or update the release PR
-        if: steps.open.outputs.run == 'true'
+        id: release-plz
         uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c # v0.5.147
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token || github.token }}
+
+      # `release-plz set-version` sets the version, the crates' requirements on each other and
+      # Cargo.lock, and renames the changelog section release-plz just wrote. The change goes into
+      # release-plz's own commit, so the PR stays one commit. release-plz is on PATH from the step
+      # above. With no crate changed since the last release, release-plz opens no PR: open one by
+      # hand with the version and its changelog section.
+      - name: Set the version by hand
+        if: inputs.version
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          VERSION: ${{ inputs.version }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          branch=$(jq -r '.head_branch // empty' <<< "${PR:-null}")
+          if [ -z "$branch" ]; then
+            echo "::error::release-plz opened no release PR: no crate changed since the last release"
+            exit 1
+          fi
+          git fetch --quiet origin "$branch"
+          git switch --quiet --force-create "$branch" FETCH_HEAD
+          picked=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          release-plz set-version "$VERSION"
+          git -c user.name="$(git log -1 --format=%an)" -c user.email="$(git log -1 --format=%ae)" \
+            commit --quiet --all --amend --message "chore: release v$VERSION"
+          git push --quiet --force-with-lease="refs/heads/$branch:$(git rev-parse FETCH_HEAD)" \
+            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$branch"
+          number=$(jq -r .number <<< "$PR")
+          title=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          body=$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --title "${title//"$picked"/"$VERSION"}" \
+            --body-file <(printf '%s\n' "${body//"$picked"/"$VERSION"}")

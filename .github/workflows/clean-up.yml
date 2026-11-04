@@ -4,7 +4,8 @@
 # spell. Two weeks keeps the last two runs of each weekly workflow to compare.
 #
 # A PR whose CI ran before the cutoff still merges: the push to main finds no passing PR run and
-# runs CI in full.
+# runs CI in full. A Release re-run after the cutoff waits on a ci run its commit no longer has;
+# push again or run CI on main first.
 name: Clean Up Runs
 
 on:
