@@ -68,10 +68,9 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
 - Running the workflow again while the release PR is open rewrites it without your edits, and
   without the version you set unless you pass it again.
 - The release workflow runs from its copy on `main`, so a change to it can't be tried in a PR.
-- If merging the release PR starts no workflow run, GitHub dropped the push. Re-run the last
-  release workflow run for that push, or push a changelog fix to `main`: either tags and drafts
-  the version, since its tag doesn't exist yet. Running the workflow by hand doesn't help: a
-  manual run only opens release PRs.
+- If merging the release PR starts no workflow run, GitHub dropped the push. Push a changelog
+  fix to `main`: that tags and drafts the version, since its tag doesn't exist yet. Running the
+  workflow by hand doesn't help: a manual run only opens release PRs.
 - A publish that stopped halfway is finished by re-running the publish job: it skips the crates
   crates.io already has.
 - The first release PR lists every commit since the start. Replace it with the summary in

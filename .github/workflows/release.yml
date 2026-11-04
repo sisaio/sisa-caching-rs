@@ -121,9 +121,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A failed lookup is logged and retried; the job's timeout still ends the wait.
           while true; do
             run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
-              --event push --json status,conclusion,url --jq 'first // empty')
+              --event push --json status,conclusion,url --jq 'first // empty') || run=
             if [ -n "$run" ] && [ "$(jq -r .status <<< "$run")" = completed ]; then
               echo "$(jq -r .url <<< "$run"): $(jq -r .conclusion <<< "$run")"
               [ "$(jq -r .conclusion <<< "$run")" = success ]
