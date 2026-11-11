@@ -7,7 +7,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+  # astral-tokio-tar is unmaintained in every version. Only testcontainers uses it, in the
+  # unpublished test crate, and its newest release still needs it. Drop this once it moves off.
+  "RUSTSEC-2026-0440",
+]
 
 [licenses]
 version = 2
