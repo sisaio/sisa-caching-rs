@@ -236,13 +236,17 @@ jobs:
             echo "The base has no workspace yet; nothing to compare."
             exit 0
           fi
+          # A crate is matched by name, so one that moved to another folder is still compared.
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE" > /dev/null
+          base_names=$(cargo metadata --no-deps --format-version 1 \
+            --manifest-path "$RUNNER_TEMP/base/Cargo.toml" | jq -r '.packages[].name')
+          names=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.publish != []) | .name')
+          git worktree remove --force "$RUNNER_TEMP/base"
           packages=()
-          while IFS=$'\t' read -r name manifest; do
-            if git cat-file -e "$BASE:${manifest#"$GITHUB_WORKSPACE/"}" 2>/dev/null; then
-              packages+=(--package "$name")
-            fi
-          done < <(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.publish != []) | [.name, .manifest_path] | @tsv')
+          while read -r name; do
+            if grep -qxF -- "$name" <<< "$base_names"; then packages+=(--package "$name"); fi
+          done <<< "$names"
           if [ ${#packages[@]} -eq 0 ]; then
             echo "No publishable crate exists in the base yet; nothing to compare."
             exit 0

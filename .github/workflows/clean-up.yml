@@ -28,6 +28,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      pull-requests: read # to keep the runs of open PRs
     env:
       DAYS: ${{ inputs.days || '14' }}
     steps:
@@ -60,19 +61,25 @@ jobs:
               fi
             done > "$RUNNER_TEMP/keep"
 
+          # An open PR's required checks are these runs: deleting them would block its merge, so
+          # every run on an open PR's head commit stays, however old.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
+            --jq '.[].head.sha' > "$RUNNER_TEMP/open"
+
           # Runs in progress can't be deleted, so only finished ones are listed. The list is TSV,
           # so a newline in a run's title stays in its field. GitHub returns at most 1,000 runs
           # per query; the next day's run takes the rest.
           gh api --paginate "$repo/runs?status=completed&per_page=100&created=%3C$cutoff" \
             --jq '.workflow_runs[] | select(.path != ".github/workflows/release.yml")
-              | [.id, .created_at, .name, .display_title] | @tsv' |
-            awk -F'\t' -v keep="$RUNNER_TEMP/keep" \
-              'BEGIN { while ((getline id < keep) > 0) kept[id] } !($1 in kept)' \
+              | [.id, .head_sha, .created_at, .name, .display_title] | @tsv' |
+            awk -F'\t' -v keep="$RUNNER_TEMP/keep" -v open="$RUNNER_TEMP/open" \
+              'BEGIN { while ((getline id < keep) > 0) kept[id]; while ((getline sha < open) > 0) heads[sha] }
+               !($1 in kept) && !($2 in heads)' \
             > "$RUNNER_TEMP/runs"
 
           # One a second, under GitHub's secondary rate limit of 80 writes a minute.
           count=0
-          while IFS=$'\t' read -r id created name title; do
+          while IFS=$'\t' read -r id _ created name title; do
             echo "$created $name: $title"
             gh api --method DELETE "$repo/runs/$id" --silent < /dev/null
             count=$((count + 1))

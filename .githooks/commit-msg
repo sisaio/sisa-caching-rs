@@ -24,7 +24,7 @@ esac
 echo "$subject" |
   grep -Eq "^($TYPES)(\(($SCOPES)\))?!?: [^ ]" ||
   fail "start with type(scope): summary; a type is one of $TYPES, and a scope one of $SCOPES"
-echo "$subject" | grep -Eq '^[^:]+: [^A-Z]' || fail 'start the summary with a lowercase letter'
+echo "$subject" | grep -Eq '^[^:]+: [a-z]' || fail 'start the summary with a lowercase letter'
 [ "${#subject}" -le 72 ] || fail 'keep the subject to 72 characters'
 case "$subject" in
   *.) fail 'end the subject without a period' ;;
@@ -34,11 +34,8 @@ if grep -iq '^co-authored-by:' "$1"; then fail 'drop the Co-authored-by trailer'
 
 # A breaking change says how to migrate in its body. CI checks a PR title with SUBJECT_ONLY set,
 # since a title has no body.
-case "$subject" in
-  *'!:'*)
-    if [ -z "${SUBJECT_ONLY:-}" ] &&
-      ! grep -v '^#' "$1" | awk 'seen && NF { found = 1 } NF { seen = 1 } END { exit !found }'; then
-      fail 'a breaking change says how to migrate in the body'
-    fi
-    ;;
-esac
+# Only a `!` before the first colon marks one: `docs: explain the !: marker` is not breaking.
+if echo "$subject" | grep -Eq '^[^:]+!: ' && [ -z "${SUBJECT_ONLY:-}" ] &&
+  ! grep -v '^#' "$1" | awk 'seen && NF { found = 1 } NF { seen = 1 } END { exit !found }'; then
+  fail 'a breaking change says how to migrate in the body'
+fi
