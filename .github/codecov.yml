@@ -1,0 +1,9 @@
+# Codecov feeds the README badge and nothing else, so it posts no commit status. Its default
+# statuses fail a commit whose changed lines are covered less than the whole project, and coverage
+# counts a test's own lines, some of which never run by design: a loader the test proves isn't
+# called, or the early return when a server isn't available. Coverage is measured on main, after
+# the merge, so a status there gates nothing and can only mark a merged commit red.
+coverage:
+  status:
+    project: off
+    patch: off
