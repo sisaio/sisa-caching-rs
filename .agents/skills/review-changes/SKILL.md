@@ -82,13 +82,13 @@ Each was real, passed CI, and now has a test. Look for the same shape anywhere i
 | A lost invalidation clears other nodes at the writer's heartbeat, once the writes before it finish | `a_number_missing_below_a_heartbeat_is_a_gap`, `a_publish_refused_on_every_try_clears_the_other_nodes_at_the_next_heartbeat`, `a_lost_invalidation_clears_the_other_nodes_once_the_writes_before_it_finish` |
 | A writer that stops or goes silent makes the others clear | `a_node_whose_heartbeats_stop_makes_the_others_clear`, `a_shutdown_that_gives_up_on_a_write_makes_the_other_nodes_clear` |
 | A node that calls `shutdown` is forgotten without a clear | `a_node_that_shuts_down_is_forgotten_without_a_clear` |
-| A lost subscription turns local reads off until it is back and cleared | `a_lost_subscription_reads_through_until_it_is_back`, `a_closed_subscription_clears_the_copies_and_subscribes_again` |
+| A lost subscription turns local reads off until it is back and cleared | `a_lost_subscription_reads_through_until_it_is_back`, `a_closed_subscription_clears_the_copies_and_subscribes_again`, `a_local_copy_from_before_the_worker_subscribes_is_cleared` |
 | A local copy lives at most the local TTL | `local_copies_expire_after_60_seconds_unless_set_otherwise`, `a_read_copies_a_distributed_hit_unchanged_for_the_local_ttl` |
 | Deadlines follow the monotonic clock, not the wall clock | `a_wall_clock_change_does_not_move_a_deadline` |
 | A memory store full past `max_entries` trims to nine tenths, on the blocking pool | `a_full_store_trims_to_nine_tenths_of_its_limit`, `a_trim_runs_on_the_blocking_pool_while_the_write_goes_on` |
 | A per-key lock nobody holds is removed | `a_lock_nobody_holds_is_removed` |
 | Calls behind Sentinel fail after the reply timeout while the primary is down | `calls_while_the_primary_is_down_fail_without_queueing_for_lookups`, `callers_that_wait_for_a_failed_lookup_get_its_error` |
-| The Redis hash and the backplane message keep their formats | `an_entry_copies_unchanged_between_memory_redis_and_hybrid`, `messages_keep_the_existing_json_format` |
+| The Redis hash and the backplane message keep their formats | `entries_are_stored_as_the_documented_hash`, `messages_keep_the_existing_json_format` |
 
 ## Gotchas
 
