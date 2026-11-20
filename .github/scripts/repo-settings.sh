@@ -17,6 +17,13 @@ milestones_file=.github/milestones.yml
 # A label name in a URL path: `type:docs` and `good first issue` both need encoding.
 encode() { jq -rn --arg value "$1" '$value | @uri'; }
 
+# Both files are read in full before anything on GitHub changes: a file that doesn't parse stops
+# the script here. Read inside a loop's `< <(...)`, a failed yq would end the loop early and the
+# script would still succeed.
+labels=$(yq -o=json -I=0 '.labels // [] | .[]' "$labels_file")
+unused=$(yq -r '.delete // [] | .[]' "$labels_file")
+milestones=$(yq -o=json -I=0 '.[]' "$milestones_file")
+
 # --- Labels ---------------------------------------------------------------------------------------
 existing=$(gh api --paginate "repos/$REPO/labels?per_page=100" --jq '.[].name')
 has_label() { grep -qxF -- "$1" <<< "$existing"; }
@@ -24,6 +31,7 @@ has_label() { grep -qxF -- "$1" <<< "$existing"; }
 # Renames first, so a label keeps its issues and PRs under its new name. A label whose new name
 # exists already is left for `delete` to remove, or for the maintainer to merge by hand.
 while read -r label; do
+  [ -n "$label" ] || continue
   name=$(jq -r .name <<< "$label")
   while read -r old; do
     if [ -z "$old" ] || ! has_label "$old"; then continue; fi
@@ -35,15 +43,16 @@ while read -r label; do
     existing=$(awk -v old="$old" -v new="$name" '$0 == old { print new; next } { print }' <<< "$existing")
     echo "label $old renamed to $name"
   done < <(jq -r '.was // empty | if type == "array" then .[] else . end' <<< "$label")
-done < <(yq -o=json -I=0 '.labels[]' "$labels_file")
+done <<< "$labels"
 
 # Then every label is created, or its color and description updated.
 while read -r label; do
+  [ -n "$label" ] || continue
   name=$(jq -r .name <<< "$label")
   gh label create "$name" --repo "$REPO" --force \
     --color "$(jq -r .color <<< "$label")" --description "$(jq -r .description <<< "$label")" > /dev/null
   echo "label $name synced"
-done < <(yq -o=json -I=0 '.labels[]' "$labels_file")
+done <<< "$labels"
 
 # Last, the labels this repository doesn't use.
 while read -r name; do
@@ -51,12 +60,13 @@ while read -r name; do
     gh label delete "$name" --repo "$REPO" --yes
     echo "label $name deleted"
   fi
-done < <(yq -r '.delete // [] | .[]' "$labels_file")
+done <<< "$unused"
 
 # --- Milestones -----------------------------------------------------------------------------------
 # Matched by title. One that exists keeps its number and its issues.
 existing=$(gh api --paginate "repos/$REPO/milestones?state=all&per_page=100" --jq '.[] | "\(.number)\t\(.title)"')
 while read -r milestone; do
+  [ -n "$milestone" ] || continue
   title=$(jq -r .title <<< "$milestone")
   due=$(jq -r '.due_on // empty' <<< "$milestone")
   args=(-f description="$(jq -r '.description // ""' <<< "$milestone")"
@@ -65,10 +75,12 @@ while read -r milestone; do
 
   number=$(awk -F'\t' -v title="$title" '$2 == title { print $1 }' <<< "$existing")
   if [ -n "$number" ]; then
+    # A due date taken out of the file is cleared on GitHub too: null, sent as JSON.
+    if [ -z "$due" ]; then args+=(-F due_on=null); fi
     gh api --method PATCH "repos/$REPO/milestones/$number" "${args[@]}" --silent
     echo "milestone $title updated"
   else
     gh api "repos/$REPO/milestones" -f title="$title" "${args[@]}" --silent
     echo "milestone $title created"
   fi
-done < <(yq -o=json -I=0 '.[]' "$milestones_file")
+done <<< "$milestones"
