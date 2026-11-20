@@ -148,7 +148,12 @@ retries the connection six times first, so every call waits about 9 s before it 
 `get_or_set` whose loader works takes three times that. Timeouts stay redis-rs's: a command fails
 after 500 ms without a reply, and a connection attempt after 1 s.
 
-A large value or a `remove_prefix` on a busy server can need longer. Start from
+A server that is up but doesn't answer, frozen or behind a network that drops traffic, costs each
+command that reply timeout. A `get_or_set` that loads calls the server three times: the read, the
+read again under the key's lock, and the write. So it takes 1.5 s on top of its loader, on a hybrid
+store as well. A shorter reply timeout lowers that: with 100 ms it takes 0.3 s.
+
+A large value or a `remove_prefix` on a busy server can need a longer one. Either way, start from
 `connection_config()`, change the timeouts, and pass the connection to `RedisCacheStore::new`:
 
 ```rust,ignore
