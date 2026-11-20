@@ -155,6 +155,8 @@ pub(crate) struct State<C: Clock = SystemClock> {
     removing: Arc<Removing>,
     /// Numbers this node's invalidations for its heartbeats.
     pub(crate) sequence: Arc<Sequence>,
+    /// Whether the last invalidation couldn't be published, so a run of failures warns once.
+    pub(crate) publishes_failing: AtomicBool,
     /// Whether `shutdown` has started. A heartbeat holds it while it publishes, so none goes out
     /// after the stop message.
     pub(crate) stopped: tokio::sync::Mutex<bool>,
@@ -175,6 +177,7 @@ impl<C: Clock> State<C> {
             turns: RwLock::new(()),
             removing: Arc::default(),
             sequence: Arc::default(),
+            publishes_failing: AtomicBool::new(false),
             stopped: tokio::sync::Mutex::new(false),
             shut_down: tokio::sync::SetOnce::new(),
         }
