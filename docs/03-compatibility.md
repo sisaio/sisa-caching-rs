@@ -151,7 +151,9 @@ after 500 ms without a reply, and a connection attempt after 1 s.
 A server that is up but doesn't answer, frozen or behind a network that drops traffic, costs each
 command that reply timeout. A `get_or_set` that loads calls the server three times: the read, the
 read again under the key's lock, and the write. So it takes 1.5 s on top of its loader, on a hybrid
-store as well. A shorter reply timeout lowers that: with 100 ms it takes 0.3 s.
+store as well. Callers of one key take turns at the lock, so each takes 1 s and its own load longer
+than the one before it, until `lock_timeout_ms` ends its wait. A shorter reply timeout lowers all
+of that: with 100 ms a call takes 0.3 s.
 
 A large value or a `remove_prefix` on a busy server can need a longer one. Either way, start from
 `connection_config()`, change the timeouts, and pass the connection to `RedisCacheStore::new`:
@@ -167,7 +169,9 @@ let cache = RedisCacheStore::new("app", conn)?;
 
 A `ClusterConnection`, and `RedisBackplane::cluster`, keep the cluster client's settings: by default
 redis-rs retries a failed command up to 16 times with growing waits. Lower them with
-`ClusterClientBuilder::retries` and `retry_wait_formula`.
+`ClusterClientBuilder::retries` and `retry_wait_formula`. By default it has no reply timeout either,
+so a node that is up but doesn't answer holds a command for good. Set one with
+`ClusterClientBuilder::response_timeout`, which bounds a command's retries as well.
 
 ## Data formats
 
