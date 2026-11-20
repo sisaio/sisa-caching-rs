@@ -13,7 +13,7 @@
 //! Given a release, such as `v0.1.0`, it compares that release with this code instead. The two
 //! run in turns on the same machine, a round each, saved as the Criterion baselines `previous-1`,
 //! `current-1`, `previous-2` and so on, so that a machine that drifts during the job slows both
-//! alike. docs/05-benchmarks.md has the commands.
+//! alike. docs/benchmarks.md has the commands.
 
 use std::{
     env, fs,

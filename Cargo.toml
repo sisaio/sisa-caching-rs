@@ -13,16 +13,27 @@ repository = "https://github.com/sisaio/sisa-caching-rs"
 readme = "README.md"
 
 # Lints every package takes, through its `[lints] workspace = true`, for all its targets: library,
-# tests, benches and examples. A name means one thing in its scope: a new binding may reuse one
-# only for the same value converted, such as `let prefix = prefix.into()`. Names are whole words,
-# so no name is a single letter.
+# tests, benches and examples. The same block is in every sisaio crate repository.
+#
+# No unsafe code, and every public item has docs and a `Debug` implementation.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+# This repository's own: `cargo fuzz` builds with `--cfg fuzzing`, which turns on the fuzz entry
+# points in fuzz/.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
+# A name means one thing in its scope: a new binding may reuse one only for the same value
+# converted, such as `let prefix = prefix.into()`. Names are whole words, so no name is a single
+# letter. Library code returns errors: no `unwrap` outside tests (clippy.toml allows it there), and
+# no `dbg!` or `todo!` left behind.
 [workspace.lints.clippy]
 shadow_unrelated = "warn"
 min_ident_chars = "warn"
-
-# `cargo fuzz` builds with `--cfg fuzzing`, which turns on the fuzz entry points in fuzz/.
-[workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
 
 [workspace.dependencies]
 # The library crates, at the coordinated version.

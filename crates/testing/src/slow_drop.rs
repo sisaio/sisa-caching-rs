@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 /// test sends on its gate, or drops the gate's sender. A store that frees it on the test's own
 /// thread holds the test up that long, and the test's send then fails. Its clones, which reads
 /// make, drop at once.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SlowDrop {
     #[serde(skip)]
     gate: Option<(oneshot::Sender<()>, Mutex<mpsc::Receiver<()>>)>,

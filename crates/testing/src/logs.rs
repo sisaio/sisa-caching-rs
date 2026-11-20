@@ -21,7 +21,7 @@ static ALONGSIDE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscrib
 /// Every event at the info level or above, one line each with its level and fields, such as
 /// `INFO message=worker started worker="in-memory-cache-purge-worker" store=app`. Install it on
 /// the test's thread with `tracing::subscriber::set_default`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Logs(Arc<Mutex<Vec<String>>>);
 
 // An empty log, with the process-wide dispatcher set up first.

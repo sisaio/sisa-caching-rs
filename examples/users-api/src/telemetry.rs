@@ -10,6 +10,7 @@ use opentelemetry_sdk::{
 use tracing_subscriber::{EnvFilter, filter::filter_fn, prelude::*};
 
 /// The providers that batch and push telemetry. Shut them down on exit to send what is left.
+#[derive(Debug)]
 pub struct Telemetry {
     tracer_provider: SdkTracerProvider,
     meter_provider: SdkMeterProvider,
@@ -17,6 +18,7 @@ pub struct Telemetry {
 }
 
 impl Telemetry {
+    /// Shuts the providers down, sending what they still hold.
     pub fn shutdown(self) {
         _ = self.tracer_provider.shutdown();
         _ = self.meter_provider.shutdown();

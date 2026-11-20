@@ -16,6 +16,7 @@ const PASSWORD: &str = "secret";
 
 /// A server of the `REDIS_IMAGE` that accepts only TLS, on certificates made for this test: its
 /// own CA, a server certificate for `localhost`, and a client certificate the server requires.
+#[derive(Debug)]
 pub struct RedisTls {
     _container: ContainerAsync<GenericImage>,
     url: String,
@@ -29,6 +30,7 @@ pub struct RedisTls {
 }
 
 impl RedisTls {
+    /// A server that requires a client certificate.
     pub async fn start() -> Self {
         Self::start_with("yes").await
     }

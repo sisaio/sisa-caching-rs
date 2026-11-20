@@ -1,5 +1,9 @@
 //! Helpers shared by the hybrid tests. Each test binary uses some of them.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
 #![allow(dead_code)]
 
 use std::fmt::Display;
