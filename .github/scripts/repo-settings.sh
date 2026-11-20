@@ -33,6 +33,7 @@ has_label() { grep -qxF -- "$1" <<< "$existing"; }
 while read -r label; do
   [ -n "$label" ] || continue
   name=$(jq -r .name <<< "$label")
+  olds=$(jq -r '.was // empty | if type == "array" then .[] else . end' <<< "$label")
   while read -r old; do
     if [ -z "$old" ] || ! has_label "$old"; then continue; fi
     if has_label "$name"; then
@@ -42,7 +43,7 @@ while read -r label; do
     gh api --method PATCH "repos/$REPO/labels/$(encode "$old")" -f new_name="$name" --silent
     existing=$(awk -v old="$old" -v new="$name" '$0 == old { print new; next } { print }' <<< "$existing")
     echo "label $old renamed to $name"
-  done < <(jq -r '.was // empty | if type == "array" then .[] else . end' <<< "$label")
+  done <<< "$olds"
 done <<< "$labels"
 
 # Then every label is created, or its color and description updated.
