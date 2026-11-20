@@ -5,12 +5,13 @@ commands and the examples.
 
 ## Workflow
 
-1. **An issue first.** Every PR closes an issue: open one with the matching form if none exists.
-   Only Dependabot's and release-plz's PRs come without one.
+1. **An issue first.** A PR closes an issue: open one with the matching form if none exists.
+   Three kinds of PR come without one: Dependabot's, release-plz's, and a small `docs` or `chore`
+   change that nobody needs to track.
 2. **A branch** from `main`, named as [Branches](#branches) says, with one topic.
 3. **The change, with its tests and docs**, in commits that follow
    [Commit messages](#commit-messages). Run [the checks](#build-and-check) before you push.
-4. **A PR** that says `Closes #n`, fills in the template, and carries its labels. Its assignee is
+4. **A PR** that says `Closes #n` when it has an issue, fills in the template, and carries its labels. Its assignee is
    its author.
 5. **Review.** CI must pass, and the PR needs one approval given after its latest push.
 6. **Merge** with the rebase method, the only one allowed, so `main` stays linear.
@@ -319,7 +320,14 @@ Releases are cut by hand, so each one batches several changes. The maintainer ru
 workflow, which opens a release PR with the version bump and the changelog section; merging it
 tags the commit, drafts the GitHub release, runs the benchmarks for it, waits for CI and the
 maintainer's approval, and publishes the crates to crates.io. A run that stopped halfway is finished by re-running its
-failed jobs: what is already published is skipped. The steps are in the
+failed jobs: what is already published is skipped.
+
+release-plz writes no changelog entry for `docs`, `ci`, `chore` and the other types the changelog
+leaves out. When a release PR holds only such commits, write the `## [<version>]` section in
+`CHANGELOG.md` by hand before merging it: without that heading the workflow tags nothing and
+still ends green.
+
+The steps are in the
 [release skill](.agents/skills/release/SKILL.md), and what the workflow needs on GitHub in
 [.github/scripts](.github/scripts/README.md#releases).
 
