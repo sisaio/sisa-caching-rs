@@ -2,6 +2,11 @@
 //! too, where it publishes with `SPUBLISH`. A test binary of its own, so its meter provider is
 //! installed before any store is built.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 mod common;
 
 use common::{assert_a_write_reaches, hybrid, start};

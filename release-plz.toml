@@ -1,5 +1,5 @@
 # release-plz opens and updates the release PR: the maintainer opens it by running the release
-# workflow, and every push to main keeps it up to date. Tagging, the GitHub release and publishing
+# workflow, and running it again brings the PR up to date with main. Tagging, the GitHub release and publishing
 # are release.yml's own jobs, not release-plz's. The five crates share one version and one changelog
 # at the root, carried by `sisa-caching-core`.
 [workspace]
@@ -13,6 +13,7 @@ protect_breaking_commits = true
 commit_parsers = [
     { message = "^feat", group = "added" },
     { message = "^(fix|revert)", group = "fixed" },
+    { message = "^security", group = "security" },
     { message = "^perf", group = "changed" },
     { message = "^(refactor|docs|test|build|ci|chore)", skip = true },
     { message = "^.*", group = "other" },

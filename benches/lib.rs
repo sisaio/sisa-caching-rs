@@ -2,6 +2,11 @@
 //! run with, the meter provider they record their metrics with, a timer for calls that need the
 //! store set up before each one, and the calls every store has, timed the same way on each.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "benchmarks unwrap: a failure should panic"
+)]
+
 use std::{
     hint::black_box,
     sync::OnceLock,
@@ -15,13 +20,18 @@ use serde::{Deserialize, Serialize};
 use sisa_caching_core::cache::{CacheKey, CacheOptions, CacheStore};
 use tokio::runtime::Runtime;
 
-#[derive(Clone, Serialize, Deserialize)]
+/// The record the benchmarks store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
+    /// The id in the user's key.
     pub id: u64,
+    /// The user's name.
     pub name: String,
+    /// The user's email address.
     pub email: String,
 }
 
+/// The user with this id.
 pub fn user(id: u64) -> User {
     User {
         id,
@@ -30,6 +40,7 @@ pub fn user(id: u64) -> User {
     }
 }
 
+/// The key of the user with this id: `user:{id}`.
 pub fn key(id: u64) -> CacheKey {
     CacheKey::new("user", id).unwrap()
 }

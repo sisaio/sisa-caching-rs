@@ -55,9 +55,6 @@
 //! store runs on any `RedisConnection`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
 
 pub use sisa_caching_core::{
     CacheEntry, CacheError, CacheKey, CacheOptions, CacheSettings, CacheStore, CacheValue,

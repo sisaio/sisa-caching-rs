@@ -24,6 +24,7 @@ pub struct ManualClock {
 }
 
 impl ManualClock {
+    /// A clock at its start: no time has passed, and the wall clock hasn't jumped.
     pub fn new() -> Self {
         Self {
             start: Instant::now(),

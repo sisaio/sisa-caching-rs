@@ -98,10 +98,6 @@
 //! messages, so the others notice one that goes missing. A writer in another language can leave
 //! them all out: nodes apply its invalidations without tracking them.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 pub mod backplane;
 pub mod error;
 pub mod settings;

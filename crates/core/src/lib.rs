@@ -28,10 +28,6 @@
 //! warn only about the errors they handle themselves. They count hits, misses, loads, failed store
 //! calls and evictions through the OpenTelemetry metrics API, as the [`metrics`] module lists.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 pub mod cache;
 pub mod clock;
 // The per-key locks under `get_or_set`: public for the store crates, not part of the API.

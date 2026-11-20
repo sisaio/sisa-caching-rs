@@ -7,6 +7,11 @@
 //! `cargo test -p sisa-caching-hybrid --test chaos -- --ignored --nocapture`; `CHAOS_SECS` sets how
 //! long the faults go on (90 s by default).
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 use std::{
     collections::HashMap,
     sync::{

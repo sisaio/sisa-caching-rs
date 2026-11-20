@@ -19,6 +19,7 @@ use crate::{
 /// A primary on port 6379 and its replica on 6380, watched by one Sentinel as `primary`. The three
 /// share one network namespace, so they announce one address. Redis Sentinel watches Dragonfly
 /// too; Garnet replicates only in cluster mode, so it has no Sentinel setup.
+#[derive(Debug)]
 pub struct RedisSentinel {
     /// The primary, the replica and the Sentinel, in that order.
     containers: Vec<ContainerAsync<GenericImage>>,
@@ -92,6 +93,7 @@ impl RedisSentinel {
         Some(redis)
     }
 
+    /// A client that asks the Sentinel where the primary is.
     pub fn sentinel_client(&self) -> SentinelClient {
         SentinelClient::build(
             vec![format!("redis://{}:26379", self.ip)],

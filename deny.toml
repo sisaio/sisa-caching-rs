@@ -1,5 +1,10 @@
 # The dependency policy that `cargo deny check` enforces: advisories, licenses, bans, and sources.
 # Adding a license, an advisory exception, or a source needs a reviewed reason beside it.
+#
+# Every sisaio crate repository starts from the same file: the same sections and settings, an
+# advisory exception as `{ id, reason }` under a comment that says when to drop it, and the base
+# licenses Apache-2.0, BSD-3-Clause, ISC, MIT, Unicode-3.0 and Zlib. A license beyond those is this
+# repository's own and says which dependency needs it.
 
 [graph]
 all-features = true
@@ -10,7 +15,7 @@ yanked = "deny"
 ignore = [
   # astral-tokio-tar is unmaintained in every version. Only testcontainers uses it, in the
   # unpublished test crate, and its newest release still needs it. Drop this once it moves off.
-  "RUSTSEC-2026-0440",
+  { id = "RUSTSEC-2026-0440", reason = "test-only, through testcontainers; no upgrade exists" },
 ]
 
 [licenses]
@@ -19,7 +24,8 @@ confidence-threshold = 0.9
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
-  # Boost Software License, used by xxhash-rust through redis.
+  # xxhash-rust, which the redis client uses for the XXH3 digests of values; the Boost license is
+  # permissive.
   "BSL-1.0",
   "ISC",
   "MIT",

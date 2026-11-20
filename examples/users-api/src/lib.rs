@@ -6,6 +6,11 @@
 //! - `GET /users` caches a list: every user.
 //! - `PUT /users/{id}` and `DELETE /users/{id}` change the database, then the cache.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "the example's stand-in database and setup unwrap: a failure should panic"
+)]
+
 mod database;
 mod telemetry;
 
@@ -27,9 +32,12 @@ use crate::database::Database;
 
 pub use crate::telemetry::{Telemetry, init_telemetry};
 
+/// A user, as the database stores it and the routes return it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
+    /// The id in the user's route and cache key.
     pub id: u64,
+    /// The user's name.
     pub name: String,
 }
 

@@ -7,3 +7,7 @@ disallowed-methods = [
 # Names are whole words: no single letter is allowed, not even clippy's default i, j, n, x, y, z
 # and w.
 allowed-idents-below-min-chars = []
+
+# `unwrap_used` and `dbg_macro` are for library code; tests may use both.
+allow-unwrap-in-tests = true
+allow-dbg-in-tests = true

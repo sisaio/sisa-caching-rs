@@ -21,7 +21,9 @@ fn image_name() -> String {
 pub enum Server {
     /// Redis or Valkey.
     Redis,
+    /// Dragonfly.
     Dragonfly,
+    /// Garnet.
     Garnet,
 }
 

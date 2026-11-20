@@ -20,6 +20,7 @@ fn is_subscriber(client: &str) -> bool {
 ///
 /// `REDIS_IMAGE` picks the image, such as `valkey/valkey:8-alpine`; the default is
 /// `redis:8-alpine`.
+#[derive(Debug)]
 pub struct Redis {
     container: ContainerAsync<GenericImage>,
     url: String,
@@ -90,14 +91,17 @@ impl Redis {
         self.wait_until_ready().await;
     }
 
+    /// The server's `redis://` URL.
     pub fn url(&self) -> &str {
         &self.url
     }
 
+    /// A client for the server.
     pub fn client(&self) -> Client {
         Client::open(self.url.as_str()).unwrap()
     }
 
+    /// A connection to the server that reconnects by itself.
     pub async fn connection(&self) -> ConnectionManager {
         ConnectionManager::new(self.client()).await.unwrap()
     }
@@ -108,6 +112,7 @@ impl Redis {
         self.container.pause().await.unwrap();
     }
 
+    /// Ends a [`pause`](Self::pause): the server answers again.
     pub async fn unpause(&self) {
         self.container.unpause().await.unwrap();
     }

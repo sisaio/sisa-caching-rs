@@ -25,6 +25,7 @@ async fn forward(mut client: TcpStream, target: String, mut cut: watch::Receiver
 /// nothing passes and nothing is refused, so a client finds out only by timing out. Its
 /// connections then close at [`restore`](Self::restore), with whatever was sent meanwhile, as
 /// connections that outlived a long split would; new ones connect again. Stops when dropped.
+#[derive(Debug)]
 pub struct Proxy {
     url: String,
     cut: watch::Sender<bool>,
@@ -55,14 +56,17 @@ impl Proxy {
         }
     }
 
+    /// The `redis://` URL of the proxy, which clients connect to in place of the server's.
     pub fn url(&self) -> &str {
         &self.url
     }
 
+    /// Stops passing anything, in either direction.
     pub fn cut(&self) {
         self.cut.send_replace(true);
     }
 
+    /// Ends the cut: the connections open during it close, and new ones pass.
     pub fn restore(&self) {
         self.cut.send_replace(false);
     }

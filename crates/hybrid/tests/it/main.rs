@@ -2,6 +2,11 @@
 //! side by side. The tests that install a meter provider, the native-tls tests and the chaos test
 //! have binaries of their own.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 #[path = "../common/mod.rs"]
 mod common;
 
