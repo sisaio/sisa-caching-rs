@@ -4,7 +4,7 @@
 # spell. Two weeks keeps the last two runs of each weekly workflow to compare.
 #
 # A PR whose CI ran before the cutoff still merges: the push to main finds no passing PR run and
-# runs CI in full. A Release re-run after the cutoff fails in `wait for CI`: its commit's ci run
+# runs CI in full. A Release re-run after the cutoff fails in `wait for ci`: its commit's ci run
 # is gone.
 name: Clean Up Runs
 
@@ -43,6 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A zero or negative count would move the cutoff to today or later.
+          if ! [[ "$DAYS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "days must be a positive whole number: $DAYS" >&2
+            exit 1
+          fi
           cutoff=$(date -u -d "$DAYS days ago" +%F)
           repo="repos/$GITHUB_REPOSITORY/actions"
 

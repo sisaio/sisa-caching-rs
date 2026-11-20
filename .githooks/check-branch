@@ -1,0 +1,24 @@
+#!/bin/sh
+# Checks a branch name against CONTRIBUTING.md#branches. The pre-push hook runs it on each branch
+# pushed, and CI on a PR's branch. Not a Git hook itself: Git only runs the files named after one.
+# Usage: check-branch <branch name>
+#
+# The same file in every sisaio repository.
+set -eu
+
+TYPES='feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security'
+branch=$1
+
+case "$branch" in
+  # The default branch, and the branches tools name themselves.
+  main | dependabot/* | renovate/* | release-plz-* | claude/*) exit 0 ;;
+esac
+
+# <type>/<issue>-<topic>; docs and chore work with no issue may leave the number out.
+if echo "$branch" | grep -Eq "^($TYPES)/[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$" ||
+  echo "$branch" | grep -Eq '^(docs|chore)/[a-z0-9]+(-[a-z0-9]+)*$'; then
+  exit 0
+fi
+
+printf 'check-branch: name the branch <type>/<issue>-<topic>, such as fix/42-short-topic\n  %s\nSee CONTRIBUTING.md#branches.\n' "$branch" >&2
+exit 1

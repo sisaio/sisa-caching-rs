@@ -20,5 +20,6 @@ passes now, benchmark numbers before and after, logs or a trace. -->
 - [ ] The checks in [CONTRIBUTING.md](https://github.com/sisaio/sisa-caching-rs/blob/main/CONTRIBUTING.md#build-and-check) pass locally.
 - [ ] The title and every commit follow [Commit messages](https://github.com/sisaio/sisa-caching-rs/blob/main/CONTRIBUTING.md#commit-messages).
 - [ ] Tests cover the change.
-- [ ] Docs are updated: API doc comments, and the affected `docs/` page, above all if a data format changed.
+- [ ] Docs are updated: API doc comments, the crate's spec in `docs/specs/`, and `docs/formats.md` if a data format changed.
+- [ ] A choice that is hard to reverse has an [ADR](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/adr/README.md), or none was needed.
 - [ ] Breaking change? Say what breaks and how to migrate.

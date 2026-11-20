@@ -1,7 +1,12 @@
-# Formatting, lints, the MSRV build, the dependency policy, breaking API changes, the Markdown
-# links, the tests, which run against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, and
-# coverage on main. The Redis tests start their servers in Docker. PRs and pushes to main that
-# change no Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
+# The commit and branch rules, the Markdown links and the dependency policy; formatting, lints,
+# the docs and the MSRV build; breaking API changes; the tests, which run against Redis 8 on every
+# PR and against Redis 7.4, Valkey 8, Dragonfly 2 and Garnet 2 on main; and coverage on main. The
+# Redis tests start their servers in Docker. PRs and pushes to main that change no Rust inputs skip
+# the Rust jobs; `ci` sums them up for the ruleset.
+#
+# Every sisaio crate repository has the same jobs under the same names: changes, policy, lint,
+# semver, test, ci and coverage. The crate names, the MSRV, the facade's features and the servers
+# are this repository's own.
 name: CI
 
 on:
@@ -22,8 +27,9 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Whether the Rust jobs need to run, and the commit check every PR needs. A PR is diffed against
-  # its base and a push to main against the commit before it, so a docs-only merge skips them too.
+  # Whether the Rust jobs need to run, and the commit and branch checks every PR needs. A PR is
+  # diffed against its base and a push to main against the commit before it, so a docs-only merge
+  # skips them too.
   # A merge with the same files as its PR's head, which passed CI, skips them as well; coverage
   # still runs on every code change, for the badge. `semver` runs only when a published crate's
   # source or manifest, the lock file, the toolchain or this workflow changes: tests, benches and
@@ -63,14 +69,15 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           api=false
-          if git diff --name-only "$BASE...$HEAD" | grep -qE \
+          if git diff --no-renames --name-only "$BASE...$HEAD" | grep -qE \
             '^crates/(core|memory|redis|hybrid|sisa-caching)/(src/|Cargo\.toml$)|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'; then
             api=true
           fi
           echo "api=$api" >> "$GITHUB_OUTPUT"
 
-      # The PR's commits and title against CONTRIBUTING.md#commit-messages. A title edited later is
-      # checked on the next push. Dependabot's titles run long, so its PRs are left out.
+      # The PR's commits and title against CONTRIBUTING.md#commit-messages, with the hook a clone
+      # runs. A title edited later is checked on the next push: no run starts on an edit.
+      # Dependabot's titles run long, so its PRs are left out.
       - name: Check commit messages
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
@@ -82,15 +89,51 @@ jobs:
             .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           done
           printf '%s\n' "$TITLE" > "$RUNNER_TEMP/message"
-          .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
+          SUBJECT_ONLY=1 .githooks/commit-msg "$RUNNER_TEMP/message" || status=1
           exit "$status"
+
+      # The PR's branch against CONTRIBUTING.md#branches, with the script the pre-push hook runs.
+      - name: Check the branch name
+        if: github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: .githooks/check-branch "$BRANCH"
+
+  # What needs no build. The links: relative links and #anchors in the Markdown files, hidden
+  # folders such as .agents and .github included; .claude only links to .agents. External links
+  # stay out, since they flake; rustdoc checks the links in doc comments. The dependency policy:
+  # advisories, licenses, bans and sources, as deny.toml sets them, when a Rust input changed.
+  policy:
+    name: policy
+    needs: changes
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
+      - name: Install lychee and cargo-deny
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: lychee,cargo-deny
+
+      - name: Check the links
+        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
+
+      - name: Check the dependency policy
+        if: needs.changes.outputs.code == 'true'
+        run: cargo deny --log-level warn --all-features check
 
   lint:
     name: lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      MSRV: "1.89"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,51 +175,13 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  msrv:
-    name: msrv
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # The workspace `rust-version`.
+      # The workspace `rust-version`, in MSRV above. Last, so the faster checks fail first. Cargo
+      # keeps each compiler's artifacts apart in the one target/.
       - name: Install the MSRV toolchain
-        run: rustup toolchain install 1.89 --profile minimal
-
-      # Keyed on the MSRV compiler; the default from rust-toolchain.toml isn't installed here.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        env:
-          RUSTUP_TOOLCHAIN: "1.89"
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+        run: rustup toolchain install "$MSRV" --profile minimal
 
       - name: Build at the MSRV
-        run: cargo +1.89 check --workspace --all-targets --all-features --locked
-
-  deny:
-    name: deny
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # cargo-deny-action's image holds an x64 binary, so the tool is installed instead.
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-deny
-
-      # Advisories, licenses, bans and sources, as deny.toml sets them.
-      - name: Check the dependency policy
-        run: cargo deny --log-level warn --all-features check
+        run: cargo "+$MSRV" check --workspace --all-targets --all-features --locked
 
   # A change that breaks a published crate's API, against the PR's base, fails unless the PR
   # carries the `breaking` label. The base rather than crates.io, so that a break already merged
@@ -213,45 +218,89 @@ jobs:
 
       - name: Install cargo-semver-checks
         if: steps.label.outputs.breaking != 'true'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-semver-checks
 
-      # Every published crate with every feature; `--workspace` skips the unpublished ones. Each
-      # crate is built twice, as it is and at the base, and on its own cargo-semver-checks gives
-      # every build a target dir of its own. One shared dir builds the dependencies once instead of
-      # six times, which takes the job from about 4 minutes to 1.
+      # Every publishable crate the base already has, with every feature: a new crate has no API
+      # to break yet. Each crate is built twice, as it is and at the base, and on its own
+      # cargo-semver-checks gives every build a target dir of its own. One shared dir builds the
+      # dependencies once instead.
       - name: Check the public API
         if: steps.label.outputs.breaking != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/semver
-        run: cargo semver-checks --workspace --all-features --baseline-rev "$BASE"
+        run: |
+          if ! git cat-file -e "$BASE:Cargo.toml" 2>/dev/null; then
+            echo "The base has no workspace yet; nothing to compare."
+            exit 0
+          fi
+          packages=()
+          while IFS=$'\t' read -r name manifest; do
+            if git cat-file -e "$BASE:${manifest#"$GITHUB_WORKSPACE/"}" 2>/dev/null; then
+              packages+=(--package "$name")
+            fi
+          done < <(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.publish != []) | [.name, .manifest_path] | @tsv')
+          if [ ${#packages[@]} -eq 0 ]; then
+            echo "No publishable crate exists in the base yet; nothing to compare."
+            exit 0
+          fi
+          cargo semver-checks "${packages[@]}" --all-features --baseline-rev "$BASE"
 
-  # Relative links and #anchors in the Markdown files, hidden folders such as .agents and .github
-  # included; .claude only links to .agents. External links stay out, since they flake; rustdoc
-  # checks the links in doc comments.
-  links:
-    name: links
+  # Redis 8, the newest, on every PR and push: the whole workspace with every feature, then the
+  # native-tls tests, which only build without `tls-rustls`. The other servers run in
+  # `redis-family`, on main.
+  test:
+    name: test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      REDIS_IMAGE: redis:8-alpine
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install lychee
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          tool: lychee
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Check the links
-        run: lychee --offline --include-fragments --no-progress --hidden --exclude-path '(^|/)(\.git|\.claude|target)/' './**/*.md'
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: nextest
 
-  test:
-    name: test (${{ matrix.server }})
+      # Pulled once here, so no test waits on the download.
+      - name: Pull the server image
+        run: docker pull "$REDIS_IMAGE"
+
+      # Every feature, so the TLS tests run on `tls-rustls`'s own crypto provider.
+      - name: Run all tests including Redis
+        run: cargo nextest run --profile ci --workspace --all-features --locked
+
+      # nextest doesn't run the examples in doc comments.
+      - name: Run the doc tests
+        run: cargo test --doc --workspace --all-features --locked
+
+      - name: Run the native-tls tests
+        run: cargo nextest run --profile ci -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
+
+  # The Redis and hybrid tests on the other servers that speak the Redis protocol. On main only,
+  # after the merge, to keep a PR to one test build: a PR that breaks one of them turns main red,
+  # which holds a release until it is fixed. Like coverage, it runs on every code change, even a
+  # merge whose PR head was tested. Only these two crates talk to the server. chaos.yml also runs
+  # Valkey, Dragonfly and Garnet under faults each night.
+  redis-family:
+    name: redis-family (${{ matrix.server }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: github.event_name == 'push' && needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     strategy:
@@ -260,7 +309,6 @@ jobs:
         # Dragonfly publishes no tag that follows its major version, so it is pinned.
         server:
           - redis:7.4-alpine
-          - redis:8-alpine
           - valkey/valkey:8-alpine
           - ghcr.io/dragonflydb/dragonfly:v2.0.2
           - ghcr.io/microsoft/garnet:2
@@ -278,30 +326,23 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Pulled once here, so no test waits on the download.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: nextest
+
       - name: Pull the server image
         run: docker pull "$REDIS_IMAGE"
 
-      # Every feature, so the TLS tests run on `tls-rustls`'s own crypto provider. Only the Redis
-      # and hybrid crates talk to the server, so the rest of the workspace, its doctests among
-      # them, runs on one server.
-      - name: Run all tests including Redis
-        if: matrix.server == 'redis:8-alpine'
-        run: cargo test --workspace --all-features --locked
-
       - name: Run the Redis and hybrid tests
-        if: matrix.server != 'redis:8-alpine'
-        run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --all-features --locked
-
-      - name: Run the native-tls tests
-        run: cargo test -p sisa-caching-redis -p sisa-caching-hybrid --features tls-native-tls --test native_tls --locked
+        run: cargo nextest run --profile ci -p sisa-caching-redis -p sisa-caching-hybrid --all-features --locked
 
   # The check the main ruleset requires: skipped jobs pass, failed or cancelled ones fail. A skipped
-  # matrix job reports no `test (...)` check, so those can't be required directly.
+  # job reports no check, so the jobs themselves can't be required directly.
   ci:
     name: ci
     if: always()
-    needs: [changes, lint, msrv, deny, semver, links, test]
+    needs: [changes, policy, lint, semver, test, redis-family]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
     steps:
@@ -309,8 +350,8 @@ jobs:
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
 
-  # Line coverage for the README badge, on main only to keep Actions minutes down. One server is
-  # enough: the other servers run the same code paths. The test helpers crate is left out.
+  # Line coverage for the README badge, on main only to keep Actions minutes down. The test
+  # helpers crate is left out.
   coverage:
     name: coverage
     needs: changes
@@ -332,7 +373,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-llvm-cov
 

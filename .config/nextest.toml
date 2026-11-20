@@ -1,0 +1,9 @@
+# cargo-nextest runs the tests: `cargo nextest run`. Each test runs in a process of its own, as
+# many at once as the machine has cores. Doc tests aren't covered: `cargo test --doc` runs them.
+#
+# The same file in every sisaio crate repository.
+
+# CI: `cargo nextest run --profile ci`. Every test runs, so one run shows every failure.
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"

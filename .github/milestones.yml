@@ -1,0 +1,14 @@
+# The repository's milestones. .github/workflows/repo-settings.yml syncs GitHub with this file on
+# each push to main that changes it, so edit here, not on GitHub. The readable version is ROADMAP.md.
+#
+# A milestone is a release: it stays open until that release is published. Each is
+# { title, description } and, optionally, `due_on` (YYYY-MM-DD, the target date) and
+# `state: closed` once its release is out. A milestone that exists keeps its number and its issues;
+# one taken out of this file is left as it is on GitHub.
+
+- { title: "0.1.0", state: closed, description: "First release on crates.io." }
+- { title: "0.2.0", state: closed, description: "Breaking: stores run their own workers, and hybrid nodes detect lost invalidations." }
+- { title: "0.3.0", state: closed, description: "Picked from the roadmap's Later list, as users ask for it." }
+- { title: "0.4.0", state: closed, description: "A faster in-memory store, and fixes in every store." }
+# A placeholder for the next release: its scope isn't decided. Reword it when the release is planned.
+- { title: "0.5.0", description: "Picked from the roadmap's Later list, as users ask for it." }

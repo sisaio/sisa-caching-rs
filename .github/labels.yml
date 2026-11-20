@@ -1,0 +1,52 @@
+# The repository's labels. .github/workflows/repo-settings.yml syncs GitHub with this file on each
+# push to main that changes it, so edit here, not on GitHub. CONTRIBUTING.md#issues-labels-and-milestones
+# says when to use each.
+#
+# A label is { name, color, description } and, to rename one that exists, `was`: the sync renames
+# the old label, which keeps it on its issues and PRs. `delete` lists labels to remove; deleting a
+# label takes it off every issue and PR that has it.
+
+labels:
+  # --- The same in every sisaio repository ----------------------------------------------------
+  # type: one per issue and PR.
+  - { name: "type:feature",  color: "1d76db", description: "A new capability (feat)." }
+  - { name: "type:bug",      color: "d73a4a", description: "Something doesn't work as the docs say (fix)." }
+  - { name: "type:security", color: "b60205", description: "A security fix or hardening (security)." }
+  - { name: "type:perf",     color: "5319e7", description: "Speed or memory (perf)." }
+  - { name: "type:chore",    color: "c5def5", description: "Refactoring, tests, CI and tooling: work users don't see." }
+  - { name: "type:docs",     color: "0075ca", description: "Docs only: doc comments, docs/, README.", was: "documentation" }
+  - { name: "type:deps",     color: "bfdadc", description: "A dependency update, usually from Dependabot.", was: "dependencies" }
+  # When they apply.
+  - { name: "breaking",         color: "000000", description: "Changes the public API or a data format; the title takes `!`." }
+  - { name: "priority:high",    color: "e99695", description: "Do next." }
+  - { name: "blocked",          color: "ededed", description: "Waiting on something else; a comment says what." }
+  - { name: "needs-info",       color: "d876e3", description: "Waiting on the reporter for details or a reproduction.", was: "needs info" }
+  - { name: "good first issue", color: "7057ff", description: "Small and well described; a good start for a new contributor." }
+  - { name: "help wanted",      color: "008672", description: "The maintainer would welcome a pull request." }
+  # area: every part the change touches. `area:ci` is in every repository.
+  - { name: "area:ci", color: "f9d0c4", description: "Workflows, release, hooks and tooling.", was: "ci" }
+
+  # --- This repository's own ------------------------------------------------------------------
+  # One area per crate, named like the commit scope.
+  - { name: "area:facade",  color: "fbca04", description: "sisa-caching: the facade crate, its features and re-exports.", was: "crate: sisa-caching" }
+  - { name: "area:core",    color: "fbca04", description: "sisa-caching-core: traits, entries, settings, metrics.", was: "crate: core" }
+  - { name: "area:memory",  color: "fbca04", description: "sisa-caching-memory: the in-memory store.", was: "crate: memory" }
+  - { name: "area:redis",   color: "fbca04", description: "sisa-caching-redis: the Redis-family store.", was: "crate: redis" }
+  - { name: "area:hybrid",  color: "fbca04", description: "sisa-caching-hybrid: the hybrid store and backplane.", was: "crate: hybrid" }
+  - { name: "area:testing", color: "fbca04", description: "sisa-caching-testing: the shared test helpers and containers." }
+  # Set by release-plz on the release PR.
+  - { name: "release", color: "c5def5", description: "The release PR that release-plz opens." }
+
+# GitHub's default labels, and Dependabot's per-ecosystem ones. Issues close as "duplicate" or
+# "not planned" instead, a question is answered in its issue, and `type:` says the kind.
+delete:
+  - bug
+  - enhancement
+  - duplicate
+  - invalid
+  - question
+  - wontfix
+  - task
+  - accessibility
+  - github_actions
+  - rust

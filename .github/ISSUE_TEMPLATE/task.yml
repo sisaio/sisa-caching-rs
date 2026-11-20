@@ -1,6 +1,7 @@
 name: Task
 description: Planned work the maintainers have agreed to do.
 type: Task
+labels: ["type:chore"]
 body:
   - type: textarea
     id: goal
@@ -21,8 +22,7 @@ body:
     attributes:
       label: Acceptance criteria
       description: What must be true to close this task, one checkbox each.
-      value: |
-        - [ ] 
+      value: "- [ ] "
     validations:
       required: true
   - type: textarea

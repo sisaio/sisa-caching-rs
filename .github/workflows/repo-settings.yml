@@ -1,0 +1,44 @@
+# Syncs the labels and milestones with .github/labels.yml and .github/milestones.yml, on each push
+# to main that changes them and when run by hand. The built-in token can write both, so no secret
+# is needed. The rulesets and the merge settings need an admin: .github/scripts/README.md.
+#
+# The same file in every sisaio repository.
+name: Repo Settings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/milestones.yml
+      - .github/scripts/repo-settings.sh
+      - .github/workflows/repo-settings.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-settings
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: sync
+    # This image has yq and jq.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Labels and milestones belong to issues.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Sync the labels and milestones
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: .github/scripts/repo-settings.sh
