@@ -482,9 +482,9 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "redis"
-version = "1.8.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7f3d75b5a3301746bff39a767bf4c5c42506b08513527308b3875bfb64a031"
+checksum = "4bef8fa589dd53a8a379a7856de1365d0a1be50c6b8aebb5c01c1ec441a2c509"
 dependencies = [
  "arc-swap",
  "arcstr",
@@ -572,7 +572,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sisa-caching-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "opentelemetry",
  "serde",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-hybrid"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "opentelemetry",
  "redis",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-memory"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde",
  "sisa-caching-core",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "sisa-caching-redis"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "redis",
  "serde",
