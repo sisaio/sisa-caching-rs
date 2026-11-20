@@ -1,6 +1,11 @@
 //! The in-memory store's reads and writes, alone and from many tasks at once, and the calls that
 //! walk every entry of a large store.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "benchmarks unwrap: a failure should panic"
+)]
+
 use std::{
     hint::black_box,
     ops::Range,

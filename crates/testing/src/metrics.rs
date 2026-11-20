@@ -10,12 +10,14 @@ use opentelemetry_sdk::metrics::{
 ///
 /// Stores create their instruments when the first one is built, from the provider installed then,
 /// so a test that reads metrics runs in a test binary of its own and installs this first.
+#[derive(Debug)]
 pub struct Metrics {
     exporter: InMemoryMetricExporter,
     provider: SdkMeterProvider,
 }
 
 impl Metrics {
+    /// Installs the provider as the global one.
     pub fn install() -> Self {
         let exporter = InMemoryMetricExporter::default();
         let provider = SdkMeterProvider::builder()

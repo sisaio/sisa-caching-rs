@@ -50,10 +50,6 @@
 //! Replication is still asynchronous: a write the primary acknowledged just before a failover can
 //! be lost, and the previous value is served until it expires.
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 pub mod connection;
 pub mod error;
 pub mod settings;

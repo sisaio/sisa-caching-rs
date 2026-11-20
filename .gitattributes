@@ -1,0 +1,3 @@
+# The same first line in every sisaio repository: text files are LF in the repository and in every
+# checkout.
+* text=auto eol=lf

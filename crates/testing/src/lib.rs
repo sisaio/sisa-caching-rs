@@ -13,6 +13,11 @@
 //!
 //! `REDIS_IMAGE` picks the server for all of them: Redis, Valkey, Dragonfly or Garnet.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 mod clock;
 mod cluster;
 mod logs;

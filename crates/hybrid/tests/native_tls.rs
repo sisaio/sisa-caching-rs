@@ -3,6 +3,10 @@
 //! uses rustls.
 
 #![cfg(all(feature = "tls-native-tls", not(feature = "tls-rustls")))]
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
 
 mod common;
 

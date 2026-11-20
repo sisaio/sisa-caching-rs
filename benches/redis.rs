@@ -1,6 +1,11 @@
 //! The Redis store's reads and writes, against a server in Docker on this machine. Most of each
 //! time is the round trip to the server.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "benchmarks unwrap: a failure should panic"
+)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use sisa_caching_benches::{meter_provider, time_every_call};
 use sisa_caching_redis::store::RedisCacheStore;

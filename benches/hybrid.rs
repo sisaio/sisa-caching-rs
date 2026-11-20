@@ -1,6 +1,11 @@
 //! The hybrid store over Redis in Docker on this machine: what a local hit saves, and what a
 //! write costs. A write's invalidation is published in the background, so it isn't timed.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "benchmarks unwrap: a failure should panic"
+)]
+
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};

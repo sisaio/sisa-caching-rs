@@ -2,6 +2,11 @@
 //! instruments are created when the first store is built, from the meter provider installed then,
 //! so this test must install its provider before any other test builds a store.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests and their helpers unwrap: a failure should panic"
+)]
+
 use opentelemetry::KeyValue;
 use sisa_caching_core::cache::{CacheKey, CacheStore};
 use sisa_caching_redis::store::RedisCacheStore;

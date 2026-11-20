@@ -16,6 +16,7 @@ use crate::server::{Server, beside, image, query, start_server, wait_for, wait_f
 ///
 /// Redis, Valkey and Garnet nodes join by gossip. Dragonfly's cluster mode has no gossip: each node
 /// is told the whole layout with `DFLYCLUSTER CONFIG`, as Dragonfly's own orchestration does.
+#[derive(Debug)]
 pub struct RedisCluster {
     _containers: Vec<ContainerAsync<GenericImage>>,
     /// Each node's address and port.
@@ -23,6 +24,7 @@ pub struct RedisCluster {
 }
 
 impl RedisCluster {
+    /// Starts three primaries and joins them into one cluster.
     pub async fn start() -> Self {
         let server = Server::current();
         let mut args = server.serve(6379);
@@ -246,6 +248,7 @@ impl RedisCluster {
             .unwrap()
     }
 
+    /// A connection to the cluster.
     pub async fn connection(&self) -> ClusterConnection {
         self.client().get_async_connection().await.unwrap()
     }

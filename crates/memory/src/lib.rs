@@ -44,10 +44,6 @@
 //! # Ok::<(), sisa_caching_core::CacheError>(())
 //! ```
 
-#![forbid(unsafe_code)]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-
 pub mod settings;
 pub mod store;
 
