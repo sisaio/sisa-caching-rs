@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::common::{WRITES, Write, backplane, hybrid, key, local_value, memory, node, start};
+use crate::common::{WRITES, Write, backplane, fast_retries, key, local_value, memory, start};
 use sisa_caching_core::{
     cache::{CacheEntry, CacheError, CacheStore, CacheValue, KeyPrefix},
     clock::SystemClock,
@@ -20,6 +20,17 @@ use sisa_caching_hybrid::{error::HybridCacheError, store::HybridCacheStore};
 use sisa_caching_memory::store::InMemoryCacheStore;
 use sisa_caching_testing::{Redis, eventually};
 use tokio::sync::Semaphore;
+
+/// A started node over `distributed` whose heartbeats are a minute apart. A write that isn't
+/// published shows as a missing number at its writer's next heartbeat, which clears the other
+/// nodes: with the default of 1 s, these tests couldn't tell that clear from the invalidation.
+async fn node<D: CacheStore + 'static>(distributed: D, redis: &Redis) -> HybridCacheStore<D> {
+    let mut settings = fast_retries();
+    settings.worker.heartbeat_interval_ms = 60_000;
+    settings.worker.heartbeat_timeout_ms = 120_000;
+
+    start(HybridCacheStore::new(distributed, backplane(redis).await, &settings).unwrap()).await
+}
 
 /// Applies every write, then reports a failure, as a call that timed out after Redis applied it
 /// would.
@@ -100,9 +111,8 @@ async fn a_failed_write_still_evicts_on_every_node() {
 
     for write in WRITES {
         let shared = memory("users");
-        let writer =
-            start(hybrid(LostReplies(shared.clone()), backplane(&redis).await).unwrap()).await;
-        let reader = node(&shared, &redis).await;
+        let writer = node(LostReplies(shared.clone()), &redis).await;
+        let reader = node(shared.clone(), &redis).await;
 
         shared.set(&key(1), "old".to_owned(), None).await.unwrap();
         writer.get::<String>(&key(1)).await.unwrap();
@@ -253,8 +263,8 @@ async fn writer_and_reader(gate: &Arc<Gate>, redis: &Redis) -> (GatedNode, Reade
         inner: shared.clone(),
         gate: gate.clone(),
     };
-    let writer = start(hybrid(distributed, backplane(redis).await).unwrap()).await;
-    let reader = start(hybrid(shared, backplane(redis).await).unwrap()).await;
+    let writer = node(distributed, redis).await;
+    let reader = node(shared, redis).await;
 
     writer.get::<String>(&key(1)).await.unwrap();
     reader.get::<String>(&key(1)).await.unwrap();
