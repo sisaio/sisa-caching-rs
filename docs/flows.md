@@ -1,7 +1,8 @@
 # Flows
 
-How a call moves through the stores, step by step. [Architecture](01-architecture.md) explains
-why each step is there.
+How a call moves through the stores, step by step, across the crates. Each store's
+[spec](specs/README.md) explains why each step is there. A new flow follows
+[templates/flow-spec.md](templates/flow-spec.md).
 
 ## `get_or_set`, on every store
 
@@ -94,8 +95,7 @@ purge, a trim or a write to its key.
 ## Redis store write and read
 
 Each key is a hash: `value` (JSON), `created_at` and optionally `ttl_ms`. Another language
-writing the same keys follows these two steps; [Data formats](01-architecture.md#data-formats)
-has the full contract.
+writing the same keys follows these two steps; [Formats](formats.md) has the full contract.
 
 ```mermaid
 sequenceDiagram

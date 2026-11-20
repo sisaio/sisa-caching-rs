@@ -176,5 +176,4 @@ so a node that is up but doesn't answer holds a command for good. Set one with
 ## Data formats
 
 Services in other languages can share the same Redis keys and invalidations. The key format, the
-Redis entry and the invalidation message are in
-[Architecture: data formats](01-architecture.md#data-formats).
+Redis entry and the invalidation message are in [Formats](formats.md).

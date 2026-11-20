@@ -1,7 +1,16 @@
 # Roadmap
 
 What shipped is in the [changelog](CHANGELOG.md). The issues and their milestones show the work in
-progress.
+progress. Each milestone is a release, and the milestones on GitHub come from
+[.github/milestones.yml](.github/milestones.yml).
+
+| Milestone | Status | Goal |
+| --- | --- | --- |
+| 0.1.0 | Released | First release on crates.io: the in-memory, Redis and hybrid stores behind one trait |
+| 0.2.0 | Released | Stores run their own workers, and hybrid nodes detect lost invalidations |
+| 0.3.0 | Released | Each hybrid store on its own backplane channel, simpler settings, a sealed store trait and a faster in-memory store |
+| 0.4.0 | Released | A faster in-memory store, and fixes in every store |
+| 0.5.0 | Next | Not decided yet: picked from the Later list below, as users ask for it |
 
 ## Later
 

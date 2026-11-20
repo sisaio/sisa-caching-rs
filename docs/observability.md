@@ -21,7 +21,7 @@ so a store built again under the same name counts on instead of starting over. K
 fixed set and put tenants or other variable parts in the keys: a store per tenant would keep one
 set of counters, and one series in the SDK, for every tenant it ever saw.
 
-Worth an alert ([Failures](01-architecture.md#failures) says what causes each and how stale
+Worth an alert ([Failures](architecture.md#failures) says what causes each and how stale
 reads can get meanwhile):
 - `errors` above 0: the store can't be reached, or holds data the code can't read, and every
   `get_or_set` meanwhile runs its loader.
