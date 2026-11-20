@@ -1,44 +1,64 @@
-# Repository setup scripts
+# Repository setup
 
-These scripts hold the GitHub settings that don't live in a workflow: the labels, milestones and
-project board, and the rulesets on `main` and the release tags. To change a setting, change the
-script or its JSON in a PR, then run the script after the merge to sync GitHub with it.
+The GitHub settings that don't live in a workflow's own file are kept here and in the two files
+next to this folder, so a change to one is a PR like any other. A change made only on GitHub
+doesn't last: the next sync overwrites it.
 
-| Script | Syncs | Needs |
+| What | Kept in | Synced by |
 | --- | --- | --- |
-| `project.sh` | Labels, milestones, and the `sisa-caching` board: its description and README (from `project-readme.md`), Status options, the Priority, Start date and Target date fields, and the views | `gh auth refresh -s project` |
-| `rulesets.sh` | The rulesets in `rulesets/`: `main.json` for the default branch, `release-tags.json` for `v*` tags | Repository admin |
+| Labels | [`.github/labels.yml`](../labels.yml) | The [`repo-settings`](../workflows/repo-settings.yml) workflow, on each push to `main` that changes the file; it runs `repo-settings.sh` |
+| Milestones | [`.github/milestones.yml`](../milestones.yml) | The same workflow |
+| Rulesets on `main` and the `v*` tags | `rulesets/main.json`, `rulesets/release-tags.json` | A repository admin, with `rulesets.sh` |
+| Merge settings: rebase only, merged branches deleted, no wiki, no project board | `rulesets.sh` | The same script |
 
-Run them from the repository root on an up-to-date `main`:
+The scripts are the same files in every sisaio repository; only the YAML and JSON they read
+differ.
+
+## Labels and milestones
+
+Edit the YAML file in a PR. The workflow syncs GitHub after the merge, with the built-in token,
+and can also be run by hand from the Actions tab.
+
+- A label that exists has its color and description updated. To rename one, give the new entry
+  `was: "<old name>"`: the label is renamed, so it stays on its issues and PRs. The names under
+  `delete` are removed, which takes them off every issue and PR. Any other label on GitHub is
+  left alone.
+- A milestone is matched by its title and keeps its number and its issues. Its description, due
+  date (`due_on`) and state are updated; mark one `state: closed` once its release is published.
+  One taken out of the file is left as it is.
+
+There is no project board: an issue's labels, milestone and assignee say where it stands, as
+[CONTRIBUTING.md](../../CONTRIBUTING.md#issues-labels-and-milestones) explains.
+
+## Rulesets and merge settings
+
+`GITHUB_TOKEN` can't be given repository administration, so no workflow runs this. After a PR
+that changes `rulesets.sh` or the JSON merges, an admin runs it from the repository root on an
+up-to-date `main`:
 
 ```sh
 .github/scripts/rulesets.sh
-.github/scripts/project.sh
 ```
 
-## Running again
+It can run any number of times: the merge settings are set again, a ruleset whose name exists is
+replaced, and rulesets made by hand under other names are left alone.
 
-Both scripts can run any number of times:
-
-- Labels and milestone descriptions are updated in place, and rulesets are replaced by name.
-- Project fields and views that exist are skipped, because GitHub's API can't edit or delete a
-  view. To change one, delete it on the board and run `project.sh` again.
-- The Status options are synced on every run. An option that exists keeps its id, so its items
-  keep their status. An option the script doesn't list, such as the default Todo, is removed, and
-  its items lose their status.
-- Labels, views and rulesets made by hand under other names are left alone.
-
-## The rulesets
+### What the rulesets say
 
 - `main`: every change goes through a PR, merged with rebase, with linear history, no force-push
   or deletion, and resolved review threads. The checks listed in `main.json` must pass: `ci`,
-  which fails when a job it needs fails and passes when they pass or are skipped, the two CodeQL
-  `analyze` jobs, and dependency `review`. A new CI job goes in `ci`'s `needs`, not in the list;
-  when a listed check is renamed, update the list too, or merges wait on a check that never runs.
-- A PR also needs one approval given after its latest push, and a branch that is up to date with
-  `main`. CodeRabbit's auto-approval gives it; the author can't. These are what OpenSSF Scorecard's
-  Branch-Protection check asks for. CODEOWNERS review, two approvers, stale review dismissal and
-  rules for admins are left off: they need a second maintainer, or only score once those do.
+  which fails when a job it needs fails and passes when they pass or are skipped, CodeQL's
+  `analyze (actions)`, and dependency `review`. A new CI job goes in `ci`'s `needs`, not in the
+  list; when a listed check is renamed, update the list too, or merges wait on a check that never
+  runs. CodeQL's Rust scan isn't in the list: it runs on `main` after the merge and every week,
+  never on a PR.
+- A PR also needs one approval given after its latest push. CodeRabbit's auto-approval gives it;
+  the author can't. CODEOWNERS review, two approvers, stale review dismissal and rules for admins
+  are left off: they need a second maintainer, or only score with OpenSSF Scorecard once those do.
+- A PR's branch doesn't have to be up to date with `main`: with rebase merges, requiring that
+  made every merge re-run CI on every other open PR. What lands on `main` is still tested: the CI
+  run on the push to `main` is skipped only when the merged tree is the very tree CI passed on in
+  the PR.
 - Repository admins can still bypass the `main` rules on a PR (never by a direct push): in an
   emergency, when CodeRabbit hasn't approved the latest push, or for a release PR, which
   CodeRabbit doesn't review.
@@ -73,18 +93,15 @@ Both scripts can run any number of times:
   that isn't on crates.io yet needs one publish with a token before it can have a trusted
   publisher.
 
-## By hand
-
-GitHub has no API for these, so `project.sh` prints them when it finishes:
-
-- Delete the default "View 1", so the board opens on Board, and order the tabs.
-- On the Roadmap view, set the date fields to Start date and Target date.
-- Turn on the project workflows: auto-add, and the Status changes on add and reopen (issues
-  only), linked PR, close and merge. Auto-add doesn't reach back, so add older items by hand.
-- Close a milestone once its release is published. The script sets milestone descriptions and
-  due dates but never opens or closes one.
+crates.io limits how fast an account publishes: 5 crates it has never seen, then one more every
+10 minutes; and 30 new versions of crates it has, then one more a minute. The publish job waits
+out a `429 Too Many Requests` for up to an hour in all, and skips what is already published when
+it is re-run, so a release with many new crates only takes longer. crates.io raises an account's
+limit on request, at help@crates.io.
 
 ## Security
 
-The scripts hold no secrets. They run under your own `gh` login and no workflow runs them, so no
-token with admin or project rights is stored in the repository's secrets.
+The scripts hold no secrets. `repo-settings.sh` runs in its workflow with the built-in token,
+which can write issues, labels and milestones and nothing else. `rulesets.sh` runs under your own
+`gh` login and no workflow runs it, so no token with admin rights is stored in the repository's
+secrets.

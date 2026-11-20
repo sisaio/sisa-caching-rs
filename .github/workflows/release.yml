@@ -9,7 +9,9 @@
 #   changelog as a draft, runs the benchmarks for it, waits for CI to pass on that commit and for
 #   the maintainer to approve the `release` environment, publishes the crates to crates.io, checks
 #   that crates.io serves the `.crate` files the tag packages to and attaches them with a signed
-#   provenance attestation to the draft, and then publishes the release.
+#   provenance attestation to the draft, and then publishes the release. A version with no section
+#   in the changelog isn't released, so a change to Cargo.toml before the first release PR, such
+#   as a dependency bump, tags nothing.
 #
 # crates.io is the one step nobody can undo, so it comes last, after the benchmark table is on the
 # draft and someone has read it. Releases are immutable once published, so the release stays a
@@ -71,6 +73,11 @@ jobs:
           tag="v$version"
           # `isDraft` of the version's release, or nothing when it has none.
           draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || true)
+          # The same heading the notes below are read from, at the start of a line.
+          if ! awk -v heading="## [$version]" 'index($0, heading) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $version; nothing to release"
+            exit 0
+          fi
           if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
             if [ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ] || [ "$draft" = false ]; then
               echo "$tag exists; nothing to release"
@@ -89,7 +96,7 @@ jobs:
             ' CHANGELOG.md > notes.md
             # A version such as 0.4.0-rc.1 is a pre-release, which GitHub never marks as the latest.
             prerelease=()
-            if [[ $version == *-* ]]; then
+            if [[ ${version%%+*} == *-* ]]; then
               prerelease=(--prerelease)
             fi
             gh release create "$tag" --draft "${prerelease[@]}" --verify-tag --title "$tag" \
@@ -110,7 +117,7 @@ jobs:
   # The ci workflow's run for this exact commit must succeed. A failed or cancelled run, or none
   # within the timeout, stops the release before crates.io.
   ci:
-    name: wait for CI
+    name: wait for ci
     needs: tag
     if: needs.tag.outputs.tag
     runs-on: ubuntu-26.04
@@ -137,12 +144,20 @@ jobs:
   # Waits for the maintainer to approve the `release` environment, after reading the benchmark
   # table on the draft. It runs even when the benchmarks failed, so that call is theirs. Each crate
   # whose version crates.io already has is skipped, so a re-run finishes a half-done publish.
+  #
+  # crates.io limits how fast one account publishes: 5 crates it has never seen, then one more
+  # every 10 minutes, and 30 new versions of crates it has, then one more a minute. Past the limit
+  # it answers 429 with the time to try again, so the step waits until then and publishes again,
+  # for up to an hour of waiting in all. A first release of more than 5 crates takes 10 minutes
+  # more for each crate past the fifth. Those publish with the `CARGO_REGISTRY_TOKEN` secret, which
+  # doesn't expire while the step waits; a trusted-publishing token lasts 30 minutes, and only
+  # publishes new versions, whose limit clears in a minute.
   publish:
     name: publish
     needs: [tag, bench, ci]
     if: always() && needs.tag.outputs.tag && needs.ci.result == 'success'
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     environment: release
     permissions:
       contents: read
@@ -168,15 +183,49 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
           TAG: ${{ needs.tag.outputs.tag }}
+          # The longest the step waits on crates.io's rate limit, in seconds, over all crates.
+          MAX_WAIT: 3600
         run: |
+          # So a failed `cargo publish` fails its pipe into `tee`.
+          set -o pipefail
           version="${TAG#v}"
+          log="$RUNNER_TEMP/publish.log"
+          waited=0
+
+          published() {
+            curl -sfo /dev/null -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$1/$version"
+          }
+
           for crate in sisa-caching-core sisa-caching-memory sisa-caching-redis sisa-caching-hybrid sisa-caching; do
-            if curl -sfo /dev/null -A "sisa-caching-rs release (github.com/$GITHUB_REPOSITORY)" \
-              "https://crates.io/api/v1/crates/$crate/$version"; then
-              echo "$crate $version is on crates.io already"
-            else
-              cargo publish -p "$crate" --locked
-            fi
+            while true; do
+              if published "$crate"; then
+                echo "$crate $version is on crates.io already"
+                break
+              fi
+              if cargo publish -p "$crate" --locked 2>&1 | tee "$log"; then
+                break
+              fi
+              # Any other failure ends the release here; a re-run carries on from this crate.
+              if ! grep -q '429 Too Many Requests' "$log"; then
+                exit 1
+              fi
+              # "Please try again after Fri, 20 Nov 2026 16:14:26 GMT"; 10 minutes when the
+              # message carries no time.
+              after=$(sed -n 's/.*try again after \(.*GMT\).*/\1/p' "$log" | tail -n 1)
+              wait=600
+              if [ -n "$after" ] && resume=$(date -u -d "$after" +%s 2> /dev/null); then
+                wait=$((resume - $(date -u +%s) + 15))
+              fi
+              if [ "$wait" -lt 15 ]; then wait=15; fi
+              if [ $((waited + wait)) -gt "$MAX_WAIT" ]; then
+                echo "::error::crates.io asks to wait $wait s more for $crate, past the $MAX_WAIT s this job waits. Re-run the failed jobs after ${after:-10 minutes}; the crates already published are skipped."
+                exit 1
+              fi
+              echo "::notice::crates.io rate limit: waiting $wait s before publishing $crate"
+              sleep "$wait"
+              waited=$((waited + wait))
+            done
           done
 
   # Signs what users download, once it matches the tagged source: it packages each crate from the
@@ -251,7 +300,7 @@ jobs:
   # on it like on any other PR. Without them, it falls back to the built-in token, whose PRs get
   # no CI.
   release-pr:
-    name: release PR
+    name: release pr
     runs-on: ubuntu-26.04
     if: github.repository_owner == 'sisaio' && github.event_name == 'workflow_dispatch'
     timeout-minutes: 30

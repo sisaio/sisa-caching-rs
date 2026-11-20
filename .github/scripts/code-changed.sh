@@ -5,10 +5,11 @@
 # Usage: code-changed.sh <base sha> <head sha>
 set -euo pipefail
 
-files=$(git diff --name-only "$1...$2")
+# --no-renames lists a moved file under its old path too, so moving one out of crates/ counts.
+files=$(git diff --no-renames --name-only "$1...$2")
 printf '%s\n' "$files" >&2
 
-if grep -qE '^(crates|benches|examples|\.cargo)/|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml|deny\.toml)$|^\.github/(workflows/(ci|codeql)\.yml|scripts/(code-changed|pr-tested)\.sh)$' <<<"$files"; then
+if grep -qE '^(crates|benches|examples|\.cargo|\.config)/|^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|rustfmt\.toml|clippy\.toml|deny\.toml)$|^\.github/(workflows/(ci|codeql)\.yml|scripts/(code-changed|pr-tested)\.sh)$' <<<"$files"; then
   echo true
 else
   echo false

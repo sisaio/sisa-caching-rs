@@ -1,13 +1,14 @@
 name: Feature request
 description: Something the library should do but doesn't.
 type: Feature
+labels: ["type:feature"]
 body:
   - type: markdown
     attributes:
       value: |
         Check the [roadmap](https://github.com/sisaio/sisa-caching-rs/blob/main/ROADMAP.md) and the
-        decisions in the [architecture page](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#decisions)
-        first; some ideas are planned and some were settled on purpose.
+        [decisions](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/adr/README.md) first; some ideas are planned and some were settled
+        on purpose.
   - type: dropdown
     id: crate
     attributes:
