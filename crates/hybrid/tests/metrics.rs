@@ -1,19 +1,22 @@
-//! The metrics a hybrid store records, above all the two the docs say to alert on. A test binary of
-//! its own: the instruments are created when the first store is built, from the meter provider
-//! installed then, so this test must install its provider before any other test builds a store.
+//! The metrics a hybrid store records, above all the two the docs say to alert on, and what it logs
+//! while it can't publish. A test binary of its own: the instruments are created when the first
+//! store is built, from the meter provider installed then, so this test must install its provider
+//! before any other test builds a store.
 
 mod common;
 
 use common::{key, memory, node, publish};
 use opentelemetry::KeyValue;
 use sisa_caching_core::cache::CacheStore;
-use sisa_caching_testing::{Metrics, Redis, eventually};
+use sisa_caching_testing::{Logs, Metrics, Redis, eventually};
 
 #[tokio::test]
 async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
     let metrics = Metrics::install();
+    let logs = Logs::default();
+    let _logging = tracing::subscriber::set_default(logs.clone());
     let hybrid = [KeyValue::new("layer", "hybrid")];
-    let redis = Redis::start().await;
+    let redis = Redis::start_restartable().await;
     let distributed = memory("app");
     let writer = node(&distributed, &redis).await;
     let reader = node(&distributed, &redis).await;
@@ -67,16 +70,34 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         2
     );
 
-    // With the server gone, every try fails, which counts as one failed publish.
-    redis.stop().await;
-    writer.remove(&key(1)).await.unwrap();
+    // With the server gone, every try fails. Each failed publish counts, and the run of them warns
+    // once.
+    let logged = |message: &str| {
+        let lines = logs.lines();
 
-    eventually("the publish gives up", async || {
-        metrics.value("sisa.caching.publish.failures", &[]) == 1
+        lines.iter().filter(|line| line.contains(message)).count()
+    };
+
+    redis.stop().await;
+    for _ in 0..3 {
+        writer.remove(&key(1)).await.unwrap();
+    }
+
+    eventually("the publishes give up", async || {
+        metrics.value("sisa.caching.publish.failures", &[]) == 3
     })
     .await;
+    assert_eq!(logged("could not publish an invalidation"), 1);
     eventually("the workers report the backplane down", async || {
         metrics.value("sisa.caching.backplane.connected", &[]) == 0
+    })
+    .await;
+
+    // The first publish that works says so.
+    redis.restart().await;
+    eventually("a publish works again", async || {
+        writer.remove(&key(1)).await.unwrap();
+        logged("invalidations are published again") > 0
     })
     .await;
 }

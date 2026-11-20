@@ -296,7 +296,8 @@ answer:
   loaded, logged at the first failure of a run and counted each time;
 - `get_or_set`'s lock wait timed out;
 - a refresh failed;
-- a hybrid publish failed after three tries;
+- a hybrid publish failed after three tries, logged at the first failure of a run and counted each
+  time;
 - the backplane subscription was lost or couldn't be made;
 - a backplane message couldn't be read, or an invalidation went missing, which clears the local
   layer.
@@ -367,5 +368,6 @@ Settled; reopen only with new evidence.
   `flatten`, so a last flattened field fails on whatever fields the others didn't take.
 - Info spans and warnings carry the store and the invalidation kind, never a key or a value; only
   debug spans and events carry keys. Stores warn only about the errors they swallow. Their info
-  lines say that a worker started or stopped, a backplane subscribed, store calls work again, or a
-  hybrid store told the other nodes it is stopping, and a worker's panic logs an error.
+  lines say that a worker started or stopped, a backplane subscribed, store calls work again,
+  invalidations are published again, or a hybrid store told the other nodes it is stopping, and a
+  worker's panic logs an error.

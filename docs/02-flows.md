@@ -184,9 +184,10 @@ sequenceDiagram
     W->>LB: bump generation, evict key
 ```
 
-If every publish try fails, the write has already returned the Redis result, and a warning is
-logged. Node A's first heartbeat after this write, and every write A started before it, has
-finished shows node B the missing sequence number, and node B clears its local layer.
+If every publish try fails, the write has already returned the Redis result. The failure is
+counted, and the first of a run logs a warning. Node A's first heartbeat after this write, and
+every write A started before it, has finished shows node B the missing sequence number, and node B
+clears its local layer.
 
 ## Backplane worker
 

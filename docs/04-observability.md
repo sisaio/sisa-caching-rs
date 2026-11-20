@@ -77,10 +77,14 @@ that operation logs `store calls work again` at info. So an outage logs two line
 operation, however many calls fail, while `sisa.caching.errors` counts each failure. A failure
 that comes and goes, such as one key holding data that no longer decodes, logs a pair each time.
 
+A hybrid store does the same for the invalidations it can't publish: the first of a run logs a
+warning with the store, the `kind` and the error, and the next one it publishes logs `invalidations
+are published again` at info, while `sisa.caching.publish.failures` counts each failure.
+
 The other warnings fire every time: a refresh whose load failed while the cached value was still
-live, which serves that value, a lock wait that timed out, an invalidation that couldn't be
-published, a backplane subscription lost or failing, a backplane message that couldn't be read, and
-a local layer cleared because an invalidation went missing or a node's heartbeats stopped. When a
+live, which serves that value, a lock wait that timed out, a backplane subscription lost or failing,
+a backplane message that couldn't be read, and a local layer cleared because an invalidation went
+missing or a node's heartbeats stopped. When a
 node stops without calling `shutdown`, every other node logs that clear `heartbeat_timeout_ms`
 later, so such a rolling deploy logs it once for each node it replaces. The backplane worker also
 logs at info when it subscribes. Each store's worker logs starting and stopping at info, and a panic

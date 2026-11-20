@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 use redis::IntoConnectionInfo;
 use sisa_caching_core::{
@@ -97,24 +100,40 @@ async fn stop<C: Clock>(state: Arc<State<C>>, backplane: Arc<RedisBackplane>, wo
 /// write, and every write the node started before it, has finished, and clear their local layers.
 /// A heartbeat vouches only for a run of finished numbers, so a slow earlier write holds the clear
 /// back until it is done.
-async fn publish(
+///
+/// Each failure is counted. Only the first of a run logs a warning, and the publish that ends the
+/// run an info line, so an outage logs two lines however many writes it fails.
+async fn publish<C: Clock>(
     publishing: Publishing,
     backplane: Arc<RedisBackplane>,
-    store: KeyPrefix,
+    state: Arc<State<C>>,
     mut message: BackplaneMessage,
 ) {
+    let store = state.local_store.name();
+    let failing = &state.publishes_failing;
+
     message.seq = Some(publishing.seq);
 
-    match send(&backplane, &store, &message).await {
-        Ok(subscribers) => METRICS.invalidation_delivered(&store, subscribers),
+    match send(&backplane, store, &message).await {
+        Ok(subscribers) => {
+            METRICS.invalidation_delivered(store, subscribers);
+
+            // A load first, so a publish writes nothing while they work.
+            if failing.load(Ordering::Relaxed) && failing.swap(false, Ordering::Relaxed) {
+                tracing::info!(%store, "invalidations are published again");
+            }
+        }
         Err(error) => {
-            METRICS.publish_failed(&store);
-            tracing::warn!(
-                %store,
-                %error,
-                kind = message.invalidation.kind(),
-                "could not publish an invalidation; other nodes clear their local layers once this node's heartbeats cover it"
-            );
+            METRICS.publish_failed(store);
+
+            if !failing.swap(true, Ordering::Relaxed) {
+                tracing::warn!(
+                    %store,
+                    %error,
+                    kind = message.invalidation.kind(),
+                    "could not publish an invalidation; other nodes clear their local layers once this node's heartbeats cover it. Each failure is counted, and this logs again once one is published"
+                );
+            }
         }
     }
 }
@@ -352,7 +371,6 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
         self.start_worker();
 
         let message = BackplaneMessage::new(self.node_id().clone(), invalidation);
-        let store = self.name().clone();
         let state = Arc::clone(&self.state);
         let backplane = Arc::clone(&self.backplane);
 
@@ -371,7 +389,7 @@ impl<D: CacheStore + 'static, C: Clock> HybridCacheStore<D, C> {
                 let result = tokio::spawn(write.in_current_span()).await;
 
                 state.apply(&message.invalidation).await;
-                tokio::spawn(publish(publishing, backplane, store, message).in_current_span());
+                tokio::spawn(publish(publishing, backplane, state, message).in_current_span());
 
                 result
             }
