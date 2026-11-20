@@ -1,4 +1,10 @@
-# CodeQL advanced setup for the Rust code and the GitHub Actions workflows.
+# CodeQL advanced setup for the Rust code and the GitHub Actions workflows. A PR gets the Actions
+# scan only, which takes under a minute. The Rust scan takes about five, longer than all of CI, so
+# it runs after the merge, on each push to main that changes a Rust input, and every week; its
+# findings show under Security → Code scanning. The `main` ruleset requires `analyze (actions)`
+# and not `analyze (rust)`, which a PR never reports.
+#
+# The same file in every sisaio crate repository.
 name: CodeQL
 
 on:
@@ -32,19 +38,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [actions, rust]
+        language: ${{ fromJSON(github.event_name == 'pull_request' && '["actions"]' || '["actions", "rust"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # The whole history, so the next step can diff the PR against its base, or the push
-          # against the commit before it.
+          # The whole history, so the next step can diff the push against the commit before it.
           fetch-depth: 0
 
-      # A PR is diffed against its base and a push to main against the commit before it: one that
-      # changes no Rust inputs skips the Rust scan, which still reports `analyze (rust)`. The
-      # Actions scan always runs, so every PR gets the `CodeQL` check that Scorecard's SAST check
-      # counts. The weekly run scans both.
+      # A push to main is diffed against the commit before it: one that changes no Rust inputs
+      # skips the Rust scan. The Actions scan always runs, so every PR gets the `CodeQL` check
+      # that Scorecard's SAST check counts. The weekly run scans both.
       - name: Look for changes to scan
         id: scope
         env:

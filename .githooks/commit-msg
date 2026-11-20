@@ -1,7 +1,13 @@
 #!/bin/sh
 # Checks a commit message against CONTRIBUTING.md#commit-messages. Git runs it on each commit once
 # a clone sets `git config core.hooksPath .githooks`; CI runs it on a PR's commits and title.
+#
+# The same file in every sisaio repository, except SCOPES below.
 set -eu
+
+TYPES='feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security'
+# This repository's scopes: its crates, then the three every repository has.
+SCOPES='core|memory|redis|hybrid|testing|facade|deps|docs|release'
 
 subject=$(grep -v '^#' "$1" | grep -m 1 . || true)
 
@@ -16,11 +22,23 @@ case "$subject" in
 esac
 
 echo "$subject" |
-  grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\((core|memory|redis|hybrid|facade|deps)\))?!?: [^ ]' ||
-  fail 'start with type(scope): summary, for example "fix(redis): keep the TTL on refresh"'
+  grep -Eq "^($TYPES)(\(($SCOPES)\))?!?: [^ ]" ||
+  fail "start with type(scope): summary; a type is one of $TYPES, and a scope one of $SCOPES"
+echo "$subject" | grep -Eq '^[^:]+: [^A-Z]' || fail 'start the summary with a lowercase letter'
 [ "${#subject}" -le 72 ] || fail 'keep the subject to 72 characters'
 case "$subject" in
   *.) fail 'end the subject without a period' ;;
   *'[skip ci]'* | *'[ci skip]'*) fail 'put [skip ci] in the body, not the subject' ;;
 esac
 if grep -iq '^co-authored-by:' "$1"; then fail 'drop the Co-authored-by trailer'; fi
+
+# A breaking change says how to migrate in its body. CI checks a PR title with SUBJECT_ONLY set,
+# since a title has no body.
+case "$subject" in
+  *'!:'*)
+    if [ -z "${SUBJECT_ONLY:-}" ] &&
+      ! grep -v '^#' "$1" | awk 'seen && NF { found = 1 } NF { seen = 1 } END { exit !found }'; then
+      fail 'a breaking change says how to migrate in the body'
+    fi
+    ;;
+esac
