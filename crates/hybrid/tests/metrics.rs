@@ -7,6 +7,7 @@ mod common;
 
 use common::{key, memory, node, publish};
 use opentelemetry::KeyValue;
+use serde_json::json;
 use sisa_caching_core::cache::CacheStore;
 use sisa_caching_testing::{Logs, Metrics, Redis, eventually};
 
@@ -69,6 +70,18 @@ async fn a_hybrid_store_counts_reads_loads_invalidations_and_its_backplane() {
         ),
         2
     );
+
+    // No heartbeat can count past the last sequence number, so each node clears and says why.
+    let last = json!({"v": 1, "source": "elsewhere", "seq": u64::MAX, "kind": "heartbeat"});
+
+    publish(&redis, "app", &last.to_string()).await;
+    eventually("both nodes clear", async || {
+        metrics.value(
+            "sisa.caching.local.clears",
+            &[KeyValue::new("reason", "untracked")],
+        ) == 2
+    })
+    .await;
 
     // With the server gone, every try fails. Each failed publish counts, and the run of them warns
     // once.
