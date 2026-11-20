@@ -1304,6 +1304,59 @@ mod tests {
         assert_eq!(loaded.as_deref(), Ok("ada"));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn get_or_set_waits_for_another_load_without_limit_when_no_lock_timeout_is_set() {
+        let store = store(
+            &ManualClock::new(),
+            InMemoryCacheSettings {
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.lock_timeout_ms = None;
+                    settings
+                },
+                ..InMemoryCacheSettings::default()
+            },
+        );
+        let user = key(1);
+        // The first load holds the key's lock until it is told to finish.
+        let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+        let mut loading = Box::pin(store.get_or_set(
+            &user,
+            async move || {
+                _ = finished.await;
+
+                Ok::<_, Infallible>("ada".to_owned())
+            },
+            None,
+        ));
+
+        assert!((&mut loading).now_or_never().is_none());
+
+        let loads = AtomicUsize::new(0);
+        let mut waiting = Box::pin(store.get_or_set(
+            &user,
+            async || {
+                loads.fetch_add(1, Ordering::SeqCst);
+
+                Ok::<_, Infallible>("grace".to_owned())
+            },
+            None,
+        ));
+
+        // An hour on the paused clock, well past the default of 30 s.
+        assert!(
+            tokio::time::timeout(secs(3600), &mut waiting)
+                .await
+                .is_err(),
+            "still waiting for the lock"
+        );
+
+        finish.send(()).unwrap();
+        assert_eq!(loading.await.as_deref(), Ok("ada"));
+        assert_eq!(waiting.await.as_deref(), Ok("ada"));
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn get_or_set_stores_over_a_value_of_another_type() {
         let store = store(&ManualClock::new(), InMemoryCacheSettings::default());
@@ -1424,6 +1477,49 @@ mod tests {
             store.get::<String>(&user).await.unwrap().as_deref(),
             Some("new")
         );
+    }
+
+    #[tokio::test]
+    async fn get_or_set_serves_the_cached_value_while_another_caller_refreshes_it() {
+        let clock = ManualClock::new();
+        let store = store(
+            &clock,
+            InMemoryCacheSettings {
+                common: {
+                    let mut settings = CacheSettings::default();
+                    settings.default_ttl_secs = Some(10);
+                    settings.refresh_threshold = Some(0.5);
+                    settings
+                },
+                ..InMemoryCacheSettings::default()
+            },
+        );
+        let user = key(1);
+
+        store.set(&user, "old".to_owned(), None).await.unwrap();
+        clock.advance(secs(6));
+
+        // The first caller's refresh never finishes, so it holds the key's lock for good.
+        let mut refreshing =
+            Box::pin(store.get_or_set(&user, pending::<Result<String, Infallible>>, None));
+
+        assert!((&mut refreshing).now_or_never().is_none());
+
+        let loads = AtomicUsize::new(0);
+        let served = store
+            .get_or_set(
+                &user,
+                async || {
+                    loads.fetch_add(1, Ordering::SeqCst);
+
+                    Ok::<_, Infallible>("new".to_owned())
+                },
+                None,
+            )
+            .now_or_never();
+
+        assert_eq!(served, Some(Ok("old".to_owned())), "without waiting");
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

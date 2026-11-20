@@ -391,3 +391,30 @@ impl ConnectionLike for SentinelConnection {
 
 // One primary at a time, so the default methods fit.
 impl RedisConnection for SentinelConnection {}
+
+#[cfg(test)]
+mod tests {
+    use sisa_caching_testing::RedisSentinel;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_caller_behind_a_clone_that_moved_takes_its_primary_without_a_lookup() {
+        let Some(sentinel) = RedisSentinel::start().await else {
+            return;
+        };
+        let conn = SentinelConnection::connect(sentinel.sentinel_client())
+            .await
+            .unwrap();
+
+        sentinel.failover().await;
+        conn.primary_client().await.unwrap();
+        // With Sentinel gone, a lookup fails.
+        sentinel.stop_sentinel().await;
+
+        // A command sent before the move, on generation 0, finds out only now.
+        let primary = conn.follow(0).await.unwrap();
+
+        assert_eq!(primary.generation, 1);
+    }
+}
