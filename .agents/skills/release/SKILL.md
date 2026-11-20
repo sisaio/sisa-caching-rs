@@ -7,7 +7,9 @@ description: Prepares a release of the sisa-caching crates (versions, changelog,
 
 [release.yml](../../../.github/workflows/release.yml) opens the release PR with release-plz
 ([release-plz.toml](../../../release-plz.toml)) and does the rest in its own jobs. The five
-library crates share one version, one changelog at the root and one `v<version>` tag.
+library crates (`sisa-caching-core`, `-memory`, `-redis`, `-hybrid` and `sisa-caching`) share one
+version, one changelog at the root and one `v<version>` tag. `sisa-caching-testing`, the examples
+and the benchmarks are never published.
 
 - Releases are cut by hand, so each one batches several changes. The maintainer opens the release
   PR by running the release workflow from the Actions tab (`gh workflow run release.yml`). It
@@ -21,14 +23,16 @@ library crates share one version, one changelog at the root and one `v<version>`
   any file a crate packages changed (`cargo package --list`), README included, so a PR whose
   commits are all `docs`, `ci` and the like has a version bump and no changelog entries: write
   its section by hand, or the GitHub release has no notes.
-- Merging the release PR changes the version in `Cargo.toml` on `main`, which starts the release
-  workflow: it tags `v<version>`, creates the GitHub release as a draft from the changelog section, and runs
-  the benchmarks, whose table and report go on the draft. The publish job then waits for the CI
-  run on that commit to pass and for the maintainer to approve the `release` environment. Once approved, it publishes the crates to
-  crates.io, and the draft is published. Releases are immutable once published, so nothing may
+- Merging the release PR changes the version in `Cargo.toml` or the changelog on `main`, which
+  starts the release workflow: it tags `v<version>`, creates the GitHub release as a draft from
+  the changelog section, and runs the benchmarks, whose table and report go on the draft. A
+  version without a `## [<version>]` section in the changelog is not tagged. The publish job then
+  waits for the CI run on that commit to pass and for the maintainer to approve the `release`
+  environment. Once approved, it publishes the crates to crates.io, and the draft is published. Releases are immutable once published, so nothing may
   change one after that.
-- Merged issues show as Done on the board; their milestone stays open until the release is
-  published, and then the maintainer closes it.
+- A merged issue is closed while its milestone is still open: the milestone stays open until the
+  release is published. The maintainer then closes it by marking it `state: closed` in
+  [.github/milestones.yml](../../../.github/milestones.yml).
 
 The maintainer starts and merges the release PR and approves the publish. An agent never starts
 or merges it, approves, publishes, or pushes a tag.
@@ -78,6 +82,11 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
   workflow by hand doesn't help: a manual run only opens release PRs.
 - A publish that stopped halfway is finished by re-running the publish job: it skips the crates
   crates.io already has.
+- crates.io limits how fast an account publishes: 5 crates it has never seen, then one more every
+  10 minutes; and 30 new versions of crates it has, then one more a minute. The publish job
+  waits out a `429 Too Many Requests` and publishes again, for up to an hour in all, so the first
+  release of more than 5 new crates takes 10 minutes more for each crate past the fifth. If it
+  runs out of time, re-run the failed jobs once the time in the error has passed.
 - The first release PR lists every commit since the start. Replace it with the summary in
   [CHANGELOG.md](../../../CHANGELOG.md).
 
@@ -88,8 +97,9 @@ A pre-release lets a pilot depend on the next version before it is stable: `0.4.
 | `GitHub Actions is not permitted to create or approve pull requests` | The maintainer allows it in Settings → Actions → General → Workflow permissions |
 | `Cannot upload assets to an immutable release` | Something wrote to a published release; record on the draft before `publish release` runs |
 | `release-plz opened no release PR` | No crate changed since the last release. For a final right after its last rc, open a normal PR with the version and the cycle's changelog section |
-| `wait for CI` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
+| `wait for ci` fails | The ci run on the tagged commit failed or was cancelled. Fix it on `main`; the fix ships as the next version, or an admin deletes the tag and the draft so the fixed commit is tagged |
 | crates.io `403`, or no token from `crates-io-auth-action` | With `CARGO_REGISTRY_TOKEN` set, the token has expired or lacks publish rights on the crate. Without it, the crate needs a trusted publisher for `release.yml` and the `release` environment ([.github/scripts/README.md](../../../.github/scripts/README.md#releases)) |
 | `crate ... already exists` | crates.io has that version; re-run the publish job, which skips it |
+| `429 Too Many Requests` and `crates.io asks to wait ... past the 3600 s this job waits` | The rate limit outlasted the job's hour of waiting. Re-run the failed jobs after the time the error gives; the crates already out are skipped |
 
 For anything else, find the first error in the failed step's log and report it with a fix.
