@@ -14,17 +14,18 @@ Report findings; don't push fixes unless asked.
 - [ ] Run the checks in [CONTRIBUTING.md](../../../CONTRIBUTING.md#build-and-check). Note each
       failure with its first error.
 - [ ] Check the diff against the
-      [rules](../../../docs/01-architecture.md#rules-that-hold-the-design-together), the
-      [decisions](../../../docs/01-architecture.md#decisions) and the
-      [code rules](../../../AGENTS.md#code) in AGENTS.md. The ones most often broken:
+      [rules](../../../docs/architecture.md#rules-that-hold-the-design-together), the
+      [decisions](../../../docs/adr/README.md) and the
+      [hard rules](../../../AGENTS.md#hard-rules) in AGENTS.md. The ones most often broken:
   - each store keeps one read path (`get_entry`) and one write path (`set_entry`);
   - only the clock module reads the wall clock;
   - invalidations touch the local layer only, never Redis;
   - no new dependency in a library crate, and no `moka`.
 - [ ] Check what goes with the change: a test for each new behavior, doc comments on new public
-      items, the `docs/` page it affects (above all
-      [Data formats](../../../docs/01-architecture.md#data-formats)), and `breaking` on the PR if
-      the public API or a data format changed.
+      items, the crate's [spec](../../../docs/specs/README.md) when what it does changed,
+      [Formats](../../../docs/formats.md) when a key, the Redis entry or the invalidation message
+      changed, an [ADR](../../../docs/adr/README.md) for a choice that is hard to reverse, and
+      `breaking` on the PR if the public API or a data format changed.
 - [ ] Check the docs in the diff: doc comments are short and plain with an example where it
       helps, and never link a Markdown file; `docs/` pages use Mermaid for diagrams and tables
       over long lists; every relative link and `#anchor` resolves.
@@ -64,12 +65,12 @@ Each was real, passed CI, and now has a test. Look for the same shape anywhere i
 ## Whole-repository review
 
 - [ ] Start from `main`'s head and note its commit. Read
-      [Guarantees and limits](../../../docs/01-architecture.md#guarantees-and-limits),
-      [Failures](../../../docs/01-architecture.md#failures) and the rules first, then each store.
+      [Guarantees and limits](../../../docs/architecture.md#guarantees-and-limits),
+      [Failures](../../../docs/architecture.md#failures) and the rules first, then each store.
 - [ ] For each invariant below, check the test still guards it: break the code and see it fail.
       An invariant the docs promise with no test is a finding.
 - [ ] Measure before calling something slow, with the
-      [benchmarking method](../../../docs/05-benchmarks.md#running-them) of alternating rounds; for a
+      [benchmarking method](../../../docs/benchmarks.md#running-them) of alternating rounds; for a
       change under 5%, compare callgrind instruction counts instead.
 - [ ] Write the findings as one document: severity, evidence, and the fix grouped into proposed
       PRs, each needing its own issue.

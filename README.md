@@ -80,14 +80,14 @@ by default, still expires every local copy, even of an entry Redis keeps until r
 Each hybrid store has its own pub/sub channel, `<store>:backplane`. One store usually covers an
 application; a second one, such as `user_cache` next to `catalog_cache`, gets its own settings
 and doesn't affect the first. See
-[Several hybrid stores](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/01-architecture.md#several-hybrid-stores).
+[Several hybrid stores](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/specs/hybrid.md#several-hybrid-stores).
 
 ## Compatibility
 
 Tested in CI against Redis 7.4, Redis 8, Valkey 8, Dragonfly 2 and Garnet 2, each as one primary, a
 three-primary cluster, and a primary and replica behind Sentinel through a failover, except Sentinel
 on Garnet, which has none.
-[docs/03-compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/03-compatibility.md)
+[docs/compatibility.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/compatibility.md)
 says how to connect to each.
 
 ## Observability
@@ -95,7 +95,7 @@ says how to connect to each.
 Stores trace through `tracing` and count hits, misses, loads, failed store calls and evictions
 through the OpenTelemetry metrics API, under `sisa.caching.*`. A hybrid write and the invalidations
 it causes on other nodes share one trace.
-[docs/04-observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/04-observability.md)
+[docs/observability.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/observability.md)
 lists every span and log line and what to alert on, and the
 [metrics docs](https://docs.rs/sisa-caching-core/latest/sisa_caching_core/metrics/) every metric;
 the example shows the setup.
@@ -135,12 +135,13 @@ Each release records its benchmarks on its
 [release page](https://github.com/sisaio/sisa-caching-rs/releases/latest): reads and writes on
 every store, each compared with the previous release on the same machine, and Criterion's full
 report.
-[docs/05-benchmarks.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/05-benchmarks.md) explains what each one measures and how to run them.
+[docs/benchmarks.md](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/benchmarks.md) explains what each one measures and how to run them.
 
 ## More
 
-- [Docs](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/00-overview.md): an overview, then architecture, flows, compatibility,
-  observability and benchmarks, in reading order.
+- [Docs](https://github.com/sisaio/sisa-caching-rs/blob/main/docs/README.md): the architecture, each crate's spec, the
+  formats other languages share, the flows, compatibility, observability, benchmarks and the
+  decisions.
 - [Roadmap](https://github.com/sisaio/sisa-caching-rs/blob/main/ROADMAP.md) and [changelog](https://github.com/sisaio/sisa-caching-rs/blob/main/CHANGELOG.md).
 - [Contributing](https://github.com/sisaio/sisa-caching-rs/blob/main/CONTRIBUTING.md): building, testing and conventions.
 - [Security](https://github.com/sisaio/sisa-caching-rs/blob/main/SECURITY.md): reporting a vulnerability.
