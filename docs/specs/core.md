@@ -45,7 +45,10 @@ Rules every store follows:
   store's `get_entry` and `set_entry`. `get_or_set` takes a per-key lock, waits up to
   `lock_timeout_ms`, reads again under the lock, and only then loads. Past
   `refresh_threshold`, the first caller to take the lock reads again too, and reloads unless
-  another caller has just refreshed the entry; the others get the cached value.
+  another caller has just refreshed the entry; the others get the cached value. A caller whose
+  read failed, while the store's last write inside `get_or_set` failed too, gives the lock back
+  and loads without it: nothing it loads would reach the callers behind it, so they don't wait
+  for it. A read that fails alone, as on a value of another type, keeps the lock.
 
 ## Behaviour
 
