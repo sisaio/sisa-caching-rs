@@ -120,8 +120,11 @@ curl localhost:3001/users/1
 ```
 
 It sets up telemetry with [`sisa-telemetry`](https://crates.io/crates/sisa-telemetry): traces and
-metrics go over OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`), and
-logs to stdout, filtered by `RUST_LOG`. It still runs without a collector. `sisa-telemetry` 0.1.0
+metrics go over OTLP/HTTP with protobuf to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
+`http://localhost:4318`), and logs to stdout. `OTEL_EXPORTER_OTLP_PROTOCOL` wins over the
+example's choice: `http/protobuf`, or `grpc`, which a collector that only listens for HTTP
+doesn't receive. `RUST_LOG` filters the logs and the traces alike. It still runs without a
+collector. `sisa-telemetry` 0.1.0
 exports no logs over OTLP and has no TLS. To print what it sends:
 
 ```sh
