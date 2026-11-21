@@ -30,7 +30,7 @@ use tracing::Instrument;
 
 use crate::database::Database;
 
-pub use crate::telemetry::{Telemetry, init_telemetry};
+pub use crate::telemetry::init_telemetry;
 
 /// A user, as the database stores it and the routes return it.
 #[derive(Debug, Clone, Serialize, Deserialize)]

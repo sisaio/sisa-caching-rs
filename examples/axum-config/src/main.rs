@@ -32,6 +32,8 @@
 //! something that isn't, as here, where each arm builds an axum `Router`. Code that keeps the
 //! store itself, such as in a struct field, needs an enum over the three stores instead.
 
+use std::time::Duration;
+
 use sisa_caching::{
     HybridCacheSettings, HybridCacheStore, InMemoryCacheSettings, InMemoryCacheStore,
     RedisCacheSettings, RedisCacheStore,
@@ -100,7 +102,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(cache) = hybrid {
         cache.shutdown().await;
     }
-    telemetry.shutdown();
+    // Sends what the providers still hold. A collector that is down costs the last spans and
+    // metrics, not a failed exit.
+    if let Err(error) = telemetry.shutdown(Duration::from_secs(2)) {
+        tracing::warn!(%error, "the last telemetry was not sent");
+    }
 
     Ok(served?)
 }
