@@ -15,3 +15,4 @@ users-api = { path = "../users-api" }
 sisa-caching = { workspace = true, features = ["memory", "redis", "hybrid"] }
 
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
