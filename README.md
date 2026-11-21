@@ -119,14 +119,16 @@ curl -X PUT localhost:3000/users/1 -H 'content-type: application/json' -d '{"nam
 curl localhost:3001/users/1
 ```
 
-It pushes traces, metrics and logs over OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
-`http://localhost:4318`) and still runs without a collector. To print what it sends:
+It sets up telemetry with [`sisa-telemetry`](https://crates.io/crates/sisa-telemetry): traces and
+metrics go over OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`), and
+logs to stdout, filtered by `RUST_LOG`. It still runs without a collector. `sisa-telemetry` 0.1.0
+exports no logs over OTLP and has no TLS. To print what it sends:
 
 ```sh
 docker run --network host otel/opentelemetry-collector \
   --config 'yaml:receivers: {otlp: {protocols: {http: {endpoint: 0.0.0.0:4318}}}}' \
   --config 'yaml:exporters: {debug: {verbosity: detailed}}' \
-  --config 'yaml:service: {pipelines: {traces: {receivers: [otlp], exporters: [debug]}, metrics: {receivers: [otlp], exporters: [debug]}, logs: {receivers: [otlp], exporters: [debug]}}}'
+  --config 'yaml:service: {pipelines: {traces: {receivers: [otlp], exporters: [debug]}, metrics: {receivers: [otlp], exporters: [debug]}}}'
 ```
 
 ## Benchmarks
