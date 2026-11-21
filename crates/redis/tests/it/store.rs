@@ -20,6 +20,7 @@ use sisa_caching_redis::{
     store::RedisCacheStore,
 };
 use sisa_caching_testing::{Redis, eventually};
+use tokio::sync::oneshot;
 
 fn key(key: u32) -> CacheKey {
     CacheKey::new("user", key).unwrap()
@@ -386,12 +387,17 @@ async fn get_or_set_callers_of_one_key_wait_for_no_other_load_while_the_server_i
     );
 
     // A load that never ends, which under the key's lock would hold up every other caller.
-    let mut stuck = Box::pin(store.get_or_set(&user, pending::<Result<String, Infallible>>, None));
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut stuck)
-            .await
-            .is_err()
-    );
+    let (started, loading) = oneshot::channel();
+    let never_ends = async move || {
+        started.send(()).unwrap();
+        pending::<Result<String, Infallible>>().await
+    };
+    let mut stuck = Box::pin(store.get_or_set(&user, never_ends, None));
+
+    tokio::select! {
+        _ = &mut stuck => unreachable!("the load never ends"),
+        signal = loading => signal.unwrap(),
+    }
 
     let loaded = tokio::time::timeout(Duration::from_secs(1), store.get_or_set(&user, load, None))
         .await
