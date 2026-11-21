@@ -1,8 +1,8 @@
 # The commit and branch rules, the Markdown links and the dependency policy; formatting, lints,
-# the docs and the MSRV build; breaking API changes; the tests, which run against Redis 8 on every
-# PR and against Redis 7.4, Valkey 8, Dragonfly 2 and Garnet 2 on main; and coverage on main. The
-# Redis tests start their servers in Docker. PRs and pushes to main that change no Rust inputs skip
-# the Rust jobs; `ci` sums them up for the ruleset.
+# the docs, the MSRV build and the one `opentelemetry` version; breaking API changes; the tests,
+# which run against Redis 8 on every PR and against Redis 7.4, Valkey 8, Dragonfly 2 and Garnet 2
+# on main; and coverage on main. The Redis tests start their servers in Docker. PRs and pushes to
+# main that change no Rust inputs skip the Rust jobs; `ci` sums them up for the ruleset.
 #
 # Every sisaio crate repository has the same jobs under the same names: changes, policy, lint,
 # semver, test, ci and coverage. The crate names, the MSRV, the facade's features and the servers
@@ -168,6 +168,12 @@ jobs:
           for features in "" memory redis hybrid tls-rustls tls-native-tls; do
             cargo check -p sisa-caching --features "$features" --locked
           done
+
+      # Two semver-incompatible versions of `opentelemetry` are two crates with two sets of global
+      # providers, and a crate on the one the application didn't initialize records into nothing.
+      # `cargo tree -i` fails when the name matches more than one version.
+      - name: Check the build holds one opentelemetry version
+        run: cargo tree -i opentelemetry --all-features --edges normal --locked > /dev/null
 
       # docs.rs builds every published crate with every feature; a broken link fails here instead.
       - name: Build the docs
