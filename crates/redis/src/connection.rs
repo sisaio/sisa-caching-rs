@@ -27,9 +27,10 @@ use tokio::sync::Mutex;
 ///
 /// A server that is up but doesn't answer costs each command the reply timeout. The first
 /// `get_or_set` that loads calls the server three times, the read, the read again under the key's
-/// lock and the write, so it takes 1.5 s on top of its loader. Once that write has failed, callers
-/// load without the lock and skip the second read: 1 s each, however many want the key. A shorter
-/// reply timeout lowers that.
+/// lock and the write, so it takes 1.5 s on top of its loader. Once that write has failed, a
+/// caller whose read fails loads without the lock and skips the second read: 1 s on top of its
+/// loader, however many want the key, or up to 2 s and the first caller's load when it was
+/// already waiting behind the first. A shorter reply timeout lowers that.
 ///
 /// Start from it when you build a `ConnectionManager` yourself, here with a longer one:
 ///

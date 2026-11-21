@@ -151,10 +151,12 @@ after 500 ms without a reply, and a connection attempt after 1 s.
 A server that is up but doesn't answer, frozen or behind a network that drops traffic, costs each
 command that reply timeout. The first `get_or_set` that loads calls the server three times: the
 read, the read again under the key's lock, and the write. So it takes 1.5 s on top of its loader,
-on a hybrid store as well. Once that write has failed, callers stop taking turns at the lock and
-skip the second read, so each takes 1 s on top of its loader, however many want the key; those
-that were already waiting behind the first one take up to 2 s and its load. A shorter reply
-timeout lowers all of that: with 100 ms the first call takes 0.3 s.
+on a hybrid store as well. Once that write has failed, a caller whose read fails stops taking
+turns at the lock and skips the second read, so it takes 1 s on top of its loader, however many
+want the key; one that was already waiting behind the first takes up to 2 s and the first one's
+load. Callers whose read was answered just before the server stopped still take turns, each 1 s
+and its own load behind the one before. A shorter reply timeout lowers all of that: with 100 ms
+the first call takes 0.3 s.
 
 A large value or a `remove_prefix` on a busy server can need a longer one. Either way, start from
 `connection_config()`, change the timeouts, and pass the connection to `RedisCacheStore::new`:
