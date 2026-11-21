@@ -2,8 +2,15 @@
 
 The stores trace through `tracing` and record metrics through the OpenTelemetry metrics API. They
 don't export anything themselves: install an OpenTelemetry SDK, for example with an OTLP exporter,
-and a `tracing` subscriber with the `tracing-opentelemetry` layer. The
-[examples](../examples/users-api) set up all three signals.
+and a `tracing` subscriber with the `tracing-opentelemetry` layer.
+
+The [example](../examples/users-api/src/telemetry.rs) does all of that with one call to
+[`sisa-telemetry`](https://crates.io/crates/sisa-telemetry)'s `init`: traces and metrics over OTLP,
+logs on stdout, and the W3C propagators. Its 0.1.0 exports no logs over OTLP, has no TLS to the
+collector, and doesn't read `RUST_LOG`: the example reads the variable and passes it on as the
+log filter. A setup of your own must build on the `opentelemetry` version the stores use, 0.33:
+a second version in the build has its own global providers, and the stores would record into
+the ones you didn't install.
 
 Install the meter provider before building the first store. The stores create their instruments
 then, from the provider installed at that time, so a provider installed later never sees them.
