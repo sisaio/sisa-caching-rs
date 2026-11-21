@@ -8,7 +8,9 @@ The [example](../examples/users-api/src/telemetry.rs) does all of that with one 
 [`sisa-telemetry`](https://crates.io/crates/sisa-telemetry)'s `init`: traces and metrics over OTLP,
 logs on stdout, and the W3C propagators. Its 0.1.0 exports no logs over OTLP, has no TLS to the
 collector, and doesn't read `RUST_LOG`: the example reads the variable and passes it on as the
-log filter. A setup of your own must build on the `opentelemetry` version the stores use, 0.33:
+log filter. That filter decides which spans exist as well as which lines are printed, so it
+filters the traces too: `RUST_LOG=warn` drops the `info` spans of a hybrid write and its
+invalidations along with the log lines. A setup of your own must build on the `opentelemetry` version the stores use, 0.33:
 a second version in the build has its own global providers, and the stores would record into
 the ones you didn't install.
 
