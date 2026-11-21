@@ -48,6 +48,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p sisa-caching-redis -p sisa-caching-hybrid --all-targets --features tls-native-tls --locked -- -D warnings
 (set -e; for f in "" memory redis hybrid tls-rustls tls-native-tls; do cargo check -p sisa-caching --features "$f" --locked; done)
+cargo tree -i opentelemetry --all-features --edges normal --locked > /dev/null
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.89 check --workspace --all-targets --all-features --locked
 cargo nextest run --workspace --all-features --locked
@@ -60,6 +61,10 @@ lychee --offline --include-fragments --hidden --exclude-path '(^|/)(\.git|\.clau
 
 The `tls-native-tls` lines build OpenSSL's bindings on Linux, which need its headers and
 `pkg-config`: `sudo apt-get install libssl-dev pkg-config` on Debian and Ubuntu.
+
+`cargo tree -i opentelemetry` fails when the build holds two versions of `opentelemetry`. Two
+semver-incompatible versions are two crates with two sets of global providers, so a store on the
+one the application didn't set up would record its metrics into nothing.
 
 A weekly workflow also checks the workspace with every direct dependency at its lowest allowed
 version: `cargo +nightly update -Z direct-minimal-versions`, then `cargo check --workspace
