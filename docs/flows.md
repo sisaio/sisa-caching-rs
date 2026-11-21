@@ -41,16 +41,24 @@ sequenceDiagram
                 end
             end
         end
-    else missing
+    else missing, or the read failed
         Store->>Lock: lock(key), waiting up to lock_timeout_ms
-        Store->>Store: get_entry(key) again
-        alt another caller stored it meanwhile
-            Store-->>App: that value
-        else still missing, or unreadable
+        alt the read failed, and so did the store's last write
+            Store->>Lock: unlock(key)
             Store->>Loader: load()
             Loader-->>Store: value
             Store->>Store: set(key, value)
             Store-->>App: value
+        else the store works, or only the read failed
+            Store->>Store: get_entry(key) again
+            alt another caller stored it meanwhile
+                Store-->>App: that value
+            else still missing, or unreadable
+                Store->>Loader: load()
+                Loader-->>Store: value
+                Store->>Store: set(key, value)
+                Store-->>App: value
+            end
         end
     end
 ```
@@ -58,6 +66,11 @@ sequenceDiagram
 If the lock wait times out, the caller loads without the lock and logs a warning. If the second
 read fails, for example because a value of another type is there, the loaded value is stored over
 it.
+
+While the store can't be reached, both the read and the write fail, so what one caller loads
+never reaches the others: taking turns at the lock would only make each wait for the loads before
+its own. A caller whose read failed, once a write inside `get_or_set` has failed too, gives the
+lock back before it loads, so callers of one key load side by side until a write works again.
 
 ## Memory store write
 

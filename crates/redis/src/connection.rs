@@ -25,10 +25,11 @@ use tokio::sync::Mutex;
 /// `get_or_set` goes straight to its loader. Timeouts stay redis-rs's: 500 ms for a reply, 1 s
 /// for a connection attempt.
 ///
-/// A server that is up but doesn't answer costs each command the reply timeout. A `get_or_set`
-/// that loads calls the server three times, the read, the read again under the key's lock and the
-/// write, so it takes 1.5 s on top of its loader, and longer behind other callers of its key, who
-/// take turns at the lock. A shorter reply timeout lowers that.
+/// A server that is up but doesn't answer costs each command the reply timeout. The first
+/// `get_or_set` that loads calls the server three times, the read, the read again under the key's
+/// lock and the write, so it takes 1.5 s on top of its loader. Once that write has failed, callers
+/// load without the lock and skip the second read: 1 s each, however many want the key. A shorter
+/// reply timeout lowers that.
 ///
 /// Start from it when you build a `ConnectionManager` yourself, here with a longer one:
 ///

@@ -1,6 +1,10 @@
 //! The Redis store against a real server: each test starts its own in Docker.
 
-use std::time::{Duration, Instant, SystemTime};
+use std::{
+    convert::Infallible,
+    future::pending,
+    time::{Duration, Instant, SystemTime},
+};
 
 use redis::{
     Cmd, Pipeline, RedisFuture, Value,
@@ -365,4 +369,33 @@ async fn calls_fail_at_once_while_the_server_is_down_and_work_once_it_is_back() 
         store.get::<String>(&key(1)).await.unwrap().as_deref(),
         Some("grace")
     );
+}
+
+#[tokio::test]
+async fn get_or_set_callers_of_one_key_wait_for_no_other_load_while_the_server_is_down() {
+    let redis = Redis::start_restartable().await;
+    let store = store(&redis).await;
+    let user = key(1);
+    let load = async || Ok::<_, Infallible>("ada".to_owned());
+
+    redis.stop().await;
+    // The first call finds that the store fails its write as well as its read.
+    assert_eq!(
+        store.get_or_set(&user, load, None).await.as_deref(),
+        Ok("ada")
+    );
+
+    // A load that never ends, which under the key's lock would hold up every other caller.
+    let mut stuck = Box::pin(store.get_or_set(&user, pending::<Result<String, Infallible>>, None));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut stuck)
+            .await
+            .is_err()
+    );
+
+    let loaded = tokio::time::timeout(Duration::from_secs(1), store.get_or_set(&user, load, None))
+        .await
+        .expect("waited for the other caller's load");
+
+    assert_eq!(loaded.as_deref(), Ok("ada"));
 }

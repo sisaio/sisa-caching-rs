@@ -41,10 +41,11 @@ async fn an_outage_logs_once_per_operation_and_counts_every_failure() {
         assert_eq!(loaded.as_deref(), Ok("loaded"));
     }
 
-    // Each call read twice, before and after its lock, and stored once.
+    // The first call read twice, before and after its lock, and each one stored once. Once a
+    // store had failed, the others read once and loaded without the lock.
     assert_eq!(
         metrics.value("sisa.caching.errors", &[KeyValue::new("operation", "get")]),
-        20
+        11
     );
     assert_eq!(
         metrics.value("sisa.caching.errors", &[KeyValue::new("operation", "set")]),
