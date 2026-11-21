@@ -89,7 +89,9 @@ where
             .is_some_and(|threshold| entry.is_refresh_due(clock.now(), threshold))
     };
 
-    let due_entry = match read_entry().await {
+    let first_read = read_entry().await;
+    let read_failed = first_read.is_err();
+    let due_entry = match first_read {
         Ok(Some(entry)) if !needs_refresh(&entry) => return Ok(entry.value),
         Ok(Some(entry)) => Some(entry),
         _ => None,
@@ -126,7 +128,7 @@ where
             };
         }
 
-        let _guard = match settings.lock_timeout() {
+        let guard = match settings.lock_timeout() {
             Some(timeout) => match tokio::time::timeout(timeout, locker.lock(key)).await {
                 Ok(guard) => Some(guard),
                 Err(_) => {
@@ -138,6 +140,15 @@ where
             },
             None => Some(locker.lock(key).await),
         };
+
+        // While the store fails this caller's read and its last write, what a caller loads under
+        // the lock never reaches the callers behind it: each would wait its turn only to load
+        // too. So this one lets them in and loads without the lock.
+        if read_failed && locker.writes_failing.load(Ordering::Relaxed) {
+            drop(guard);
+
+            return load_and_set().await;
+        }
 
         // Another caller may have stored the value while this one waited. On a value of another
         // type, data that doesn't decode, or a store that can't be reached, the loaded value is
@@ -334,9 +345,11 @@ pub trait CacheStore: crate::sealed::Sealed + Send + Sync {
     ///
     /// A store call that fails inside it doesn't fail the call, since it returns the loader's
     /// error type: a failed read loads, and a failed store returns the loaded value without
-    /// caching it. Each failure counts in `sisa.caching.errors`; the first of a run logs a
-    /// warning, and the success that ends it an info line. Options over the 365-day limit fail
-    /// the store the same way.
+    /// caching it. While both fail, as when the server is down, nothing one caller loads reaches
+    /// the others, so callers of one key don't wait for each other: each runs `load`. Each
+    /// failure counts in `sisa.caching.errors`; the first of a run logs a warning, and the
+    /// success that ends it an info line. Options over the 365-day limit fail the store the same
+    /// way.
     fn get_or_set<CV, F, Fut, E>(
         &self,
         key: &str,

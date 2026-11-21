@@ -56,7 +56,8 @@ impl std::fmt::Debug for KeyGuard<'_> {
 /// never waits.
 ///
 /// It also keeps whether the store's last read and last write inside `get_or_set` failed, so a
-/// run of failures logs once.
+/// run of failures logs once, and callers stop waiting for each other's loads while nothing they
+/// load gets stored.
 #[derive(Debug, Default)]
 pub struct Locker {
     locks: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
